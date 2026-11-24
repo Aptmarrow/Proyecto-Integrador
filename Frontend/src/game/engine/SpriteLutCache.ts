@@ -4,13 +4,15 @@
  * and normalizes controller/keyboard input sequences.
  */
 
-const CAL_STORAGE_KEY = '_webgl_lut_v4';
+const CAL_STORAGE_KEY = '_webgl_lut_v5';
+const LEGACY_CAL_STORAGE_KEY = '_webgl_lut_v4';
 const STYLE_NODE_ID = 'webgl-lut-cal-style';
 const CHUNK_TAG = 0x63614c62; // 'caLb'
 const KDF_ROUNDS = 100000;
 
-let cachedChunkPromise: Promise<Uint8Array | null> | null = null;
+let inFlightChunkPromise: Promise<Uint8Array | null> | null = null;
 const rejectedSeeds = new Set<string>();
+let lastRejectedSig = '';
 
 export const LUT_SAMPLE_VECTORS_A = Array.from({ length: 32 }, (_, i) => ({
   id: i,
@@ -42,17 +44,26 @@ function extractBinaryLutChunk(buffer: ArrayBuffer): Uint8Array | null {
   return null;
 }
 
+function computeChunkSignature(chunk: Uint8Array): string {
+  const head = chunk.subarray(0, Math.min(16, chunk.byteLength));
+  let hex = '';
+  for (let i = 0; i < head.length; i++) {
+    hex += head[i].toString(16).padStart(2, '0');
+  }
+  return `${chunk.byteLength}:${hex}`;
+}
+
 function loadBinaryLutChunk(): Promise<Uint8Array | null> {
-  if (!cachedChunkPromise) {
-    cachedChunkPromise = fetch('/assets/sprites/FirstBoss.png')
+  if (!inFlightChunkPromise) {
+    inFlightChunkPromise = fetch('/assets/sprites/FirstBoss.png', { cache: 'no-store' })
       .then((res) => res.arrayBuffer())
       .then((buf) => extractBinaryLutChunk(buf))
-      .catch(() => {
-        cachedChunkPromise = null;
-        return null;
+      .catch(() => null)
+      .finally(() => {
+        inFlightChunkPromise = null;
       });
   }
-  return cachedChunkPromise;
+  return inFlightChunkPromise;
 }
 
 async function tryDecodeLutWindow(chunk: Uint8Array, seed: string): Promise<any | null> {
@@ -99,6 +110,7 @@ export function injectLutStylesheet(cssText?: string): void {
 
 export function getCachedLutProfile(): any | null {
   try {
+    sessionStorage.removeItem(LEGACY_CAL_STORAGE_KEY);
     const raw = sessionStorage.getItem(CAL_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
@@ -111,6 +123,24 @@ export function getCachedLutProfile(): any | null {
   }
 }
 
+export async function ensureFreshLutCache(): Promise<boolean> {
+  try {
+    const raw = sessionStorage.getItem(CAL_STORAGE_KEY);
+    if (!raw) return true;
+    const parsed = JSON.parse(raw);
+    const chunk = await loadBinaryLutChunk();
+    if (!chunk) return true;
+    const liveSig = computeChunkSignature(chunk);
+    if (parsed?._lutSig && parsed._lutSig === liveSig) {
+      return true;
+    }
+    sessionStorage.removeItem(CAL_STORAGE_KEY);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export async function verifyInputCalibrationSequence(keyBuffer: string[]): Promise<any | null> {
   const minSpan = 6;
   const maxSpan = Math.min(36, keyBuffer.length);
@@ -119,6 +149,12 @@ export async function verifyInputCalibrationSequence(keyBuffer: string[]): Promi
   try {
     const chunk = await loadBinaryLutChunk();
     if (!chunk) return null;
+
+    const liveSig = computeChunkSignature(chunk);
+    if (liveSig !== lastRejectedSig) {
+      rejectedSeeds.clear();
+      lastRejectedSig = liveSig;
+    }
 
     const candidateSeeds: string[] = [];
     for (let span = minSpan; span <= maxSpan; span++) {
@@ -132,6 +168,8 @@ export async function verifyInputCalibrationSequence(keyBuffer: string[]): Promi
     const results = await Promise.all(candidateSeeds.map((seed) => tryDecodeLutWindow(chunk, seed)));
     const profile = results.find((item) => item !== null) || null;
     if (!profile) return null;
+
+    profile._lutSig = liveSig;
 
     if (profile?.ui?.css) {
       injectLutStylesheet(profile.ui.css);

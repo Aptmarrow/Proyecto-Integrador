@@ -117,6 +117,23 @@ export class GameRuntimeSession {
       this.pushStruggle();
     }
 
+    if (!e.repeat && this.engine.hasStagePreviewVariants()) {
+      const codeDigit = /^(?:Digit|Numpad)([0-9])$/.exec(e.code)?.[1];
+      const keyDigit = /^[0-9]$/.test(e.key) ? e.key : undefined;
+      const digit = codeDigit ?? keyDigit;
+      if (digit === '0') {
+        if (this.engine.selectStagePreviewVariant(-1)) {
+          return;
+        }
+      } else if (digit && digit >= '5' && digit <= '9') {
+        const variants = this.engine.getStagePreviewVariants();
+        const variantIdx = variants.findIndex((v) => v.key === digit);
+        if (variantIdx >= 0 && this.engine.selectStagePreviewVariant(variantIdx)) {
+          return;
+        }
+      }
+    }
+
     if (this.runtimeMode === 'local-worker') {
       if (e.code === 'Digit1') this.selectRole('DPS');
       if (e.code === 'Digit2') this.selectRole('Tank');
@@ -149,7 +166,11 @@ export class GameRuntimeSession {
     }
     const canvas = document.createElement('canvas');
     options.mountContainer.appendChild(canvas);
-    this.engine = new GameEngine(canvas, 1024, 576, { difficulty: options.difficulty });
+    this.engine = new GameEngine(canvas, 1024, 576, {
+      difficulty: options.difficulty,
+      world: options.world,
+      stage: options.stage,
+    });
     this.engine.setCharacterClass(normalizeRole(options.classId));
   }
 
@@ -304,6 +325,10 @@ export class GameRuntimeSession {
     this.workerBridge?.setRole(role);
   }
 
+  public selectStagePreviewVariant(index: number): boolean {
+    return this.engine.selectStagePreviewVariant(index);
+  }
+
   public triggerSkill(): void {
     if (this.workerBridge?.isActive()) {
       this.workerBridge.triggerSkill();
@@ -452,6 +477,7 @@ export class GameRuntimeSession {
     if (snapshot.struggle) this.engine.applyBackendStruggle(snapshot.struggle);
     if (snapshot.enemies) this.engine.applyBackendEnemies(snapshot.enemies);
     if (snapshot.items) this.engine.applyBackendItems(snapshot.items);
+    if (snapshot.stageTime !== undefined) this.engine.setSyncedStageTime(snapshot.stageTime);
     if (snapshot.campaign) this.engine.applyBackendCampaign(snapshot.campaign);
   }
 }

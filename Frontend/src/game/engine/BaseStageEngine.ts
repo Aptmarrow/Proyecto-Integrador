@@ -79,7 +79,7 @@ export class BaseStageEngine {
     this.app.stage.addChild(this.uiContainer);
 
     // Inicializar sistemas
-    this.backgroundRenderer = new BackgroundRenderer(this.bgContainer);
+    this.backgroundRenderer = new BackgroundRenderer(this.bgContainer, this.app.renderer);
     this.particleSystem = new ParticleSystem();
     this.wallSystem = new WallSystem();
     this.laserSystem = new LaserSystem();
@@ -249,6 +249,7 @@ export class BaseStageEngine {
   }
 
   public destroy(): void {
+    this.backgroundRenderer.destroy();
     this.app.destroy(true, { children: true, texture: false });
   }
 }

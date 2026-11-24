@@ -58,3 +58,8 @@ Thumbs.db
 *.userosscache
 *.sln.docstates
 *.rsuser
+
+# ========================
+# Agent Skills y personalizaciones locales
+# ========================
+.agents/

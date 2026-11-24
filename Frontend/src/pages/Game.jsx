@@ -127,6 +127,8 @@ export default function Game({ isDevMode = false }) {
   );
   const [currentWorld, setCurrentWorld] = useState(launchConfig.world);
   const [currentStage, setCurrentStage] = useState(launchConfig.stage);
+  const [currentStageTitle, setCurrentStageTitle] = useState('');
+  const [bossEtaSeconds, setBossEtaSeconds] = useState(0);
   const [stageClearTitle, setStageClearTitle] = useState('STAGE CLEARED!');
   const [stageClearSubtext, setStageClearSubtext] = useState('Boss derrotado.');
   const [canAdvanceStage, setCanAdvanceStage] = useState(false);
@@ -138,6 +140,8 @@ export default function Game({ isDevMode = false }) {
   const [struggleTimeLeft, setStruggleTimeLeft] = useState(5.0);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [stagePreviewVariants, setStagePreviewVariants] = useState([]);
+  const [activeStagePreviewIdx, setActiveStagePreviewIdx] = useState(-1);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [joystickActive, setJoystickActive] = useState(false);
   const [joystickStickPos, setJoystickStickPos] = useState({ x: 0, y: 0 });
@@ -176,6 +180,10 @@ export default function Game({ isDevMode = false }) {
     if (!mountContainer) return undefined;
 
     let lastHudSync = 0;
+    let lastPreviewSig = '';
+    let lastPreviewActive = -1;
+    setStagePreviewVariants([]);
+    setActiveStagePreviewIdx(-1);
 
     const session = new GameRuntimeSession({
       mountContainer,
@@ -244,6 +252,8 @@ export default function Game({ isDevMode = false }) {
         setCurrentDifficultyLabel(engine.currentDifficultyLabel);
         setCurrentWorld(engine.currentWorld);
         setCurrentStage(engine.currentStage);
+        setCurrentStageTitle(engine.currentStageTitle);
+        setBossEtaSeconds(Math.ceil(engine.bossEtaSeconds));
         setStageClearTitle(engine.stageClearTitle);
         setStageClearSubtext(engine.stageClearSubtext);
         setCanAdvanceStage(engine.canAdvanceStage);
@@ -252,6 +262,18 @@ export default function Game({ isDevMode = false }) {
         setIsStruggleAligning(engine.isStruggleAligning);
         setStruggleProgress(engine.struggleProgress);
         setStruggleTimeLeft(engine.struggleTimeLeft);
+
+        const previewVariants = engine.getStagePreviewVariants();
+        const sig = previewVariants.map((v) => `${v.key}:${v.label}:${v.preset}`).join('|');
+        if (sig !== lastPreviewSig) {
+          lastPreviewSig = sig;
+          setStagePreviewVariants(previewVariants);
+        }
+        const activeIdx = engine.getActiveStagePreviewVariantIndex();
+        if (activeIdx !== lastPreviewActive) {
+          lastPreviewActive = activeIdx;
+          setActiveStagePreviewIdx(activeIdx);
+        }
       },
     });
 
@@ -385,6 +407,8 @@ export default function Game({ isDevMode = false }) {
           difficultyLabel={currentDifficultyLabel}
           world={currentWorld}
           stage={currentStage}
+          stageTitle={currentStageTitle}
+          bossEtaSeconds={bossEtaSeconds}
           onExitLobby={handleExitLobby}
         />
 
@@ -441,10 +465,13 @@ export default function Game({ isDevMode = false }) {
           isFullscreen={isFullscreen}
           canSwitchRole={isLocalWorkerMode}
           showDebugActions={true}
+          stagePreviewVariants={stagePreviewVariants}
+          activeStagePreviewIdx={activeStagePreviewIdx}
           onSelectRole={(role) => sessionRef.current?.selectRole(role)}
           onTriggerSkill={() => sessionRef.current?.triggerSkill()}
           onSpawnBoss={() => sessionRef.current?.spawnBossNow()}
           onStartStruggle={() => sessionRef.current?.startBeamStruggleTest()}
+          onSelectStagePreview={(idx) => sessionRef.current?.selectStagePreviewVariant(idx)}
           onToggleFullscreen={toggleFullscreen}
         />
       </div>

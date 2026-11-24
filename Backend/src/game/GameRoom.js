@@ -17,7 +17,6 @@ const { DEFAULT_PLAYER_STATS, normalizeClassId, getCharacterStats } = require('.
 const { buildRoomSnapshot } = require('./serializers/roomSnapshot');
 
 const SKILL_COOLDOWN    = 1.5;   // 1.5s skill cooldown
-const STRUGGLE_PLAYER_WIN_BOSS_DAMAGE = 25;
 const STRUGGLE_BOSS_WIN_PLAYER_DAMAGE = 35;
 
 const SPAWN_POSITIONS = [
@@ -50,30 +49,42 @@ class GameRoom {
       expectedPlayerCount: options.expectedPlayerCount || 1,
     });
     this._beamStruggleController = new BeamStruggleAuthority();
-    // Kept for compatibility with existing reads in case anything still peeks internals.
     this._beamStruggle = this._beamStruggleController.state;
 
     // Setup boss callbacks
-    this.boss.onPhaseChange = (phase, spellName, isSpellCard) => {
+    this.boss.onPhaseChange = (_phase, _spellName, _isSpellCard) => {
       this.bulletSystem.clearByOwner('boss');
+      this.itemSystem.spawnItemFountain(this.boss.x, this.boss.y, 8);
     };
 
     this.boss.onDefeated = () => {
       this.campaign.markStageCleared();
+      this.bulletSystem.clearByOwner('boss');
+      this.laserSystem.lasers = [];
       this.itemSystem.spawnItemFountain(this.boss.x, this.boss.y, 20);
     };
 
-    // Setup timeline for the current stage
     this._setupTimeline();
   }
 
+  _getSquadHpScale() {
+    let activeCount = 0;
+    for (const [, p] of this.players) {
+      if (p.active) activeCount++;
+    }
+    const n = Math.max(1, activeCount);
+    return 1 + (n - 1) * 0.42;
+  }
+
   spawnBossNow() {
+    const config = this.campaign.getStageConfig();
     this.enemySystem.clear();
     this.bulletSystem.clearByOwner('boss');
     this.campaign.stageState = 'boss_battle';
-    this.boss.spawn(700, 300);
+    this.boss.configure(config.bossProfile, this._getSquadHpScale());
+    this.boss.spawn(685, 300);
     this.boss._introProgress = 1.0;
-    this.boss.x = 700;
+    this.boss.x = 685;
     this.boss.y = 300;
     this.boss.isRefilling = false;
     this.boss.isInvulnerable = false;
@@ -106,7 +117,7 @@ class GameRoom {
       ownerId: targetId,
       direction: 'right',
       chargeDuration: 0.25,
-      fireDuration: 4.5,
+      fireDuration: 4.8,
       fadeDuration: 0.4,
       maxWidth: 68,
       color: 0x00f2fe,
@@ -116,7 +127,7 @@ class GameRoom {
       ownerId: 'boss',
       direction: 'left',
       chargeDuration: 0.25,
-      fireDuration: 4.5,
+      fireDuration: 4.8,
       fadeDuration: 0.4,
       maxWidth: 68,
       color: 0xff2b5b,
@@ -126,21 +137,27 @@ class GameRoom {
 
   _setupTimeline() {
     const config = this.campaign.getStageConfig();
+    this.boss.configure(config.bossProfile, this._getSquadHpScale());
     this.timeline.loadFromStageConfig(config, this.campaign.bannerText, this.campaign.bannerSubtext);
 
     this.timeline
-      .on('stage_banner', (payload) => {
+      .on('stage_banner', () => {
         this.campaign.stageState = 'waves';
       })
       .on('spawn_wave', (payload) => {
-        this.enemySystem.runWavePattern(payload.wave);
+        if (Array.isArray(payload?.enemies)) {
+          this.enemySystem.spawnWaveDescriptors(payload.enemies, this._getSquadHpScale());
+        } else {
+          this.enemySystem.runWavePattern(payload.wave);
+        }
       })
       .on('boss_warning', () => {
         this.campaign.stageState = 'boss_warning';
       })
       .on('spawn_boss', () => {
         this.campaign.stageState = 'boss_battle';
-        this.boss.spawn();
+        this.boss.configure(config.bossProfile, this._getSquadHpScale());
+        this.boss.spawn(685, 300);
       });
   }
 
@@ -203,7 +220,6 @@ class GameRoom {
 
   setInput(playerId, input) {
     const player = this.players.get(playerId);
-    // Inputs only accepted during playing phase
     if (player && player.active && this.phase === 'playing') {
       player.input = input;
     }
@@ -213,29 +229,18 @@ class GameRoom {
     this._phaseController.setExpectedPlayerCount(count);
   }
 
-  // ── Phase transitions ────────────────────────────────────────────────────────
-
-  /**
-   * Mark a player as loaded/ready after client assets are initialized.
-   */
   setPlayerLoaded(playerId) {
     const nextPhase = this._phaseController.setPlayerLoaded(playerId, this.players);
     this._syncPhaseState();
     return nextPhase;
   }
 
-  /**
-   * Host triggers the ready check. Returns true if the transition succeeded.
-   */
   startReadyCheck(requesterId) {
     const ok = this._phaseController.startReadyCheck(requesterId, this.hostId);
     this._syncPhaseState();
     return ok;
   }
 
-  /**
-   * Mark a player as ready. Returns the new phase if it changed, null otherwise.
-   */
   setPlayerReady(playerId) {
     const nextPhase = this._phaseController.setPlayerReady(playerId, this.players);
     this._syncPhaseState();
@@ -251,9 +256,6 @@ class GameRoom {
     }));
   }
 
-  /**
-   * Cancel an ongoing ready/countdown and return to lobby.
-   */
   cancelToLobby() {
     this._phaseController.cancelToLobby(this.players);
     this._syncPhaseState();
@@ -265,10 +267,6 @@ class GameRoom {
 
   // ── Game loop ────────────────────────────────────────────────────────────────
 
-  /**
-   * Advance the simulation one tick.
-   * @returns {{ hits: Array, phaseChanged: string|null }}
-   */
   update(deltaTime) {
     const phaseChanged = this._phaseController.tick(deltaTime);
     this._syncPhaseState();
@@ -295,41 +293,39 @@ class GameRoom {
 
     // 3. Update boss AI and patterns
     if (this.boss.isActive && !this.boss.isDefeated) {
-      // Get average player position for boss aiming
       const playerPos = this._getAveragePlayerPos();
       this.boss.update(deltaTime, playerPos, this.bulletSystem, this.laserSystem);
     }
 
     // 4. Unlock boss beam if mega laser finished
     if (this.boss.isLockedForBeam) {
-      const hasMega = this.laserSystem.lasers.some(l => l.ownerId === 'boss' && (l.isMegaBeam || l.maxWidth >= 60));
+      const hasMega = this.laserSystem.lasers.some((l) => l.ownerId === 'boss' && (l.isMegaBeam || l.maxWidth >= 60));
       if (!hasMega) this.boss.isLockedForBeam = false;
     }
 
-    // 5. Update enemy system (movement, shooting, player bullet collisions)
+    // 5. Update enemy system
     const playerPos = this._getAveragePlayerPos();
     const enemyDefeats = this.enemySystem.update(deltaTime, this.bulletSystem, playerPos);
 
-    // 6. Spawn items from defeated enemies and apply SP gain
+    // 6. Spawn items from defeated enemies and grant squad SP
     for (const defeat of enemyDefeats) {
       this.itemSystem.spawnItem(defeat.x, defeat.y, defeat.itemDrop);
-      // Give SP to all active players
       for (const [, p] of this.players) {
         if (p.active && p.hp > 0) {
           const stats = p.stats || DEFAULT_PLAYER_STATS;
-          p.sp = Math.min(stats.spMax, p.sp + 60);
+          p.sp = Math.min(stats.spMax, p.sp + 65);
         }
       }
     }
 
-    // 7. Update items (movement, magnetization, pickup)
+    // 7. Update items
     const itemPickups = this.itemSystem.update(deltaTime, this.players);
     this._applyItemPickups(itemPickups);
 
     // 8. Physics step
     this.world.step(deltaTime);
 
-    // 9. Bullet collision (boss bullets → players)
+    // 9. Bullet collision
     const bulletHits = this.bulletSystem.update(deltaTime, this.players);
     this._applyBulletHits(bulletHits);
 
@@ -366,20 +362,19 @@ class GameRoom {
         if (!player || player.hp <= 0) continue;
         this.applyDamageToPlayer(player, hit.damage || 0);
       }
-      // Player lasers vs boss and intermediate enemies
       for (const laser of this.laserSystem.lasers) {
         if (laser.ownerId === 'boss' || laser.state !== 'firing') continue;
         const beamHalfW = (laser.currentWidth || laser.maxWidth) / 2;
         if (this.boss.isActive && !this.boss.isDefeated) {
           if (this.boss.x >= laser.sourceX && Math.abs(this.boss.y - laser.sourceY) < beamHalfW + 40) {
-            this.boss.takeDamage(deltaTime * 60); // ~1 dmg per frame at 60fps
+            this.boss.takeDamage(deltaTime * 68);
           }
         }
         for (let i = this.enemySystem.active.length - 1; i >= 0; i--) {
           const e = this.enemySystem.active[i];
           if (e.isDead) continue;
           if (e.x >= laser.sourceX && Math.abs(e.y - laser.sourceY) < beamHalfW + e.radius) {
-            e.hp -= deltaTime * 80;
+            e.hp -= deltaTime * 95;
             if (e.hp <= 0) {
               e.isDead = true;
               this.itemSystem.spawnItem(e.x, e.y, e.itemDrop);
@@ -392,11 +387,6 @@ class GameRoom {
 
     // 14. Player bullets vs boss
     this._resolvePlayerBulletsAgainstBoss();
-
-    // 15. Stage advancement
-    if (this.campaign.stageState === 'stage_clear' && this.campaign.hasNextStage()) {
-      // Auto-advance or wait for client signal — for now just set state
-    }
 
     return [...bulletHits, ...laserHits];
   }
@@ -448,22 +438,18 @@ class GameRoom {
     const normClass = normalizeClassId(player.character);
     const shootCooldown = 1 / Math.max(0.1, stats.shotsPerSecond || 5);
 
-    // Passive SP regeneration so tactical class skills remain usable across waves
-    player.sp = Math.min(stats.spMax, player.sp + deltaTime * 45);
+    // Passive SP regeneration so tactical 4-player skills stay responsive across waves & boss phases
+    player.sp = Math.min(stats.spMax, player.sp + deltaTime * 50);
 
     if (action === 'shoot' && player.shootCooldown <= 0) {
       if (normClass === 'support' || normClass === 'healer') {
         const targets = this._getAutoAimTargets();
-        spawnAutoAimBullet(this.bulletSystem, id, pos.x + 16, pos.y, targets, 650, 4, 2.5, stats.bulletDamage, 'autoaim');
+        spawnAutoAimBullet(this.bulletSystem, id, pos.x + 16, pos.y, targets, 660, 4, 2.6, stats.bulletDamage, 'autoaim');
       } else if (normClass === 'tank' || normClass === 'defense') {
-        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y, 600, 0, 5, 2.5, 'normal', stats.bulletDamage);
+        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y, 620, 0, 5, 2.5, 'normal', stats.bulletDamage, 0x00ff88);
       } else {
-        const bx1 = pos.x + 16;
-        const by1 = pos.y - 6;
-        const bx2 = pos.x + 16;
-        const by2 = pos.y + 6;
-        this.bulletSystem.spawnBullet(id, bx1, by1, 750, 0, 4, 2.5, 'normal', stats.bulletDamage);
-        this.bulletSystem.spawnBullet(id, bx2, by2, 750, 0, 4, 2.5, 'normal', stats.bulletDamage);
+        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y - 6, 760, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
+        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y + 6, 760, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
       }
       player.shootCooldown = shootCooldown;
     }
@@ -473,46 +459,50 @@ class GameRoom {
     const supportCost = Math.min(400, stats.spMax);
     const dpsCost = Math.min(350, stats.spMax);
 
+    // Tank: Wide tactical energy shield wall (absorbs enemy bullets across a full lane)
     if ((action === 'wall' || ((normClass === 'tank' || normClass === 'defense') && action === 'special')) && player.skillCooldown <= 0 && player.sp >= wallCost) {
-      this.wallSystem.spawnWall(id, pos.x + 24, pos.y, 40, 0, 14, 48, 25, 1.0);
+      this.wallSystem.spawnWall(id, pos.x + 26, pos.y, 38, 0, 16, 68, 25, 1.75);
       player.skillCooldown = SKILL_COOLDOWN;
       player.sp = Math.max(0, player.sp - wallCost);
     }
 
+    // Special_Attack: Piercing Master Spark laser (clears enemy bullets + triggers Beam Struggle vs Boss Mega-Beams)
     if ((action === 'laser' || ((normClass === 'special_attack' || normClass === 'attack') && action === 'special')) && player.skillCooldown <= 0 && player.sp >= laserCost) {
       this.laserSystem.spawnLaser(pos.x + 16, pos.y, pos.y, {
         ownerId: id,
         direction: 'right',
-        chargeDuration: 0.3,
-        fireDuration: 1.0,
-        fadeDuration: 0.2,
-        maxWidth: 30,
+        chargeDuration: 0.28,
+        fireDuration: 1.15,
+        fadeDuration: 0.22,
+        maxWidth: 34,
         color: 0x00f0ff,
       });
       player.skillCooldown = SKILL_COOLDOWN * 2;
       player.sp = Math.max(0, player.sp - laserCost);
     }
 
+    // Support: 6-bolt Homing Salvo + Squad Heal (+28 HP to all active players)
     if ((normClass === 'support' || normClass === 'healer') && action === 'special' && player.skillCooldown <= 0 && player.sp >= supportCost) {
       const targets = this._getAutoAimTargets();
       for (const offsetY of [-18, -10, -4, 4, 10, 18]) {
-        spawnAutoAimBullet(this.bulletSystem, id, pos.x + 16, pos.y + offsetY, targets, 700, 5, 2.8, stats.bulletDamage * 1.5, 'autoaim');
+        spawnAutoAimBullet(this.bulletSystem, id, pos.x + 16, pos.y + offsetY, targets, 710, 5, 2.8, stats.bulletDamage * 1.6, 'autoaim');
       }
       for (const [, ally] of this.players) {
         if (ally.active && ally.hp > 0) {
           const allyStats = ally.stats || DEFAULT_PLAYER_STATS;
-          ally.hp = Math.min(allyStats.hpMax, ally.hp + 25);
+          ally.hp = Math.min(allyStats.hpMax, ally.hp + 28);
         }
       }
       player.skillCooldown = SKILL_COOLDOWN * 1.5;
       player.sp = Math.max(0, player.sp - supportCost);
     }
 
+    // DPS: 8-way High-Velocity Shotgun Burst (cracks Dreadnought cores & Boss HP bars)
     if ((normClass === 'dps' || normClass === 'physical') && action === 'special' && player.skillCooldown <= 0 && player.sp >= dpsCost) {
       for (const angleOffset of [-0.21, -0.14, -0.07, -0.02, 0.02, 0.07, 0.14, 0.21]) {
         const vx = Math.cos(angleOffset) * 840;
         const vy = Math.sin(angleOffset) * 840;
-        this.bulletSystem.spawnBullet(id, pos.x + 18, pos.y, vx, vy, 5, 2.5, 'normal', stats.bulletDamage * 2);
+        this.bulletSystem.spawnBullet(id, pos.x + 18, pos.y, vx, vy, 5, 2.5, 'normal', stats.bulletDamage * 2.2, 0x00f2fe);
       }
       player.skillCooldown = SKILL_COOLDOWN;
       player.sp = Math.max(0, player.sp - dpsCost);
@@ -537,16 +527,16 @@ class GameRoom {
       const stats = player.stats || DEFAULT_PLAYER_STATS;
       switch (pickup.type) {
         case 'power':
-          player.sp = Math.min(stats.spMax, player.sp + 45);
+          player.sp = Math.min(stats.spMax, player.sp + 50);
           break;
         case 'point':
-          player.sp = Math.min(stats.spMax, player.sp + 25);
+          player.sp = Math.min(stats.spMax, player.sp + 30);
           break;
         case 'bomb_frag':
-          player.sp = Math.min(stats.spMax, player.sp + 150);
+          player.sp = Math.min(stats.spMax, player.sp + 165);
           break;
         case 'life_frag':
-          player.hp = Math.min(stats.hpMax, player.hp + 25);
+          player.hp = Math.min(stats.hpMax, player.hp + 28);
           break;
       }
     }
@@ -561,7 +551,7 @@ class GameRoom {
 
       const dx = b.x - this.boss.x;
       const dy = b.y - this.boss.y;
-      if (dx * dx + dy * dy >= (40 + b.radius) * (40 + b.radius)) continue;
+      if (dx * dx + dy * dy >= (42 + b.radius) * (42 + b.radius)) continue;
 
       const damage = b.damage || 5;
       const owner = this.players.get(b.ownerId);
@@ -570,7 +560,7 @@ class GameRoom {
         owner.sp = Math.min(stats.spMax, owner.sp + Math.max(8, stats.spChargePerHit || 0));
       }
 
-      this.boss.takeDamage(damage * 0.08);
+      this.boss.takeDamage(damage * 0.14);
       this.bulletSystem.hash.remove(b);
       releaseBullet(b);
       this.bulletSystem.active.splice(i, 1);
@@ -579,10 +569,6 @@ class GameRoom {
 
   // ── Stage Management ────────────────────────────────────────────────────────
 
-  /**
-   * Advance to the next stage if possible.
-   * @returns {boolean}
-   */
   advanceStage() {
     if (!this.campaign.hasNextStage()) return false;
     if (!this.campaign.advanceToNextStage()) return false;
@@ -591,9 +577,6 @@ class GameRoom {
     return true;
   }
 
-  /**
-   * Restart the current stage (e.g. after squad wipe or retry).
-   */
   restartStage() {
     this.campaign.stageState = 'intro';
     this._resetStageRuntime();
@@ -622,8 +605,6 @@ class GameRoom {
     this.stageTime = 0;
     this._setupTimeline();
   }
-
-  // ── Snapshot ─────────────────────────────────────────────────────────────────
 
   getState() {
     return buildRoomSnapshot(this, { fallbackStats: DEFAULT_PLAYER_STATS });

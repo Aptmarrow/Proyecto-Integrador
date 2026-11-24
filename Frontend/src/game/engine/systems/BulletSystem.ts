@@ -43,18 +43,19 @@ export class BulletSystem {
     return b;
   }
 
-  public spawnEnemyFan(originX: number, originY: number, targetX: number, targetY: number, offsets: number[] = [-0.25, 0, 0.25], speed: number = 300, color: number = 0xff2b5b): void {
+  public spawnEnemyFan(
+    originX: number,
+    originY: number,
+    targetX: number,
+    targetY: number,
+    offsets: number[] = [-0.25, 0, 0.25],
+    speed: number = 300,
+    color: number = 0xff2b5b
+  ): void {
     const baseAngle = Math.atan2(targetY - originY, targetX - originX);
     for (const offset of offsets) {
       const angle = baseAngle + offset;
-      this.spawnEnemyBullet(
-        originX,
-        originY,
-        Math.cos(angle) * speed,
-        Math.sin(angle) * speed,
-        6,
-        color
-      );
+      this.spawnEnemyBullet(originX, originY, Math.cos(angle) * speed, Math.sin(angle) * speed, 6, color);
     }
   }
 
@@ -68,7 +69,6 @@ export class BulletSystem {
       onPlayerBulletHit?: () => void;
     }
   ): void {
-    // 1. Mover y evaluar Proyectiles del Jugador
     const bossX = (bossPos as any).pos?.x ?? bossPos.x;
     const bossY = (bossPos as any).pos?.y ?? bossPos.y;
     const bossHp = bossPos.hp;
@@ -78,12 +78,16 @@ export class BulletSystem {
       pb.x += pb.vx * dt;
       pb.y += pb.vy * dt;
 
-      if (pb.x > CANVAS_WIDTH + OFFSCREEN_MARGIN || pb.x < -OFFSCREEN_MARGIN || pb.y < -OFFSCREEN_MARGIN || pb.y > CANVAS_HEIGHT + OFFSCREEN_MARGIN) {
+      if (
+        pb.x > CANVAS_WIDTH + OFFSCREEN_MARGIN ||
+        pb.x < -OFFSCREEN_MARGIN ||
+        pb.y < -OFFSCREEN_MARGIN ||
+        pb.y > CANVAS_HEIGHT + OFFSCREEN_MARGIN
+      ) {
         this.playerBullets.splice(i, 1);
         continue;
       }
 
-      // Daño al Jefe
       if (bossHp > 0 && Math.hypot(pb.x - bossX, pb.y - bossY) < 55) {
         if (callbacks?.onBossHit) callbacks.onBossHit(pb.damage ?? 0.5);
         if (callbacks?.onPlayerBulletHit) callbacks.onPlayerBulletHit();
@@ -91,18 +95,21 @@ export class BulletSystem {
       }
     }
 
-    // 2. Mover y evaluar Proyectiles Enemigos
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
       b.x += b.vx * dt;
       b.y += b.vy * dt;
 
-      if (b.x < -OFFSCREEN_MARGIN || b.x > CANVAS_WIDTH + OFFSCREEN_MARGIN || b.y < -OFFSCREEN_MARGIN || b.y > CANVAS_HEIGHT + OFFSCREEN_MARGIN) {
+      if (
+        b.x < -OFFSCREEN_MARGIN ||
+        b.x > CANVAS_WIDTH + OFFSCREEN_MARGIN ||
+        b.y < -OFFSCREEN_MARGIN ||
+        b.y > CANVAS_HEIGHT + OFFSCREEN_MARGIN
+      ) {
         this.bullets.splice(i, 1);
         continue;
       }
 
-      // Impacto en el Jugador
       if (Math.hypot(b.x - playerPos.x, b.y - playerPos.y) < b.radius + 3) {
         this.bullets.splice(i, 1);
         if (callbacks?.onPlayerHit) callbacks.onPlayerHit();
@@ -113,21 +120,34 @@ export class BulletSystem {
   public render(graphics: PIXI.Graphics): void {
     graphics.clear();
 
-    // Dibujar balas de jugador (rectángulos / dardos horizontales)
+    // 1. Player energy bolts (luminous plasma lance + bright white core)
     for (const pb of this.playerBullets) {
-      graphics.beginFill(pb.color || 0x00f2fe);
-      graphics.drawRect(pb.x, pb.y - 2, 22, 5);
+      const col = pb.color || 0x00f2fe;
+      graphics.beginFill(col, 0.35);
+      graphics.drawRoundedRect(pb.x - 2, pb.y - 4, 24, 8, 4);
+      graphics.endFill();
+      graphics.beginFill(col, 0.95);
+      graphics.drawRoundedRect(pb.x, pb.y - 2.5, 20, 5, 2.5);
+      graphics.endFill();
+      graphics.beginFill(0xffffff, 0.9);
+      graphics.drawRect(pb.x + 3, pb.y - 1, 13, 2);
       graphics.endFill();
     }
 
-    // Dibujar balas enemigas (círculos Danmaku con borde blanco)
+    // 2. Touhou-style Space Danmaku Orbs (outer colored aura + saturated rim + crisp white core)
     for (const b of this.bullets) {
-      graphics.beginFill(b.color);
-      graphics.drawCircle(b.x, b.y, b.radius);
+      const r = b.radius;
+      graphics.beginFill(b.color, 0.28);
+      graphics.drawCircle(b.x, b.y, r * 1.42);
       graphics.endFill();
-      graphics.lineStyle(1.5, 0xffffff, 0.8);
-      graphics.drawCircle(b.x, b.y, b.radius);
-      graphics.lineStyle(0);
+
+      graphics.beginFill(b.color, 0.95);
+      graphics.drawCircle(b.x, b.y, r);
+      graphics.endFill();
+
+      graphics.beginFill(0xffffff, 0.92);
+      graphics.drawCircle(b.x, b.y, Math.max(1.8, r * 0.52));
+      graphics.endFill();
     }
   }
 

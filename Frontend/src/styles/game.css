@@ -954,6 +954,25 @@
   border-color: #ffd000;
 }
 
+.dk-preview-act-btn {
+  background: rgba(124, 58, 237, 0.28);
+  color: #e9d5ff;
+  border-color: rgba(168, 85, 247, 0.55);
+}
+
+.dk-preview-act-btn.active {
+  background: #a855f7;
+  color: #ffffff;
+  border-color: #f0abfc;
+  font-weight: 800;
+}
+
+.dk-preview-reset-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
 .dk-fullscreen-toggle-btn {
   background: #3b82f6;
   color: #ffffff;

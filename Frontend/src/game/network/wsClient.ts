@@ -88,6 +88,8 @@ export interface ServerItem {
   type: 'power' | 'point' | 'bomb_frag' | 'life_frag' | string;
 }
 
+import type { SpaceThemeSpec } from '../campaign/spaceCampaignCatalog';
+
 export interface ServerCampaign {
   difficulty: string;
   difficultyLabel: string;
@@ -101,6 +103,9 @@ export interface ServerCampaign {
   clearSubtext: string;
   worldName?: string;
   stageTitle?: string;
+  bossSpawnAt?: number;
+  bossWarningAt?: number;
+  spaceTheme?: SpaceThemeSpec;
 }
 
 export interface ServerBeamStruggle {

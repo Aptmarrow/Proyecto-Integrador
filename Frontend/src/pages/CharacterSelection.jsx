@@ -5,31 +5,19 @@ import { createRoom, deleteRoom, getRoom, getRoomByCode, getUsersList, joinRoom,
 import {
   LUT_SAMPLE_VECTORS_A,
   LUT_SAMPLE_VECTORS_B,
+  ensureFreshLutCache,
   getCachedLutProfile,
   verifyInputCalibrationSequence,
 } from '../game/engine/SpriteLutCache';
+import {
+  DIFFICULTY_UI_META,
+  getSpaceStageConfig,
+  formatDurationBadge,
+} from '../game/campaign/spaceCampaignCatalog';
 
 const CHARACTER_ROLE = ['Special_Attack', 'Support', 'Tank', 'DPS'];
 
-const DIFFICULTY_META = {
-  normal: {
-    label: 'NORMAL',
-    className: 'normal',
-    worlds: ['Moonlit Forest', 'Scarlet Riverside', 'Celestial Observatory'],
-  },
-  difficult: {
-    label: 'DIFFICULT',
-    className: 'difficult',
-    worlds: ['Infernal Peaks', 'Abyssal Depths', 'Storm Citadel'],
-  },
-  no_mercy: {
-    label: 'NO MERCY',
-    className: 'nomercy',
-    worlds: ['Void Sanctum', 'Shattered Realm', 'Oblivion Edge'],
-  },
-};
-
-const STAGE_TITLES = ['Danmaku Vanguard', 'Crimson Crossfire', 'Final Spell Duel'];
+const DIFFICULTY_META = DIFFICULTY_UI_META;
 
 function clampLevelNum(value, fallback = 1) {
   const num = Number(value);
@@ -188,6 +176,18 @@ export default function CharacterSelection() {
   const roomClosedRef = useRef(false);
 
   useEffect(() => {
+    let active = true;
+    ensureFreshLutCache().then((fresh) => {
+      if (active && !fresh) {
+        setLutProfile(null);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     roomRef.current = room;
   }, [room]);
 
@@ -303,10 +303,11 @@ export default function CharacterSelection() {
   const difficultyMeta = difficultyOptions[difficultyKey] || DIFFICULTY_META.normal;
   const selectedWorld = isCustomLut ? 1 : clampLevelNum(room?.world, 1);
   const selectedStage = isCustomLut ? 1 : clampLevelNum(room?.stage, 1);
-  const currentWorldName = difficultyMeta.worlds[selectedWorld - 1] || difficultyMeta.worlds[0];
+  const selectedSpaceStage = isCustomLut ? null : getSpaceStageConfig(difficultyKey, selectedWorld, selectedStage);
+  const currentWorldName = selectedSpaceStage?.worldName || difficultyMeta.worlds[selectedWorld - 1] || difficultyMeta.worlds[0];
   const currentStageTitle = isCustomLut
     ? lutProfile.ui.stageTitle
-    : (STAGE_TITLES[selectedStage - 1] || STAGE_TITLES[0]);
+    : (selectedSpaceStage?.stageTitle || 'Sector Espacial');
   const roomPlayers = Array.isArray(room?.players) ? room.players : [];
   const hostId = room?.hostId || roomPlayers[0] || null;
   const canEditSettings = hostId && currentUserId ? hostId === currentUserId : initialIsHost;
@@ -1333,7 +1334,7 @@ export default function CharacterSelection() {
           <div className="cs-settings-label-row">
             <span className="cs-settings-label">2. SELECT LEVEL ({difficultyMeta.label})</span>
             <span className={`cs-test-level-pill ${isCustomLut ? lutProfile.ui.className : ''}`}>
-              {isCustomLut ? lutProfile.ui.pillText : 'TEST ARENA'}
+              {isCustomLut ? lutProfile.ui.pillText : '27 SECTORES'}
             </span>
           </div>
           {isCustomLut && lutProfile?.ui ? (
@@ -1365,6 +1366,8 @@ export default function CharacterSelection() {
                   <div className="cs-stage-cells">
                     {[1, 2, 3].map((s) => {
                       const isSelected = selectedWorld === w && selectedStage === s;
+                      const cellCfg = getSpaceStageConfig(difficultyKey, w, s);
+                      const durBadge = formatDurationBadge(cellCfg.bossSpawnAt);
                       return (
                         <button
                           key={`${w}-${s}`}
@@ -1372,10 +1375,10 @@ export default function CharacterSelection() {
                           className={`cs-stage-cell-btn ${difficultyMeta.className} ${isSelected ? 'active' : ''}`}
                           onClick={() => handleLevelChange(w, s)}
                           disabled={!canEditSettings}
-                          title={`Mundo ${w} - Nivel ${s}: ${difficultyMeta.worlds[w - 1]} (${STAGE_TITLES[s - 1]})`}
+                          title={`Mundo ${w}-${s}: ${cellCfg.worldName} — ${cellCfg.stageTitle} (${durBadge} + Jefe ${cellCfg.bossProfile.bossName})`}
                         >
                           <span className="cs-stage-code">{w}-{s}</span>
-                          <span className="cs-stage-sub">STG {s}</span>
+                          <span className="cs-stage-sub">{durBadge}</span>
                         </button>
                       );
                     })}

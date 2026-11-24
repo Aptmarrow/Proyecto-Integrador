@@ -14,8 +14,15 @@ export default function GameHudHeader({
   difficultyLabel = 'Normal',
   world = 1,
   stage = 1,
+  stageTitle = '',
+  bossEtaSeconds = 0,
   onExitLobby,
 }) {
+  const formatEta = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = Math.max(0, Math.floor(sec % 60));
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
   return (
     <header className={`dk-top-hud-bar ${showBossHpBar ? 'mode-boss' : 'mode-squad'}`}>
       <div className={`dk-squad-container ${showBossHpBar ? 'squad-compact' : 'squad-full'}`}>
@@ -153,11 +160,23 @@ export default function GameHudHeader({
         <div className="dk-hud-status-cluster">
           <div
             className="dk-stage-hud-pill"
-            title={`Dificultad ${difficultyLabel} — Mundo ${world}, Nivel ${stage}`}
+            title={`Dificultad ${difficultyLabel} — Mundo ${world}-${stage}${stageTitle ? `: ${stageTitle}` : ''}`}
           >
             <span>{String(difficultyLabel).toUpperCase()}</span>
             <span className="dk-stage-hud-sep">·</span>
             <span>NIVEL {world}-{stage}</span>
+            {stageTitle && (
+              <>
+                <span className="dk-stage-hud-sep">·</span>
+                <span>{stageTitle.toUpperCase()}</span>
+              </>
+            )}
+            {bossEtaSeconds > 0 && (
+              <>
+                <span className="dk-stage-hud-sep">·</span>
+                <span>JEFE EN {formatEta(bossEtaSeconds)}</span>
+              </>
+            )}
           </div>
           {workerModeLabel && (
             <div className="dk-worker-status-pill" title={workerModeLabel}>

@@ -1,6 +1,13 @@
 'use strict';
 
-const { getStageConfig, hasNextStage, getNextStageIndices, WORLDS_PER_DIFFICULTY, STAGES_PER_WORLD, DIFFICULTY_LABELS } = require('./stageConfigs');
+const {
+  getStageConfig,
+  hasNextStage,
+  getNextStageIndices,
+  WORLDS_PER_DIFFICULTY,
+  STAGES_PER_WORLD,
+  DIFFICULTY_LABELS,
+} = require('./stageConfigs');
 
 const VALID_DIFFICULTIES = ['normal', 'difficult', 'no_mercy'];
 
@@ -16,7 +23,7 @@ function clampIndex(oneBased, max) {
 }
 
 /**
- * Manages campaign progression for a game room.
+ * Manages campaign progression for a game room across the 27 space levels.
  * Tracks difficulty, current world/stage, and stage clear state.
  */
 class CampaignManager {
@@ -61,30 +68,36 @@ class CampaignManager {
   }
 
   get bannerText() {
-    return `WORLD ${this.worldIndex + 1} - STAGE ${this.stageIndex + 1}`;
+    const config = this.getStageConfig();
+    return `MUNDO ${this.worldIndex + 1}-${this.stageIndex + 1} · ${config.worldName.toUpperCase()}`;
   }
 
   get bannerSubtext() {
     const config = this.getStageConfig();
-    return `${DIFFICULTY_LABELS[this.difficulty]} | ${config.worldName} ~ ${config.stageTitle}`;
+    const label = DIFFICULTY_LABELS[this.difficulty] || this.difficulty;
+    return `${label} — ${config.stageTitle}`;
   }
 
   get clearTitle() {
-    if (this.campaignComplete) return `${this.bannerText} CLEARED! CAMPAIGN COMPLETE`;
-    return `${this.bannerText} CLEARED!`;
+    const label = DIFFICULTY_LABELS[this.difficulty] || this.difficulty;
+    if (this.campaignComplete) return `¡EXPEDICIÓN ${label.toUpperCase()} COMPLETADA!`;
+    return `¡SECTOR ${this.worldIndex + 1}-${this.stageIndex + 1} DESPEJADO!`;
   }
 
   get clearSubtext() {
+    const config = this.getStageConfig();
+    const label = DIFFICULTY_LABELS[this.difficulty] || this.difficulty;
     if (this.campaignComplete) {
-      return `Completaste ${DIFFICULTY_LABELS[this.difficulty]} (${WORLDS_PER_DIFFICULTY} mundos x ${STAGES_PER_WORLD} stages).`;
+      return `Conquistaste los ${WORLDS_PER_DIFFICULTY * STAGES_PER_WORLD} sectores espaciales de ${label}.`;
     }
-    return `Boss final derrotado en ${this.bannerText}.`;
+    return `${config.bossProfile?.bossName || 'Jefe'} derrotado en ${config.stageTitle}.`;
   }
 
   toSnapshot() {
+    const config = this.getStageConfig();
     return {
       difficulty: this.difficulty,
-      difficultyLabel: DIFFICULTY_LABELS[this.difficulty],
+      difficultyLabel: DIFFICULTY_LABELS[this.difficulty] || this.difficulty,
       world: this.worldIndex + 1,
       stage: this.stageIndex + 1,
       stageState: this.stageState,
@@ -93,8 +106,11 @@ class CampaignManager {
       bannerSubtext: this.bannerSubtext,
       clearTitle: this.clearTitle,
       clearSubtext: this.clearSubtext,
-      worldName: this.getStageConfig().worldName,
-      stageTitle: this.getStageConfig().stageTitle,
+      worldName: config.worldName,
+      stageTitle: config.stageTitle,
+      bossSpawnAt: config.bossSpawnAt,
+      bossWarningAt: config.bossWarningAt,
+      spaceTheme: config.spaceTheme,
     };
   }
 }

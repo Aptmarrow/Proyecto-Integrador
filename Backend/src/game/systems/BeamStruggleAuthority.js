@@ -1,9 +1,10 @@
 'use strict';
 
 const STRUGGLE_ALIGN_DURATION = 0.45;
-const STRUGGLE_MAX_TIMER = 3.5;
-const STRUGGLE_BOSS_PRESSURE_PER_SEC = 22;
-const STRUGGLE_PLAYER_PUSH_PER_SEC = 30;
+const STRUGGLE_MAX_TIMER = 4.2;
+const STRUGGLE_BOSS_PRESSURE_PER_SEC = 21;
+const STRUGGLE_PLAYER_PUSH_PER_SEC = 31;
+const STRUGGLE_ALLY_ASSIST_PER_SEC = 7.5;
 
 class BeamStruggleAuthority {
   constructor() {
@@ -82,7 +83,7 @@ class BeamStruggleAuthority {
       if (!ownerPlayer || !ownerPlayer.active || ownerPlayer.hp <= 0) return;
 
       const yDelta = Math.abs(playerLaser.sourceY - bossLaser.sourceY);
-      if (yDelta > 40) return;
+      if (yDelta > 78) return;
 
       if (playerLaser.sourceX >= bossLaser.sourceX + 140) return;
 
@@ -99,6 +100,11 @@ class BeamStruggleAuthority {
 
       const midX = (playerLaser.sourceX + bossLaser.sourceX) * 0.5;
       const midY = (playerLaser.sourceY + bossLaser.sourceY) * 0.5;
+      playerLaser.sourceY = midY;
+      playerLaser.targetY = midY;
+      bossLaser.sourceY = midY;
+      bossLaser.targetY = midY;
+
       struggle.clashX = midX;
       struggle.clashY = midY;
       struggle.vortexX = midX;
@@ -108,11 +114,13 @@ class BeamStruggleAuthority {
 
       playerLaser.state = 'firing';
       playerLaser.timer = 0;
+      playerLaser.fireDuration = Math.max(playerLaser.fireDuration, STRUGGLE_MAX_TIMER + 1.5);
       playerLaser.maxWidth = Math.max(playerLaser.maxWidth, 96);
       playerLaser.color = 0x00f2fe;
 
       bossLaser.state = 'firing';
       bossLaser.timer = 0;
+      bossLaser.fireDuration = Math.max(bossLaser.fireDuration, STRUGGLE_MAX_TIMER + 1.5);
       bossLaser.maxWidth = Math.max(bossLaser.maxWidth, 96);
       bossLaser.color = 0xffdd00;
       return;
@@ -161,6 +169,14 @@ class BeamStruggleAuthority {
       struggle.balance += STRUGGLE_PLAYER_PUSH_PER_SEC * dt;
     }
 
+    // 4-Player Co-op Synergy: active teammates cheering/firing add extra beam push!
+    for (const [allyId, ally] of players) {
+      if (allyId === struggle.playerId || !ally.active || ally.hp <= 0) continue;
+      if (ally.input.action === 'shoot' || ally.input.action === 'struggle_push') {
+        struggle.balance += STRUGGLE_ALLY_ASSIST_PER_SEC * dt;
+      }
+    }
+
     struggle.balance = Math.max(0, Math.min(100, struggle.balance));
 
     struggle.clashX = 150 + (struggle.balance / 100) * 500;
@@ -170,9 +186,9 @@ class BeamStruggleAuthority {
     struggle.vortexX = struggle.clashX;
     struggle.vortexY = struggle.clashY;
 
-    if (struggle.balance >= 100) {
+    if (struggle.balance >= 100 || (struggle.timer <= 0 && struggle.balance >= 50)) {
       struggle.winner = 'player';
-    } else if (struggle.balance <= 0 || struggle.timer <= 0) {
+    } else if (struggle.balance <= 0 || (struggle.timer <= 0 && struggle.balance < 50)) {
       struggle.winner = 'boss';
     }
 

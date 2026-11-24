@@ -1,30 +1,38 @@
 'use strict';
 
 /**
- * Backend-authoritative Boss controller.
- * Manages 5 phases (multi-stock HP bars), danmaku patterns, movement AI.
- * Ported from frontend Boss.ts — logic only, no PIXI.js rendering.
+ * Backend-authoritative Boss controller for all 27 Space Campaign Levels.
+ * Manages 5 phases (multi-stock HP bars), unique Boss Profiles, movement choreographies,
+ * showy colored danmaku patterns, pod lasers, and Mega-Beam clashes.
  */
 
+const { computeBossMovement, fireBossPattern } = require('../campaign/spaceThemesAndWaves');
+
 const BOSS_PHASES = [
-  { phase: 1, name: 'Phase 1 "Vanguard Barrage"', isSpellCard: false, maxHp: 110 },
-  { phase: 2, name: 'Core Surge "Crimson Vortex"', isSpellCard: true, maxHp: 140 },
-  { phase: 3, name: 'Phase 3 "Crossfire Storm"', isSpellCard: false, maxHp: 130 },
-  { phase: 4, name: 'Overload Protocol "Prism Cage"', isSpellCard: true, maxHp: 160 },
-  { phase: 5, name: 'Final Protocol "Eclipse Ray"', isSpellCard: true, maxHp: 200 },
+  { phase: 1, name: 'Fase 1 "Patrulla Lagrange"', isSpellCard: false, maxHp: 112, pattern: 'crescent_fan', shootInterval: 0.44, laserMode: 'targeted', laserInterval: 4.8, megaLaserInterval: 0 },
+  { phase: 2, name: 'Sello Orbital "Escudo Perigeo"', isSpellCard: true, maxHp: 138, pattern: 'star_mandala', shootInterval: 0.88, laserMode: 'targeted', laserInterval: 4.4, megaLaserInterval: 7.2 },
+  { phase: 3, name: 'Fase 3 "Vectores de Atraque"', isSpellCard: false, maxHp: 130, pattern: 'binary_helix', shootInterval: 0.24, laserMode: 'none', laserInterval: 5.0, megaLaserInterval: 0 },
+  { phase: 4, name: 'Protocolo Aegis "Anillo Geosíncrono"', isSpellCard: true, maxHp: 152, pattern: 'counter_lotus', shootInterval: 0.42, laserMode: 'both', laserInterval: 3.8, megaLaserInterval: 6.6 },
+  { phase: 5, name: 'Órbita Final "Lanza Cenital"', isSpellCard: true, maxHp: 175, pattern: 'supernova_symphony', shootInterval: 0.34, laserMode: 'both', laserInterval: 3.6, megaLaserInterval: 6.0 },
 ];
 
 class BossController {
   constructor() {
     this.x = 700;
     this.y = 300;
-    this.targetX = 700;
+    this.targetX = 685;
     this.targetY = 300;
-    this.hp = BOSS_PHASES[0].maxHp;
-    this.maxHp = BOSS_PHASES[0].maxHp;
+    this._phases = BOSS_PHASES;
+    this._palette = [0x00f2fe, 0xff2b5b, 0xffdd00];
+    this._moveArchetype = 'orbital_lissajous';
+    this._speedScale = 1.0;
+    this._squadScale = 1.0;
+
+    this.hp = this._phases[0].maxHp;
+    this.maxHp = this._phases[0].maxHp;
     this.phase = 1;
     this.remainingStocks = 4;
-    this.spellcardName = BOSS_PHASES[0].name;
+    this.spellcardName = this._phases[0].name;
     this.isSpellCard = false;
     this.isActive = false;
     this.isDefeated = false;
@@ -33,11 +41,9 @@ class BossController {
     this.isLockedForBeam = false;
     this.refillTimer = 0;
 
-    // Timers for danmaku patterns
     this._shootTimer = 0;
+    this._shotIndex = 0;
     this._laserTimer = 0;
-    this._specialTimer = 0;
-    this._darkOrbTimer = 0;
     this._megaLaserTimer = 0;
     this._animTimer = 0;
     this._introProgress = 0;
@@ -48,32 +54,53 @@ class BossController {
     this.onDefeated = null;
   }
 
-  spawn(targetX = 700, targetY = 300) {
+  /**
+   * Configure the boss with one of the 27 Space Boss Profiles and active squad HP scale.
+   */
+  configure(bossProfile, squadScale = 1.0) {
+    this._squadScale = Math.max(1.0, squadScale || 1.0);
+    if (bossProfile && Array.isArray(bossProfile.phases) && bossProfile.phases.length >= 5) {
+      this._phases = bossProfile.phases;
+      this._palette = bossProfile.palette || [0x00f2fe, 0xff2b5b, 0xffdd00];
+      this._moveArchetype = bossProfile.moveArchetype || 'orbital_lissajous';
+      this._speedScale = bossProfile.speedScale || 1.0;
+    } else {
+      this._phases = BOSS_PHASES;
+      this._palette = [0x00f2fe, 0xff2b5b, 0xffdd00];
+      this._moveArchetype = 'orbital_lissajous';
+      this._speedScale = 1.0;
+    }
+    const p0Hp = Math.round(this._phases[0].maxHp * this._squadScale);
+    this.hp = p0Hp;
+    this.maxHp = p0Hp;
+    this.spellcardName = this._phases[0].name;
+    this.isSpellCard = this._phases[0].isSpellCard;
+  }
+
+  spawn(targetX = 685, targetY = 300) {
     this.isActive = true;
-    this.x = 800; // off-screen right (in 800-wide world)
+    this.x = 820;
     this.y = targetY;
     this.targetX = targetX;
     this.targetY = targetY;
     this._introProgress = 0;
     this.phase = 1;
     this.remainingStocks = 4;
-    this.hp = BOSS_PHASES[0].maxHp;
-    this.maxHp = BOSS_PHASES[0].maxHp;
-    this.spellcardName = BOSS_PHASES[0].name;
-    this.isSpellCard = BOSS_PHASES[0].isSpellCard;
+    const p0Hp = Math.round(this._phases[0].maxHp * this._squadScale);
+    this.hp = p0Hp;
+    this.maxHp = p0Hp;
+    this.spellcardName = this._phases[0].name;
+    this.isSpellCard = this._phases[0].isSpellCard;
     this.isDefeated = false;
     this.isInvulnerable = true;
     this.isRefilling = true;
-    this.refillTimer = 1.3;
+    this.refillTimer = 1.25;
+    this._shootTimer = 0;
+    this._shotIndex = 0;
+    this._laserTimer = 1.5;
+    this._megaLaserTimer = 0;
   }
 
-  /**
-   * Advance the boss simulation one tick.
-   * @param {number} dt
-   * @param {{ x: number, y: number }} playerPos
-   * @param {BulletSystem} bulletSystem
-   * @param {LaserSystem} laserSystem
-   */
   update(dt, playerPos, bulletSystem, laserSystem) {
     if (!this.isActive || this.isDefeated) return;
 
@@ -83,12 +110,12 @@ class BossController {
     if (this._introProgress < 1.0) {
       this._introProgress = Math.min(1.0, this._introProgress + dt * 0.9);
       const ease = 1 - Math.pow(1 - this._introProgress, 3);
-      this.x = 800 + (this.targetX - 800) * ease;
+      this.x = 820 + (this.targetX - 820) * ease;
       this.y = this.targetY;
       return;
     }
 
-    // 2. Refill animation (invulnerable transition)
+    // 2. Refill transition
     if (this.isRefilling) {
       this.refillTimer -= dt;
       if (this.refillTimer <= 0) {
@@ -98,204 +125,84 @@ class BossController {
       return;
     }
 
-    // 3. Movement AI per phase
+    // 3. Movement AI per boss archetype
     if (this.isLockedForBeam) {
       this.x = this.targetX;
       this.y = this.targetY;
-    } else {
-      const t = this._animTimer;
-      switch (this.phase) {
-        case 1:
-          this.y = this.targetY + Math.sin(t * 2.2) * 40;
-          this.x = this.targetX + Math.cos(t * 1.1) * 12;
-          break;
-        case 2:
-          this.x = this.targetX + Math.cos(t * 1.8) * 35;
-          this.y = this.targetY + Math.sin(t * 3.6) * 48;
-          break;
-        case 3:
-          this.x = this.targetX + Math.sin(t * 3.0) * 28;
-          this.y = this.targetY + Math.cos(t * 2.0) * 60;
-          break;
-        case 4:
-          this.x = this.targetX + Math.sin(t * 5.0) * 12;
-          this.y = this.targetY + Math.cos(t * 2.8) * 32;
-          break;
-        case 5:
-          this.x = this.targetX + Math.cos(t * 2.5) * 45;
-          this.y = this.targetY + Math.sin(t * 2.5) * 60;
-          break;
-      }
-    }
-
-    // If locked for beam, don't shoot
-    if (this.isLockedForBeam) {
       this._shootTimer = 0;
       this._laserTimer = 0;
-      this._specialTimer = 0;
-      this._darkOrbTimer = 0;
       return;
     }
 
-    // 4. Danmaku patterns per phase
+    const nextPos = computeBossMovement(this._moveArchetype, this.targetX, this.targetY, this._animTimer, this.phase);
+    this.x = Math.max(540, Math.min(755, nextPos.x));
+    this.y = Math.max(85, Math.min(515, nextPos.y));
+
+    // 4. Execute level-specific phase pattern
+    const phaseDef = this._phases[this.phase - 1] || this._phases[0];
     this._shootTimer += dt;
     this._laserTimer += dt;
-    this._specialTimer += dt;
-    this._darkOrbTimer += dt;
 
-    switch (this.phase) {
-      case 1:
-        this._updatePhase1(bulletSystem, laserSystem, playerPos);
-        break;
-      case 2:
-        this._updatePhase2(dt, bulletSystem, laserSystem, playerPos);
-        break;
-      case 3:
-        this._updatePhase3(bulletSystem, playerPos);
-        break;
-      case 4:
-        this._updatePhase4(dt, bulletSystem, laserSystem, playerPos);
-        break;
-      case 5:
-        this._updatePhase5(dt, bulletSystem, laserSystem, playerPos);
-        break;
-    }
-  }
-
-  _updatePhase1(bulletSystem, laserSystem, playerPos) {
-    if (this._shootTimer >= 0.38) {
+    const shootInterval = phaseDef.shootInterval || 0.36;
+    if (this._shootTimer >= shootInterval) {
       this._shootTimer = 0;
-      this._spawnFan(bulletSystem, playerPos, [-0.35, -0.18, 0, 0.18, 0.35], 210, 0xff3366);
+      fireBossPattern(
+        phaseDef.pattern || 'crescent_fan',
+        {
+          bossX: this.x,
+          bossY: this.y,
+          playerX: playerPos.x,
+          playerY: playerPos.y,
+          animTimer: this._animTimer,
+          shotIndex: this._shotIndex++,
+          palette: this._palette,
+          speedScale: this._speedScale,
+          phase: this.phase,
+        },
+        (bx, by, angle, speed, radius, color, damage) => {
+          bulletSystem.spawn('boss', bx, by, angle, speed, radius, 4.4, 'normal', damage || 5, color);
+        }
+      );
     }
-    if (this._specialTimer >= 1.6) {
-      this._specialTimer = 0;
-      this._spawnFan(bulletSystem, playerPos, [-0.5, 0.5], 250, 0x00f2fe);
-    }
-    if (this._laserTimer >= 5.0) {
+
+    if (phaseDef.laserMode && phaseDef.laserMode !== 'none' && this._laserTimer >= (phaseDef.laserInterval || 4.2)) {
       this._laserTimer = 0;
-      this._triggerRhombusLasers(laserSystem, playerPos, 'targeted');
+      this._triggerRhombusLasers(laserSystem, playerPos, phaseDef.laserMode);
     }
-  }
 
-  _updatePhase2(dt, bulletSystem, laserSystem, playerPos) {
-    if (this._shootTimer >= 0.3) {
-      this._shootTimer = 0;
-      this._spawnFan(bulletSystem, playerPos, [-0.22, 0.22], 260, 0x00f2fe);
-    }
-    if (this._specialTimer >= 1.4) {
-      this._specialTimer = 0;
-      const count = 18;
-      const baseAngle = this._animTimer * 1.8;
-      for (let i = 0; i < count; i++) {
-        const a = baseAngle + (Math.PI * 2 * i) / count;
-        bulletSystem.spawn('boss', this.x, this.y, a, 160, 6, 3, 'normal', 5);
+    if (phaseDef.megaLaserInterval && phaseDef.megaLaserInterval > 0) {
+      this._megaLaserTimer += dt;
+      if (this._megaLaserTimer >= phaseDef.megaLaserInterval) {
+        this._megaLaserTimer = 0;
+        this._triggerMegaLaser(laserSystem);
       }
-    }
-    if (this._laserTimer >= 3.8) {
-      this._laserTimer = 0;
-      this._triggerRhombusLasers(laserSystem, playerPos, 'targeted');
-    }
-    this._megaLaserTimer += dt;
-    if (this._megaLaserTimer >= 6.5) {
-      this._megaLaserTimer = 0;
-      this._triggerMegaLaser(laserSystem);
-    }
-  }
-
-  _updatePhase3(bulletSystem, playerPos) {
-    if (this._shootTimer >= 0.22) {
-      this._shootTimer = 0;
-      const angle = Math.atan2(playerPos.y - this.y, playerPos.x - this.x);
-      const wave = Math.sin(this._animTimer * 9) * 0.45;
-      bulletSystem.spawn('boss', this.x, this.y, angle + wave, 220, 5, 3, 'normal', 5);
-      bulletSystem.spawn('boss', this.x, this.y, angle - wave, 220, 5, 3, 'normal', 5);
-    }
-    if (this._specialTimer >= 1.1) {
-      this._specialTimer = 0;
-      this._spawnFan(bulletSystem, playerPos, [-0.3, 0, 0.3], 270, 0xffffff);
-    }
-  }
-
-  _updatePhase4(dt, bulletSystem, laserSystem, playerPos) {
-    if (this._shootTimer >= 0.16) {
-      this._shootTimer = 0;
-      const rot = this._animTimer * 5.5;
-      for (let arm = 0; arm < 6; arm++) {
-        const a = rot + (Math.PI / 3) * arm;
-        bulletSystem.spawn('boss', this.x, this.y, a, 190, 5, 3, 'normal', 5);
-      }
-    }
-    if (this._laserTimer >= 3.2) {
-      this._laserTimer = 0;
-      this._triggerRhombusLasers(laserSystem, playerPos, 'both');
-    }
-    this._megaLaserTimer += dt;
-    if (this._megaLaserTimer >= 6.0) {
-      this._megaLaserTimer = 0;
-      this._triggerMegaLaser(laserSystem);
-    }
-  }
-
-  _updatePhase5(dt, bulletSystem, laserSystem, playerPos) {
-    if (this._shootTimer >= 0.14) {
-      this._shootTimer = 0;
-      const rot = this._animTimer * 4.2;
-      for (let arm = 0; arm < 8; arm++) {
-        const a = rot + (Math.PI / 4) * arm;
-        bulletSystem.spawn('boss', this.x, this.y, a, 175, 6, 3, 'normal', 5);
-      }
-    }
-    if (this._darkOrbTimer >= 1.5) {
-      this._darkOrbTimer = 0;
-      const count = 12;
-      const baseA = this._animTimer * 2.0;
-      for (let i = 0; i < count; i++) {
-        const a = baseA + (Math.PI * 2 * i) / count;
-        bulletSystem.spawn('boss', this.x, this.y, a, 128, 7, 3, 'normal', 5);
-      }
-    }
-    if (this._laserTimer >= 3.0) {
-      this._laserTimer = 0;
-      this._triggerRhombusLasers(laserSystem, playerPos, 'both');
-    }
-    this._megaLaserTimer += dt;
-    if (this._megaLaserTimer >= 5.5) {
-      this._megaLaserTimer = 0;
-      this._triggerMegaLaser(laserSystem);
-    }
-  }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  _spawnFan(bulletSystem, playerPos, offsets, speed, color) {
-    const angle = Math.atan2(playerPos.y - this.y, playerPos.x - this.x);
-    for (const off of offsets) {
-      bulletSystem.spawn('boss', this.x - 25, this.y, angle + off, speed, 5, 3, 'normal', 5);
     }
   }
 
   _triggerRhombusLasers(laserSystem, playerPos, pattern) {
-    const topPodY = 252;
-    const bottomPodY = 348;
-    const podX = 665;
+    const topPodY = Math.max(90, this.y - 54);
+    const bottomPodY = Math.min(510, this.y + 54);
+    const podX = this.x - 22;
+    const cLaser = this._palette[1] || 0xff2b5b;
+    const cTarget = this._palette[0] || 0x00f2fe;
 
     if (pattern === 'both') {
       laserSystem.spawnLaser(podX, topPodY, topPodY, {
         ownerId: 'boss', direction: 'left',
-        chargeDuration: 0.6, fireDuration: 1.0, fadeDuration: 0.3,
-        maxWidth: 30, color: this.phase >= 4 ? 0xff2b5b : 0xff3366, podType: 'top',
+        chargeDuration: 0.72, fireDuration: 1.0, fadeDuration: 0.3,
+        maxWidth: 28, color: cLaser, podType: 'top',
       });
       laserSystem.spawnLaser(podX, bottomPodY, bottomPodY, {
         ownerId: 'boss', direction: 'left',
-        chargeDuration: 0.6, fireDuration: 1.0, fadeDuration: 0.3,
-        maxWidth: 30, color: this.phase >= 4 ? 0xff2b5b : 0xff3366, podType: 'bottom',
+        chargeDuration: 0.72, fireDuration: 1.0, fadeDuration: 0.3,
+        maxWidth: 28, color: cLaser, podType: 'bottom',
       });
     } else {
       const podY = playerPos.y < this.y ? topPodY : bottomPodY;
-      laserSystem.spawnLaser(podX, podY, playerPos.y, {
+      laserSystem.spawnLaser(podX, podY, podY, {
         ownerId: 'boss', direction: 'left',
-        chargeDuration: 0.5, fireDuration: 1.0, fadeDuration: 0.3,
-        maxWidth: 36, color: 0x00f2fe,
+        chargeDuration: 0.65, fireDuration: 1.0, fadeDuration: 0.3,
+        maxWidth: 32, color: cTarget,
         podType: playerPos.y < this.y ? 'top' : 'bottom',
       });
     }
@@ -303,18 +210,17 @@ class BossController {
 
   _triggerMegaLaser(laserSystem) {
     this.isLockedForBeam = true;
-    this.x = 740;
-    this.targetX = 740;
-    this.targetY = this.y;
+    this.x = 730;
+    this.targetX = 730;
+    this.targetY = Math.max(150, Math.min(450, this.y));
+    this.y = this.targetY;
 
     laserSystem.spawnLaser(this.x, this.y, this.y, {
       ownerId: 'boss', direction: 'left',
-      chargeDuration: 1.25, fireDuration: 1.8, fadeDuration: 0.4,
-      maxWidth: 76, color: 0xffdd00, isMegaBeam: true,
+      chargeDuration: 1.25, fireDuration: 1.85, fadeDuration: 0.4,
+      maxWidth: 76, color: this._palette[2] || 0xffdd00, isMegaBeam: true,
     });
   }
-
-  // ── Damage & Phase Transitions ────────────────────────────────────────────
 
   takeDamage(amount) {
     if (!this.isActive || this.isDefeated || this.isInvulnerable || this.isRefilling) return;
@@ -323,17 +229,20 @@ class BossController {
 
     if (this.hp <= 0) {
       if (this.phase < 5) {
-        // Transition to next phase
-        const nextDef = BOSS_PHASES[this.phase]; // phase 1 → index 1 (phase 2)
+        const nextDef = this._phases[this.phase];
         this.phase = nextDef.phase;
         this.remainingStocks = 5 - this.phase;
         this.spellcardName = nextDef.name;
         this.isSpellCard = nextDef.isSpellCard;
-        this.hp = nextDef.maxHp;
-        this.maxHp = nextDef.maxHp;
+        const nextHp = Math.round(nextDef.maxHp * this._squadScale);
+        this.hp = nextHp;
+        this.maxHp = nextHp;
         this.isInvulnerable = true;
         this.isRefilling = true;
         this.refillTimer = 1.2;
+        this._shootTimer = 0;
+        this._laserTimer = 0;
+        this._megaLaserTimer = 0;
 
         if (this.onPhaseChange) {
           this.onPhaseChange(this.phase, this.spellcardName, this.isSpellCard);
@@ -358,9 +267,10 @@ class BossController {
   reset() {
     this.phase = 1;
     this.remainingStocks = 4;
-    this.hp = BOSS_PHASES[0].maxHp;
-    this.maxHp = BOSS_PHASES[0].maxHp;
-    this.spellcardName = BOSS_PHASES[0].name;
+    const p0Hp = Math.round(this._phases[0].maxHp * this._squadScale);
+    this.hp = p0Hp;
+    this.maxHp = p0Hp;
+    this.spellcardName = this._phases[0].name;
     this.isSpellCard = false;
     this.isActive = false;
     this.isDefeated = false;

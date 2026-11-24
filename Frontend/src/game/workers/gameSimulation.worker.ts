@@ -12,6 +12,13 @@ import type {
   ServerCampaign,
   ServerBeamStruggle,
 } from '../network/wsClient';
+import {
+  getSpaceStageConfig,
+  computeBossMovement,
+  fireBossPattern,
+  type SpaceStageConfig,
+  type BossPhaseProfile,
+} from '../campaign/spaceCampaignCatalog';
 
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
@@ -151,11 +158,8 @@ interface SimEnemy {
   shootInterval: number;
   shootTimer: number;
   spawnTime: number;
-  freq: number;
-  amp: number;
-  phase: number;
-  hoverX: number;
-  hoverTime: number;
+  bulletColor: number;
+  customParams: Record<string, any>;
 }
 
 interface SimItem {
@@ -168,67 +172,7 @@ interface SimItem {
   magnetizedTo: string | null;
 }
 
-const BOSS_SPELLS = [
-  { phase: 1, name: 'Phase 1 "Vanguard Barrage"', isSpellCard: false },
-  { phase: 2, name: 'Core Surge "Crimson Vortex"', isSpellCard: true },
-  { phase: 3, name: 'Phase 3 "Crossfire Storm"', isSpellCard: false },
-  { phase: 4, name: 'Overload Protocol "Prism Cage"', isSpellCard: true },
-  { phase: 5, name: 'Final Protocol "Eclipse Ray"', isSpellCard: true },
-];
-
-const WORLD_NAMES_BY_DIFFICULTY: Record<string, [string, string, string]> = {
-  normal: ['Moonlit Forest', 'Scarlet Riverside', 'Celestial Observatory'],
-  difficult: ['Infernal Peaks', 'Abyssal Depths', 'Storm Citadel'],
-  no_mercy: ['Void Sanctum', 'Shattered Realm', 'Oblivion Edge'],
-};
-
-const STAGE_TITLES: [string, string, string] = [
-  'Danmaku Vanguard',
-  'Crimson Crossfire',
-  'Final Spell Duel',
-];
-
 const TOTAL_STAGES_PER_DIFFICULTY = 9; // 3 worlds × 3 stages
-
-function getStageMeta(difficulty: string, stageIndex: number, customProfile?: any) {
-  if (customProfile) {
-    return {
-      world: customProfile.world || 1,
-      stage: customProfile.stage || 1,
-      worldName: customProfile.worldName || 'Stage 1',
-      stageTitle: customProfile.stageTitle || 'Stage 1',
-      bannerText: customProfile.bannerText || 'STAGE 1-1',
-      bannerSubtext: customProfile.bannerSubtext || '',
-      clearTitle: customProfile.clearTitle || 'STAGE CLEARED!',
-      clearSubtext: customProfile.clearSubtext || '',
-      bossBaseHp: customProfile.bossBaseHp || 200,
-    };
-  }
-  const clamped = Math.max(0, Math.min(TOTAL_STAGES_PER_DIFFICULTY - 1, stageIndex));
-  const worldIdx = Math.floor(clamped / 3);
-  const stageIdx = clamped % 3;
-  const world = worldIdx + 1;
-  const stage = stageIdx + 1;
-  const worlds = WORLD_NAMES_BY_DIFFICULTY[difficulty] || WORLD_NAMES_BY_DIFFICULTY.normal;
-  const worldName = worlds[worldIdx];
-  const stageTitle = STAGE_TITLES[stageIdx];
-  const diffLabel = difficulty === 'no_mercy' ? 'NO MERCY' : difficulty === 'difficult' ? 'DIFFICULT' : 'NORMAL';
-  const isFinal = clamped >= TOTAL_STAGES_PER_DIFFICULTY - 1;
-
-  return {
-    world,
-    stage,
-    worldName,
-    stageTitle,
-    bannerText: `WORLD ${world}-${stage} · ${worldName.toUpperCase()}`,
-    bannerSubtext: `${diffLabel} — ${stageTitle}`,
-    clearTitle: isFinal ? `${diffLabel} CAMPAIGN COMPLETE!` : `WORLD ${world} - STAGE ${stage} CLEARED!`,
-    clearSubtext: isFinal
-      ? '¡El escuadrón Danmakrew conquistó todos los mundos!'
-      : `${worldName} · Preparando siguiente sector...`,
-    bossBaseHp: 110 + worldIdx * 30 + stageIdx * 18,
-  };
-}
 
 const SPAWN_POSITIONS = [
   { x: 110, y: 240 },
@@ -259,22 +203,26 @@ class DanmakrewSimulationWorker {
   private loopTimer: ReturnType<typeof setInterval> | null = null;
 
   private boss = {
-    x: 650,
+    x: 685,
     y: 300,
-    hp: 110,
-    maxHp: 110,
+    targetX: 685,
+    targetY: 300,
+    hp: 112,
+    maxHp: 112,
     phase: 1,
     remainingStocks: 4,
-    spellcardName: BOSS_SPELLS[0].name,
+    spellcardName: 'Fase 1 "Patrulla Lagrange"',
     isSpellCard: false,
     isActive: false,
     isDefeated: false,
     isRefilling: false,
     refillTimer: 0,
     isLockedForBeam: false,
-    attackTimer: 0,
-    laserTimer: 2.5,
-    moveTimer: 0,
+    shootTimer: 0,
+    shotIndex: 0,
+    laserTimer: 0,
+    megaLaserTimer: 0,
+    animTimer: 0,
   };
 
   private struggle: ServerBeamStruggle = {
@@ -282,7 +230,7 @@ class DanmakrewSimulationWorker {
     isAligning: false,
     winner: null,
     timer: 0,
-    maxTimer: 5.0,
+    maxTimer: 4.5,
     balance: 50,
     resolutionTimer: 0,
     clashX: 400,
@@ -290,6 +238,81 @@ class DanmakrewSimulationWorker {
   };
 
   private alignTimer = 0;
+
+  private getCurrentSpaceConfig(): SpaceStageConfig {
+    const clamped = Math.max(0, Math.min(TOTAL_STAGES_PER_DIFFICULTY - 1, this.stageIndex));
+    const w = Math.floor(clamped / 3) + 1;
+    const s = (clamped % 3) + 1;
+    return getSpaceStageConfig(this.difficulty, w, s);
+  }
+
+  private getSquadHpScale(): number {
+    let activeCount = 0;
+    for (const [, p] of this.players) {
+      if (p.hp > 0) activeCount++;
+    }
+    const n = Math.max(1, activeCount);
+    return 1 + (n - 1) * 0.42;
+  }
+
+  private getStageMeta() {
+    if (this.customStageProfile) {
+      return {
+        world: this.customStageProfile.world || 1,
+        stage: this.customStageProfile.stage || 1,
+        worldName: this.customStageProfile.worldName || 'Stage 1',
+        stageTitle: this.customStageProfile.stageTitle || 'Stage 1',
+        bannerText: this.customStageProfile.bannerText || 'STAGE 1-1',
+        bannerSubtext: this.customStageProfile.bannerSubtext || '',
+        clearTitle: this.customStageProfile.clearTitle || 'STAGE CLEARED!',
+        clearSubtext: this.customStageProfile.clearSubtext || '',
+        bossSpawnAt: this.customStageProfile.bossSpawnAt ?? 34.5,
+        bossWarningAt: this.customStageProfile.bossWarningAt ?? 31.5,
+        spaceTheme: undefined,
+      };
+    }
+
+    const cfg = this.getCurrentSpaceConfig();
+    const diffLabel =
+      this.difficulty === 'no_mercy' ? 'NoMercy' : this.difficulty === 'difficult' ? 'Dificil' : 'Normal';
+    const isFinal = this.stageIndex >= TOTAL_STAGES_PER_DIFFICULTY - 1;
+
+    return {
+      world: cfg.world,
+      stage: cfg.stage,
+      worldName: cfg.worldName,
+      stageTitle: cfg.stageTitle,
+      bannerText: `MUNDO ${cfg.world}-${cfg.stage} · ${cfg.worldName.toUpperCase()}`,
+      bannerSubtext: `${diffLabel} — ${cfg.stageTitle}`,
+      clearTitle: isFinal
+        ? `¡EXPEDICIÓN ${diffLabel.toUpperCase()} COMPLETADA!`
+        : `¡SECTOR ${cfg.world}-${cfg.stage} DESPEJADO!`,
+      clearSubtext: isFinal
+        ? '¡El escuadrón Danmakrew conquistó los 9 sectores espaciales!'
+        : `${cfg.bossProfile.bossName} derrotado · Preparando siguiente sector...`,
+      bossSpawnAt: cfg.bossSpawnAt,
+      bossWarningAt: cfg.bossWarningAt,
+      spaceTheme: cfg.spaceTheme,
+    };
+  }
+
+  private getActiveBossPhases(): BossPhaseProfile[] {
+    if (Array.isArray(this.customStageProfile?.bossPhases)) {
+      const baseHp = (this.customStageProfile.bossBaseHp || 180) * (this.customStageProfile.difficultyMult || 1);
+      return this.customStageProfile.bossPhases.map((p: any, idx: number) => ({
+        phase: idx + 1,
+        name: p.name,
+        isSpellCard: Boolean(p.isSpellCard),
+        maxHp: Math.round(baseHp),
+        pattern: idx === 0 ? 'crescent_fan' : idx === 1 ? 'star_mandala' : idx === 2 ? 'binary_helix' : idx === 3 ? 'counter_lotus' : 'supernova_symphony',
+        shootInterval: 0.42,
+        laserMode: idx >= 3 ? 'both' : 'targeted',
+        laserInterval: 4.2,
+        megaLaserInterval: idx >= 1 ? 6.5 : 0,
+      }));
+    }
+    return this.getCurrentSpaceConfig().bossProfile.phases;
+  }
 
   public init(
     roomId: string,
@@ -303,7 +326,11 @@ class DanmakrewSimulationWorker {
     this.stop();
     this.myPlayerId = playerId || 'player-local-host';
     this.customStageProfile = stageProfile || null;
-    this.difficulty = stageProfile ? String(difficulty || 'normal') : (difficulty === 'difficult' || difficulty === 'no_mercy' ? difficulty : 'normal');
+    this.difficulty = stageProfile
+      ? String(difficulty || 'normal')
+      : difficulty === 'difficult' || difficulty === 'no_mercy'
+        ? difficulty
+        : 'normal';
     const w = stageProfile ? 1 : Math.max(1, Math.min(3, Math.floor(Number(world) || 1)));
     const s = stageProfile ? 1 : Math.max(1, Math.min(3, Math.floor(Number(stage) || 1)));
     this.stageIndex = (w - 1) * 3 + (s - 1);
@@ -416,23 +443,24 @@ class DanmakrewSimulationWorker {
 
   public pushStruggle(): void {
     if (this.struggle.active) {
-      this.struggle.balance = Math.min(100, this.struggle.balance + 4.2);
+      this.struggle.balance = Math.min(100, this.struggle.balance + 4.4);
     }
   }
 
   public spawnBossNow(): void {
+    if (this.customStageProfile?.disableBoss) return;
     this.enemies = [];
-    this.triggeredEvents.add('w1');
-    this.triggeredEvents.add('w2');
-    this.triggeredEvents.add('w3');
-    this.triggeredEvents.add('w4');
-    this.triggeredEvents.add('w5');
+    const cfg = this.getCurrentSpaceConfig();
+    for (const w of cfg.waves) {
+      this.triggeredEvents.add(w.key);
+    }
     this.triggeredEvents.add('warn');
     this.triggeredEvents.add('boss');
     this.activateBoss();
   }
 
   public startBeamStruggleTest(): void {
+    if (this.customStageProfile?.disableBoss) return;
     const me = this.players.get(this.myPlayerId);
     if (!me) return;
     this.setPlayerRole(this.myPlayerId, 'Special_Attack');
@@ -442,12 +470,14 @@ class DanmakrewSimulationWorker {
     this.bullets = [];
     this.lasers = [];
     me.body.setPosition(planck.Vec2(140, 300));
-    this.boss.x = 660;
+    this.boss.x = 670;
     this.boss.y = 300;
+    this.boss.targetX = 670;
+    this.boss.targetY = 300;
     this.boss.isLockedForBeam = true;
 
-    this.spawnLaser(me.id, 'right', 156, 300, 300, 0.25, 4.5, 0.25, 32, 0x00f0ff, false);
-    this.spawnLaser('boss', 'left', 625, 300, 300, 0.25, 4.5, 0.25, 76, 0xffdd00, true);
+    this.spawnLaser(me.id, 'right', 156, 300, 300, 0.25, 4.8, 0.25, 34, 0x00f0ff, false);
+    this.spawnLaser('boss', 'left', 645, 300, 300, 0.25, 4.8, 0.25, 76, 0xffdd00, true);
   }
 
   public advanceStage(): boolean {
@@ -473,17 +503,6 @@ class DanmakrewSimulationWorker {
     }
   }
 
-  private getDifficultyMult(): number {
-    if (this.customStageProfile?.difficultyMult) return Number(this.customStageProfile.difficultyMult);
-    if (this.difficulty === 'no_mercy') return 1.5;
-    if (this.difficulty === 'difficult') return 1.25;
-    return 1.0;
-  }
-
-  private getActiveBossSpells() {
-    return Array.isArray(this.customStageProfile?.bossPhases) ? this.customStageProfile.bossPhases : BOSS_SPELLS;
-  }
-
   private resetStageRuntime(): void {
     this.bullets = [];
     this.walls = [];
@@ -498,40 +517,42 @@ class DanmakrewSimulationWorker {
       isAligning: false,
       winner: null,
       timer: 0,
-      maxTimer: 5.0,
+      maxTimer: 4.5,
       balance: 50,
       resolutionTimer: 0,
       clashX: 400,
       clashY: 300,
     };
 
-    const cfg = getStageMeta(this.difficulty, this.stageIndex, this.customStageProfile);
-    const hp = Math.round(cfg.bossBaseHp * this.getDifficultyMult());
-    const spells = this.getActiveBossSpells();
+    const phases = this.getActiveBossPhases();
+    const hp = Math.round(phases[0].maxHp * this.getSquadHpScale());
     this.boss = {
-      x: 650,
+      x: 685,
       y: 300,
+      targetX: 685,
+      targetY: 300,
       hp,
       maxHp: hp,
       phase: 1,
       remainingStocks: 4,
-      spellcardName: spells[0].name,
+      spellcardName: phases[0].name,
       isSpellCard: false,
       isActive: false,
       isDefeated: false,
       isRefilling: false,
       refillTimer: 0,
       isLockedForBeam: false,
-      attackTimer: 0,
-      laserTimer: 3.0,
-      moveTimer: 0,
+      shootTimer: 0,
+      shotIndex: 0,
+      laserTimer: 0,
+      megaLaserTimer: 0,
+      animTimer: 0,
     };
   }
 
   private activateBoss(): void {
-    const cfg = getStageMeta(this.difficulty, this.stageIndex, this.customStageProfile);
-    const hp = Math.round(cfg.bossBaseHp * this.getDifficultyMult());
-    const spells = this.getActiveBossSpells();
+    const phases = this.getActiveBossPhases();
+    const hp = Math.round(phases[0].maxHp * this.getSquadHpScale());
     this.stageState = 'boss_battle';
     this.boss.isActive = true;
     this.boss.isDefeated = false;
@@ -539,8 +560,12 @@ class DanmakrewSimulationWorker {
     this.boss.remainingStocks = 4;
     this.boss.hp = hp;
     this.boss.maxHp = hp;
-    this.boss.spellcardName = spells[0].name;
-    this.boss.isSpellCard = spells[0].isSpellCard;
+    this.boss.spellcardName = phases[0].name;
+    this.boss.isSpellCard = phases[0].isSpellCard;
+    this.boss.shootTimer = 0;
+    this.boss.shotIndex = 0;
+    this.boss.laserTimer = 1.2;
+    this.boss.megaLaserTimer = 0;
   }
 
   private step(dt: number): void {
@@ -576,38 +601,84 @@ class DanmakrewSimulationWorker {
           for (const spec of w.enemies || []) {
             this.enemies.push({
               id: `en_${this.nextEntityId++}`,
-              ...spec,
+              type: spec.type || 'green_fairy',
+              x: spec.startX ?? WORLD_WIDTH + 45,
+              y: spec.startY ?? 300,
+              startX: spec.startX ?? WORLD_WIDTH + 45,
+              startY: spec.startY ?? 300,
+              speed: spec.speed ?? 140,
+              hp: spec.hp ?? 20,
+              maxHp: spec.hp ?? 20,
+              radius: spec.radius ?? 16,
+              itemDrop: spec.itemDrop || 'power',
+              trajectory: spec.trajectory || 'sine',
+              attackPattern: spec.attackPattern || 'aimed_single',
+              shootInterval: spec.shootInterval ?? 1.5,
+              shootTimer: -(spec.shootDelay ?? 0.2),
+              spawnTime: 0,
+              bulletColor: spec.bulletColor ?? 0xff2b5b,
+              customParams: spec.customParams || { freq: spec.freq, amp: spec.amp, phase: spec.phase, hoverX: spec.hoverX, hoverTime: spec.hoverTime },
             });
           }
         });
       }
-      fireOnce('warn', this.customStageProfile.bossWarningAt ?? 31.5, () => {
-        if (!this.boss.isActive && !this.boss.isDefeated) {
-          this.stageState = 'boss_warning';
-        }
-      });
-      fireOnce('boss', this.customStageProfile.bossSpawnAt ?? 34.5, () => {
-        if (!this.boss.isActive && !this.boss.isDefeated) {
-          this.activateBoss();
-        }
-      });
+      if (!this.customStageProfile.disableBoss) {
+        fireOnce('warn', this.customStageProfile.bossWarningAt ?? 31.5, () => {
+          if (!this.boss.isActive && !this.boss.isDefeated) {
+            this.stageState = 'boss_warning';
+          }
+        });
+        fireOnce('boss', this.customStageProfile.bossSpawnAt ?? 34.5, () => {
+          if (!this.boss.isActive && !this.boss.isDefeated) {
+            this.activateBoss();
+          }
+        });
+      }
       return;
     }
+
+    const cfg = this.getCurrentSpaceConfig();
+    const squadScale = this.getSquadHpScale();
 
     fireOnce('banner', 0.1, () => {
       this.stageState = 'waves';
     });
-    fireOnce('w1', 0.4, () => this.spawnWave(1));
-    fireOnce('w2', 6.5, () => this.spawnWave(2));
-    fireOnce('w3', 13.0, () => this.spawnWave(3));
-    fireOnce('w4', 20.0, () => this.spawnWave(4));
-    fireOnce('w5', 27.0, () => this.spawnWave(5));
-    fireOnce('warn', 33.5, () => {
+
+    for (const w of cfg.waves) {
+      fireOnce(w.key, w.at, () => {
+        for (const spec of w.enemies) {
+          const scaledHp = Math.max(8, Math.round(spec.hp * squadScale));
+          this.enemies.push({
+            id: `en_${this.nextEntityId++}`,
+            type: spec.type,
+            x: spec.startX,
+            y: spec.startY,
+            startX: spec.startX,
+            startY: spec.startY,
+            speed: spec.speed,
+            hp: scaledHp,
+            maxHp: scaledHp,
+            radius: spec.radius,
+            itemDrop: spec.itemDrop,
+            trajectory: spec.trajectory,
+            attackPattern: spec.attackPattern,
+            shootInterval: spec.shootInterval,
+            shootTimer: -(spec.shootDelay ?? 0.25),
+            spawnTime: 0,
+            bulletColor: spec.bulletColor,
+            customParams: spec.customParams || {},
+          });
+        }
+      });
+    }
+
+    fireOnce('warn', cfg.bossWarningAt, () => {
       if (!this.boss.isActive && !this.boss.isDefeated) {
         this.stageState = 'boss_warning';
       }
     });
-    fireOnce('boss', 36.5, () => {
+
+    fireOnce('boss', cfg.bossSpawnAt, () => {
       if (!this.boss.isActive && !this.boss.isDefeated) {
         this.activateBoss();
       }
@@ -689,7 +760,7 @@ class DanmakrewSimulationWorker {
   }
 
   private executePlayerSkill(p: SimPlayer, action: string): void {
-    if (p.skillCooldown > 0 || p.hp <= 0) return;
+    if (this.customStageProfile?.disableWeapons || p.skillCooldown > 0 || p.hp <= 0) return;
     const pos = p.body.getPosition();
     const roleKey = normalizeRoleKey(p.character);
 
@@ -697,15 +768,15 @@ class DanmakrewSimulationWorker {
       this.walls.push({
         id: `wall_${this.nextEntityId++}`,
         ownerId: p.id,
-        x: pos.x + 24,
+        x: pos.x + 26,
         y: pos.y,
-        vx: 40,
+        vx: 38,
         vy: 0,
-        width: 14,
-        height: 48,
+        width: 16,
+        height: 68,
         hp: 25,
         maxHp: 25,
-        ttl: 1.0,
+        ttl: 1.75,
       });
       p.skillCooldown = SKILL_COOLDOWN;
       p.sp = Math.max(0, p.sp - 250);
@@ -713,7 +784,7 @@ class DanmakrewSimulationWorker {
     }
 
     if ((action === 'laser' || (roleKey === 'special_attack' && action === 'special')) && p.sp >= 500) {
-      this.spawnLaser(p.id, 'right', pos.x + 16, pos.y, pos.y, 0.3, 1.1, 0.2, 30, 0x00f0ff, false);
+      this.spawnLaser(p.id, 'right', pos.x + 16, pos.y, pos.y, 0.28, 1.15, 0.22, 34, 0x00f0ff, false);
       p.skillCooldown = SKILL_COOLDOWN * 2;
       p.sp = Math.max(0, p.sp - 500);
       return;
@@ -721,11 +792,11 @@ class DanmakrewSimulationWorker {
 
     if (roleKey === 'support' && action === 'special' && p.sp >= 400) {
       for (const offsetY of [-18, -10, -4, 4, 10, 18]) {
-        this.spawnAutoAimShot(p.id, pos.x + 16, pos.y + offsetY, 700, p.stats.bulletDamage * 1.5);
+        this.spawnAutoAimShot(p.id, pos.x + 16, pos.y + offsetY, 710, p.stats.bulletDamage * 1.6);
       }
       for (const [, ally] of this.players) {
         if (ally.hp > 0) {
-          ally.hp = Math.min(ally.stats.hpMax, ally.hp + 25);
+          ally.hp = Math.min(ally.stats.hpMax, ally.hp + 28);
         }
       }
       p.skillCooldown = SKILL_COOLDOWN * 1.5;
@@ -745,7 +816,7 @@ class DanmakrewSimulationWorker {
           radius: 5,
           ttl: 2.5,
           type: 'normal',
-          damage: p.stats.bulletDamage * 2,
+          damage: p.stats.bulletDamage * 2.2,
           color: 0x00f2fe,
         });
       }
@@ -764,17 +835,25 @@ class DanmakrewSimulationWorker {
       }
 
       if (p.isBot) {
-        // Escort AI for local demo companions
         const pos = p.body.getPosition();
-        const desiredY = 300 + Math.sin(this.stageTime * 1.8 + pos.x * 0.02) * 140;
-        p.input.dx = Math.cos(this.stageTime * 1.1) * 0.25;
+        const desiredY = 300 + Math.sin(this.stageTime * 1.7 + pos.x * 0.02) * 145;
+        p.input.dx = Math.cos(this.stageTime * 1.05) * 0.25;
         p.input.dy = Math.max(-1, Math.min(1, (desiredY - pos.y) / 80));
-        p.input.action = 'shoot';
+        if (this.customStageProfile?.disableWeapons) {
+          p.input.action = null;
+        } else if (this.struggle.active) {
+          p.input.action = 'struggle_push';
+        } else if (p.skillCooldown <= 0 && p.sp >= 520 && (this.enemies.length >= 4 || this.boss.isActive)) {
+          const rk = normalizeRoleKey(p.character);
+          p.input.action = rk === 'tank' ? 'wall' : rk === 'special_attack' ? 'laser' : 'special';
+        } else {
+          p.input.action = 'shoot';
+        }
       }
 
       p.shootCooldown = Math.max(0, p.shootCooldown - dt);
       p.skillCooldown = Math.max(0, p.skillCooldown - dt);
-      p.sp = Math.min(p.stats.spMax, p.sp + dt * 45);
+      p.sp = Math.min(p.stats.spMax, p.sp + dt * 50);
 
       const { dx, dy, action, focus } = p.input;
       if (!locked) {
@@ -789,21 +868,21 @@ class DanmakrewSimulationWorker {
       }
 
       if (action === 'struggle_push') {
-        this.pushStruggle();
+        if (!p.isBot) this.pushStruggle();
       } else if (action === 'wall' || action === 'laser' || action === 'special') {
         this.executePlayerSkill(p, action);
-      } else if (action === 'shoot' && p.shootCooldown <= 0 && !locked) {
+      } else if (!this.customStageProfile?.disableWeapons && action === 'shoot' && p.shootCooldown <= 0 && !locked) {
         const pos = p.body.getPosition();
         const roleKey = normalizeRoleKey(p.character);
         if (roleKey === 'support') {
-          this.spawnAutoAimShot(p.id, pos.x + 16, pos.y, 650, p.stats.bulletDamage);
+          this.spawnAutoAimShot(p.id, pos.x + 16, pos.y, 660, p.stats.bulletDamage);
         } else if (roleKey === 'tank') {
           this.bullets.push({
             id: this.nextBulletId++,
             ownerId: p.id,
             x: pos.x + 16,
             y: pos.y,
-            vx: 600,
+            vx: 620,
             vy: 0,
             radius: 5,
             ttl: 2.5,
@@ -818,7 +897,7 @@ class DanmakrewSimulationWorker {
               ownerId: p.id,
               x: pos.x + 16,
               y: pos.y + offsetY,
-              vx: 750,
+              vx: 760,
               vy: 0,
               radius: 4,
               ttl: 2.5,
@@ -847,167 +926,6 @@ class DanmakrewSimulationWorker {
     return c > 0 ? { x: sx / c, y: sy / c } : { x: 120, y: 300 };
   }
 
-  private spawnWave(waveId: number): void {
-    const mult = this.getDifficultyMult();
-    if (waveId === 1) {
-      for (let i = 0; i < 6; i++) {
-        this.enemies.push({
-          id: `en_${this.nextEntityId++}`,
-          type: 'green_fairy',
-          x: WORLD_WIDTH + 45 + i * 58,
-          y: 170,
-          startX: WORLD_WIDTH + 45 + i * 58,
-          startY: 170,
-          speed: 130,
-          hp: Math.round(14 * mult),
-          maxHp: Math.round(14 * mult),
-          radius: 16,
-          itemDrop: i % 2 === 0 ? 'power' : 'point',
-          trajectory: 'double_helix',
-          attackPattern: 'aimed_single',
-          shootInterval: 1.8,
-          shootTimer: 0.4 * i,
-          spawnTime: 0,
-          freq: 3.2,
-          amp: 70,
-          phase: i * 0.4,
-          hoverX: 550,
-          hoverTime: 3.5,
-        });
-        this.enemies.push({
-          id: `en_${this.nextEntityId++}`,
-          type: 'yellow_fairy',
-          x: WORLD_WIDTH + 45 + i * 58,
-          y: 430,
-          startX: WORLD_WIDTH + 45 + i * 58,
-          startY: 430,
-          speed: 130,
-          hp: Math.round(16 * mult),
-          maxHp: Math.round(16 * mult),
-          radius: 16,
-          itemDrop: 'power',
-          trajectory: 'double_helix',
-          attackPattern: 'helix_stream',
-          shootInterval: 1.9,
-          shootTimer: 0.3 * i,
-          spawnTime: 0,
-          freq: 3.2,
-          amp: 70,
-          phase: i * 0.4 + Math.PI,
-          hoverX: 550,
-          hoverTime: 3.5,
-        });
-      }
-    } else if (waveId === 2) {
-      for (let i = 0; i < 3; i++) {
-        for (const top of [true, false]) {
-          const sy = top ? 110 + i * 24 : 490 - i * 24;
-          this.enemies.push({
-            id: `en_${this.nextEntityId++}`,
-            type: 'red_fairy',
-            x: WORLD_WIDTH + 50 + i * 68,
-            y: sy,
-            startX: WORLD_WIDTH + 50 + i * 68,
-            startY: sy,
-            speed: 150,
-            hp: Math.round(26 * mult),
-            maxHp: Math.round(26 * mult),
-            radius: 17,
-            itemDrop: top ? 'power' : 'point',
-            trajectory: 'hover_retreat',
-            attackPattern: 'flower_burst',
-            shootInterval: 1.25,
-            shootTimer: 0.2,
-            spawnTime: 0,
-            freq: 2.5,
-            amp: 16,
-            phase: 0,
-            hoverX: 575 - i * 32,
-            hoverTime: 3.8,
-          });
-        }
-      }
-    } else if (waveId === 3) {
-      this.enemies.push({
-        id: `en_${this.nextEntityId++}`,
-        type: 'big_fairy',
-        x: WORLD_WIDTH + 50,
-        y: 300,
-        startX: WORLD_WIDTH + 50,
-        startY: 300,
-        speed: 75,
-        hp: Math.round(125 * mult),
-        maxHp: Math.round(125 * mult),
-        radius: 30,
-        itemDrop: 'life_frag',
-        trajectory: 'hover_retreat',
-        attackPattern: 'star_rings',
-        shootInterval: 0.9,
-        shootTimer: 0,
-        spawnTime: 0,
-        freq: 2.0,
-        amp: 20,
-        phase: 0,
-        hoverX: 535,
-        hoverTime: 7.0,
-      });
-    } else if (waveId === 4) {
-      for (const [idx, sy] of [120, 210, 390, 480].entries()) {
-        this.enemies.push({
-          id: `en_${this.nextEntityId++}`,
-          type: 'purple_fairy',
-          x: WORLD_WIDTH + 45 + idx * 42,
-          y: sy,
-          startX: WORLD_WIDTH + 45 + idx * 42,
-          startY: sy,
-          speed: 125,
-          hp: Math.round(34 * mult),
-          maxHp: Math.round(34 * mult),
-          radius: 17,
-          itemDrop: idx % 2 === 0 ? 'bomb_frag' : 'power',
-          trajectory: 'hover_retreat',
-          attackPattern: 'ring_burst',
-          shootInterval: 1.1,
-          shootTimer: 0.25 * idx,
-          spawnTime: 0,
-          freq: 2.4,
-          amp: 15,
-          phase: idx,
-          hoverX: 555 - (idx % 2) * 40,
-          hoverTime: 4.2,
-        });
-      }
-    } else if (waveId === 5) {
-      for (let i = 0; i < 8; i++) {
-        const isTop = i % 2 === 0;
-        const sy = isTop ? 40 : WORLD_HEIGHT - 40;
-        this.enemies.push({
-          id: `en_${this.nextEntityId++}`,
-          type: 'green_fairy',
-          x: WORLD_WIDTH + 40 + i * 48,
-          y: sy,
-          startX: WORLD_WIDTH + 40 + i * 48,
-          startY: sy,
-          speed: 175,
-          hp: Math.round(18 * mult),
-          maxHp: Math.round(18 * mult),
-          radius: 16,
-          itemDrop: i % 3 === 0 ? 'power' : 'point',
-          trajectory: isTop ? 'cross_top' : 'cross_bottom',
-          attackPattern: 'aimed_single',
-          shootInterval: 0.95,
-          shootTimer: 0.15 * i,
-          spawnTime: 0,
-          freq: 1.8,
-          amp: 140,
-          phase: 0,
-          hoverX: 500,
-          hoverTime: 3.0,
-        });
-      }
-    }
-  }
-
   private updateEnemies(dt: number): void {
     const target = this.getAveragePlayerPos();
 
@@ -1015,56 +933,183 @@ class DanmakrewSimulationWorker {
       const e = this.enemies[i];
       e.spawnTime += dt;
       const t = e.spawnTime;
+      const p = e.customParams || {};
 
-      if (e.trajectory === 'double_helix') {
-        e.x -= e.speed * dt;
-        e.y = e.startY + e.amp * Math.sin(e.freq * t + e.phase);
-      } else if (e.trajectory === 'hover_retreat') {
-        if (e.x > e.hoverX) e.x -= e.speed * dt;
-        else if (t > e.hoverTime) e.x -= e.speed * 0.55 * dt;
-        e.y = e.startY + Math.sin(t * 2.5) * 15;
-      } else if (e.trajectory === 'cross_top') {
-        e.x -= e.speed * dt;
-        e.y = e.startY + Math.abs(Math.sin(t * 1.8)) * 150;
-      } else if (e.trajectory === 'cross_bottom') {
-        e.x -= e.speed * dt;
-        e.y = e.startY - Math.abs(Math.sin(t * 1.8)) * 150;
-      } else {
-        e.x -= e.speed * dt;
+      switch (e.trajectory) {
+        case 'v_formation':
+          e.x -= e.speed * dt;
+          e.y = e.startY + Math.sin(t * 1.8) * (p.driftY ?? 16);
+          break;
+        case 'perimeter_skimmer':
+          e.x -= e.speed * dt;
+          e.y = e.startY + Math.sin(t * 3.2) * (p.bobAmp ?? 12);
+          break;
+        case 'orbit_anchor': {
+          const ax = p.anchorX ?? 545;
+          const ay = p.anchorY ?? 300;
+          const r = p.orbitR ?? 80;
+          const ang = t * 2.1 + (p.phase ?? 0);
+          if (t < 1.8) {
+            const k = t / 1.8;
+            const tx = ax + Math.cos(ang) * r * 0.65;
+            const ty = ay + Math.sin(ang) * r;
+            e.x = e.startX + (tx - e.startX) * k;
+            e.y = e.startY + (ty - e.startY) * k;
+          } else if (t < 7.4) {
+            e.x = ax + Math.cos(ang) * r * 0.65;
+            e.y = ay + Math.sin(ang) * r;
+          } else {
+            e.x -= e.speed * 1.15 * dt;
+          }
+          break;
+        }
+        case 'pendulum':
+          e.x -= e.speed * 0.78 * dt;
+          e.y = e.startY + Math.sin(t * (p.freq ?? 2.1) + (p.phase ?? 0)) * (p.ampY ?? 140);
+          break;
+        case 'swoop_arc': {
+          const apexX = p.apexX ?? 510;
+          const targetY = p.targetY ?? 300;
+          if (t < 1.9) {
+            const ease = 1 - Math.pow(1 - t / 1.9, 2);
+            e.x = e.startX + (apexX - e.startX) * ease;
+            e.y = e.startY + (targetY - e.startY) * ease;
+          } else {
+            e.x -= e.speed * 1.15 * dt;
+            e.y += (e.startY < 300 ? 1 : -1) * e.speed * 0.35 * dt;
+          }
+          break;
+        }
+        case 'sine':
+        case 'double_helix':
+          e.x -= e.speed * dt;
+          e.y = e.startY + (p.amp ?? 70) * Math.sin((p.freq ?? 3.0) * t + (p.phase ?? 0));
+          break;
+        case 'hover_retreat': {
+          const hoverX = p.hoverX ?? 560;
+          const hoverTime = p.hoverTime ?? 4.2;
+          if (e.x > hoverX && t <= hoverTime) e.x -= e.speed * 1.25 * dt;
+          else if (t > hoverTime) e.x -= e.speed * 0.7 * dt;
+          e.y = e.startY + Math.sin(t * 2.4) * 16;
+          break;
+        }
+        case 'spiral':
+          e.x -= e.speed * 0.68 * dt;
+          e.y = e.startY + Math.sin(t * 2.9 + (p.phase ?? 0)) * 68;
+          break;
+        case 'cross_top':
+          e.x -= e.speed * dt;
+          e.y = e.startY + Math.abs(Math.sin(t * 1.7)) * 165;
+          break;
+        case 'cross_bottom':
+          e.x -= e.speed * dt;
+          e.y = e.startY - Math.abs(Math.sin(t * 1.7)) * 165;
+          break;
+        case 'zigzag':
+          e.x -= e.speed * dt;
+          e.y = Math.max(36, Math.min(WORLD_HEIGHT - 36, e.y + (Math.floor(t * 1.8) % 2 === 0 ? 1 : -1) * e.speed * 0.55 * dt));
+          break;
+        default:
+          e.x -= e.speed * dt;
+          break;
       }
 
-      if (e.x < -60 || e.y < -70 || e.y > WORLD_HEIGHT + 70) {
+      if (e.x < -70 || (e.spawnTime > 6.0 && e.x > WORLD_WIDTH + 220) || e.y < -90 || e.y > WORLD_HEIGHT + 90) {
         this.enemies.splice(i, 1);
         continue;
       }
 
       e.shootTimer += dt;
-      if (e.shootTimer >= e.shootInterval) {
+      if (e.x < WORLD_WIDTH - 8 && e.x > 40 && e.shootTimer >= e.shootInterval) {
         e.shootTimer = 0;
-        const aim = Math.atan2(target.y - e.y, target.x - e.x);
-        if (e.attackPattern === 'aimed_single') {
-          this.spawnEnemyBullet(e.x, e.y, aim, 210, 4, 0xff2b5b);
-        } else if (e.attackPattern === 'helix_stream') {
-          this.spawnEnemyBullet(e.x, e.y, aim + 0.18, 220, 4, 0xffae00);
-          this.spawnEnemyBullet(e.x, e.y, aim - 0.18, 220, 4, 0xffae00);
-        } else if (e.attackPattern === 'flower_burst') {
-          for (let k = 0; k < 5; k++) {
-            this.spawnEnemyBullet(e.x, e.y, aim + (Math.PI * 2 * k) / 5, 180, 4, 0xff2b5b);
-          }
-        } else if (e.attackPattern === 'ring_burst') {
-          for (let k = 0; k < 10; k++) {
-            this.spawnEnemyBullet(e.x, e.y, (Math.PI * 2 * k) / 10, 165, 4, 0xa855f7);
-          }
-        } else if (e.attackPattern === 'star_rings') {
-          for (let k = 0; k < 14; k++) {
-            this.spawnEnemyBullet(e.x, e.y, t * 2 + (Math.PI * 2 * k) / 14, 150, 5, 0x3b82f6);
-          }
-        }
+        this.fireEnemyPattern(e, target);
       }
     }
   }
 
-  private spawnEnemyBullet(x: number, y: number, angle: number, speed: number, radius: number, color: number): void {
+  private fireEnemyPattern(e: SimEnemy, target: { x: number; y: number }): void {
+    const aim = Math.atan2(target.y - e.y, target.x - e.x);
+    const col = e.bulletColor || 0xff2b5b;
+    const t = e.spawnTime;
+
+    switch (e.attackPattern) {
+      case 'aimed_single':
+        this.spawnEnemyBullet(e.x, e.y, aim, 188, 4, col);
+        break;
+      case 'aimed_spread':
+        for (const off of [-0.26, 0, 0.26]) {
+          this.spawnEnemyBullet(e.x, e.y, aim + off, 185, 4, col);
+        }
+        break;
+      case 'crescent_arc':
+        [-0.36, -0.18, 0, 0.18, 0.36].forEach((off, idx) => {
+          this.spawnEnemyBullet(e.x, e.y, aim + off, 195 - Math.abs(idx - 2) * 14, 4.5, col);
+        });
+        break;
+      case 'prism_fan':
+        this.spawnEnemyBullet(e.x, e.y, aim - 0.22, 198, 4, col);
+        this.spawnEnemyBullet(e.x, e.y, aim + 0.22, 198, 4, col);
+        this.spawnEnemyBullet(e.x, e.y, aim, 152, 5, 0xffffff);
+        break;
+      case 'siege_curtain':
+        this.spawnEnemyBullet(e.x - 10, e.y - 10, Math.PI, 192, 4.5, col);
+        this.spawnEnemyBullet(e.x - 10, e.y + 10, Math.PI, 192, 4.5, col);
+        break;
+      case 'nova_mandala': {
+        const petals = e.customParams?.petals || 5;
+        const total = petals * 3;
+        const rot = t * 1.1;
+        for (let k = 0; k < total; k++) {
+          const theta = (Math.PI * 2 * k) / total;
+          const factor = 1 - 0.22 * Math.abs(Math.sin(petals * theta * 0.5));
+          this.spawnEnemyBullet(e.x, e.y, rot + theta, 175 * factor, k % 3 === 0 ? 5 : 4, k % 3 === 0 ? 0xffffff : col);
+        }
+        break;
+      }
+      case 'pulsar_sweep': {
+        const dir = e.customParams?.spinDir || 1;
+        const base = t * 2.1 * dir;
+        for (let b = 0; b < 3; b++) {
+          this.spawnEnemyBullet(e.x, e.y, base + (Math.PI * 2 * b) / 3, 182, 4.5, col);
+        }
+        break;
+      }
+      case 'helix_stream':
+        this.spawnEnemyBullet(e.x, e.y, aim + 0.19, 196, 4, col);
+        this.spawnEnemyBullet(e.x, e.y, aim - 0.19, 196, 4, 0x00f2fe);
+        break;
+      case 'flower_burst':
+        for (let k = 0; k < 6; k++) {
+          this.spawnEnemyBullet(e.x, e.y, t * 1.4 + (Math.PI * 2 * k) / 6, 172, 4.5, col);
+        }
+        break;
+      case 'ring_burst':
+        for (let k = 0; k < 10; k++) {
+          this.spawnEnemyBullet(e.x, e.y, t * 0.8 + (Math.PI * 2 * k) / 10, 158, 4, col);
+        }
+        break;
+      case 'star_rings':
+        for (let k = 0; k < 12; k++) {
+          this.spawnEnemyBullet(e.x, e.y, t * 1.7 + (Math.PI * 2 * k) / 12, 154, 5, col);
+        }
+        break;
+      case 'cross_spread':
+        for (const off of [-0.32, 0, 0.32]) {
+          this.spawnEnemyBullet(e.x, e.y, aim + off, 200, 4, col);
+        }
+        break;
+      case 'needle_stream':
+        this.spawnEnemyBullet(e.x, e.y, aim, 228, 3.5, col);
+        break;
+      case 'spiral_barrage':
+        for (let k = 0; k < 4; k++) {
+          this.spawnEnemyBullet(e.x, e.y, t * 3.4 + (Math.PI / 2) * k, 168, 4, col);
+        }
+        break;
+    }
+  }
+
+  private spawnEnemyBullet(x: number, y: number, angle: number, speed: number, radius: number, color: number, damage: number = 5): void {
     this.bullets.push({
       id: this.nextBulletId++,
       ownerId: 'boss',
@@ -1073,15 +1118,17 @@ class DanmakrewSimulationWorker {
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       radius,
-      ttl: 4.0,
+      ttl: 4.4,
       type: 'normal',
-      damage: 5,
+      damage,
       color,
     });
   }
 
   private updateBoss(dt: number): void {
     if (!this.boss.isActive || this.boss.isDefeated) return;
+
+    this.boss.animTimer += dt;
 
     if (this.boss.isRefilling) {
       this.boss.refillTimer -= dt;
@@ -1093,12 +1140,6 @@ class DanmakrewSimulationWorker {
       return;
     }
 
-    if (!this.boss.isLockedForBeam && !this.struggle.active && !this.struggle.isAligning) {
-      this.boss.moveTimer += dt;
-      this.boss.x = 640 + Math.cos(this.boss.moveTimer * 0.9) * 35;
-      this.boss.y = 300 + Math.sin(this.boss.moveTimer * 1.25) * 120;
-    }
-
     const hasMega = this.lasers.some((l) => l.ownerId === 'boss' && l.isMegaBeam);
     if (this.boss.isLockedForBeam && !hasMega) {
       this.boss.isLockedForBeam = false;
@@ -1106,36 +1147,72 @@ class DanmakrewSimulationWorker {
 
     if (this.struggle.active || this.struggle.isAligning) return;
 
-    const target = this.getAveragePlayerPos();
-    this.boss.attackTimer += dt;
-    this.boss.laserTimer -= dt;
+    const cfg = this.getCurrentSpaceConfig();
+    const profile = cfg.bossProfile;
+    const phases = this.getActiveBossPhases();
+    const phaseDef = phases[this.boss.phase - 1] || phases[0];
 
-    const interval = this.boss.phase >= 4 ? 0.55 : 0.75;
-    if (this.boss.attackTimer >= interval) {
-      this.boss.attackTimer = 0;
-      const baseAngle = Math.atan2(target.y - this.boss.y, target.x - this.boss.x);
-      const count = 5 + this.boss.phase * 2;
-      for (let i = 0; i < count; i++) {
-        const spread = ((i - (count - 1) / 2) / count) * 1.3;
-        this.spawnEnemyBullet(
-          this.boss.x - 24,
-          this.boss.y,
-          baseAngle + spread,
-          210 + this.boss.phase * 18,
-          5,
-          this.boss.isSpellCard ? 0xa855f7 : 0xff2b5b
-        );
+    if (!this.boss.isLockedForBeam) {
+      const nextPos = computeBossMovement(
+        profile.moveArchetype,
+        this.boss.targetX,
+        this.boss.targetY,
+        this.boss.animTimer,
+        this.boss.phase
+      );
+      this.boss.x = Math.max(540, Math.min(755, nextPos.x));
+      this.boss.y = Math.max(85, Math.min(515, nextPos.y));
+    } else {
+      return;
+    }
+
+    const target = this.getAveragePlayerPos();
+    this.boss.shootTimer += dt;
+    this.boss.laserTimer += dt;
+
+    if (this.boss.shootTimer >= (phaseDef.shootInterval || 0.38)) {
+      this.boss.shootTimer = 0;
+      fireBossPattern(
+        phaseDef.pattern || 'crescent_fan',
+        {
+          bossX: this.boss.x,
+          bossY: this.boss.y,
+          playerX: target.x,
+          playerY: target.y,
+          animTimer: this.boss.animTimer,
+          shotIndex: this.boss.shotIndex++,
+          palette: profile.palette,
+          speedScale: profile.speedScale,
+          phase: this.boss.phase,
+        },
+        (bx, by, angle, speed, radius, color, damage) => {
+          this.spawnEnemyBullet(bx, by, angle, speed, radius, color, damage);
+        }
+      );
+    }
+
+    if (phaseDef.laserMode !== 'none' && this.boss.laserTimer >= (phaseDef.laserInterval || 4.2)) {
+      this.boss.laserTimer = 0;
+      const topY = Math.max(90, this.boss.y - 54);
+      const botY = Math.min(510, this.boss.y + 54);
+      if (phaseDef.laserMode === 'both') {
+        this.spawnLaser('boss', 'left', this.boss.x - 22, topY, topY, 0.72, 1.0, 0.3, 28, profile.palette[1], false);
+        this.spawnLaser('boss', 'left', this.boss.x - 22, botY, botY, 0.72, 1.0, 0.3, 28, profile.palette[1], false);
+      } else {
+        const py = target.y < this.boss.y ? topY : botY;
+        this.spawnLaser('boss', 'left', this.boss.x - 22, py, py, 0.65, 1.0, 0.3, 32, profile.palette[0], false);
       }
     }
 
-    if (this.boss.laserTimer <= 0) {
-      this.boss.laserTimer = this.boss.phase >= 3 ? 5.2 : 6.2;
-      if (this.boss.phase >= 3) {
+    if (phaseDef.megaLaserInterval > 0) {
+      this.boss.megaLaserTimer += dt;
+      if (this.boss.megaLaserTimer >= phaseDef.megaLaserInterval) {
+        this.boss.megaLaserTimer = 0;
         this.boss.isLockedForBeam = true;
-        this.spawnLaser('boss', 'left', this.boss.x - 28, this.boss.y, this.boss.y, 0.75, 1.8, 0.3, 72, 0xffdd00, true);
-      } else {
-        this.spawnLaser('boss', 'left', this.boss.x - 24, this.boss.y - 48, this.boss.y - 48, 0.65, 1.1, 0.25, 32, 0xff2b5b, false);
-        this.spawnLaser('boss', 'left', this.boss.x - 24, this.boss.y + 48, this.boss.y + 48, 0.65, 1.1, 0.25, 32, 0xff2b5b, false);
+        this.boss.x = 730;
+        this.boss.targetX = 730;
+        this.boss.y = Math.max(150, Math.min(450, this.boss.y));
+        this.spawnLaser('boss', 'left', this.boss.x - 20, this.boss.y, this.boss.y, 1.25, 1.85, 0.35, 76, profile.palette[2], true);
       }
     }
   }
@@ -1149,17 +1226,22 @@ class DanmakrewSimulationWorker {
   }
 
   private advanceBossPhaseOrDefeat(): void {
-    // Clear enemy bullets on phase break
     this.bullets = this.bullets.filter((b) => b.ownerId !== 'boss');
     if (this.boss.remainingStocks > 0) {
       this.boss.remainingStocks--;
       this.boss.phase = Math.min(5, this.boss.phase + 1);
-      const spells = this.getActiveBossSpells();
-      const spell = spells[this.boss.phase - 1] || spells[spells.length - 1];
+      const phases = this.getActiveBossPhases();
+      const spell = phases[this.boss.phase - 1] || phases[phases.length - 1];
+      const nextHp = Math.round(spell.maxHp * this.getSquadHpScale());
+      this.boss.maxHp = nextHp;
+      this.boss.hp = 1;
       this.boss.spellcardName = spell.name;
       this.boss.isSpellCard = spell.isSpellCard;
       this.boss.isRefilling = true;
-      this.boss.refillTimer = 0.85;
+      this.boss.refillTimer = 0.9;
+      this.boss.shootTimer = 0;
+      this.boss.laserTimer = 0;
+      this.boss.megaLaserTimer = 0;
       this.spawnItemFountain(this.boss.x, this.boss.y, 8);
     } else {
       this.boss.isDefeated = true;
@@ -1200,8 +1282,7 @@ class DanmakrewSimulationWorker {
           closestDist = dist;
           closestPlayer = p;
         }
-        // Upper-right / collection line auto-magnetize or proximity magnetize
-        if (dist < 110 || pos.x > 520) {
+        if (dist < 115 || pos.x > 520) {
           item.magnetizedTo = p.id;
         }
       }
@@ -1225,8 +1306,8 @@ class DanmakrewSimulationWorker {
       if (closestPlayer && closestDist < 24) {
         if (item.type === 'power') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 50);
         else if (item.type === 'point') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 30);
-        else if (item.type === 'bomb_frag') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 160);
-        else if (item.type === 'life_frag') closestPlayer.hp = Math.min(closestPlayer.stats.hpMax, closestPlayer.hp + 25);
+        else if (item.type === 'bomb_frag') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 165);
+        else if (item.type === 'life_frag') closestPlayer.hp = Math.min(closestPlayer.stats.hpMax, closestPlayer.hp + 28);
         this.items.splice(i, 1);
         continue;
       }
@@ -1250,7 +1331,6 @@ class DanmakrewSimulationWorker {
       }
 
       if (b.ownerId === 'boss') {
-        // Enemy bullet vs players
         let hitPlayer = false;
         for (const [, p] of this.players) {
           if (p.hp <= 0) continue;
@@ -1268,7 +1348,6 @@ class DanmakrewSimulationWorker {
           this.bullets.splice(i, 1);
         }
       } else {
-        // Player bullet vs enemies
         let consumed = false;
         for (let j = this.enemies.length - 1; j >= 0; j--) {
           const e = this.enemies[j];
@@ -1289,7 +1368,7 @@ class DanmakrewSimulationWorker {
                 magnetizedTo: null,
               });
               for (const [, p] of this.players) {
-                if (p.hp > 0) p.sp = Math.min(p.stats.spMax, p.sp + 60);
+                if (p.hp > 0) p.sp = Math.min(p.stats.spMax, p.sp + 65);
               }
               this.enemies.splice(j, 1);
             }
@@ -1302,14 +1381,13 @@ class DanmakrewSimulationWorker {
           continue;
         }
 
-        // Player bullet vs boss
         if (this.boss.isActive && !this.boss.isDefeated) {
           const dx = b.x - this.boss.x;
           const dy = b.y - this.boss.y;
-          if (dx * dx + dy * dy <= (40 + b.radius) * (40 + b.radius)) {
+          if (dx * dx + dy * dy <= (42 + b.radius) * (42 + b.radius)) {
             const owner = this.players.get(b.ownerId);
             if (owner) owner.sp = Math.min(owner.stats.spMax, owner.sp + owner.stats.spChargePerHit);
-            this.damageBoss(b.damage * 0.45);
+            this.damageBoss(b.damage * 0.35);
             this.bullets.splice(i, 1);
           }
         }
@@ -1341,7 +1419,6 @@ class DanmakrewSimulationWorker {
 
       const halfW = l.currentWidth * 0.5;
 
-      // Lasers erase normal bullets in their beam path
       for (let bIdx = this.bullets.length - 1; bIdx >= 0; bIdx--) {
         const b = this.bullets[bIdx];
         if (b.type === 'laser') continue;
@@ -1351,11 +1428,9 @@ class DanmakrewSimulationWorker {
         }
       }
 
-      // Boss lasers damage Tank walls at 50 DPS (destroys two 25 HP walls in 1s)
       if (l.ownerId === 'boss') {
         for (const w of this.walls) {
-          const inX = w.x <= l.sourceX;
-          if (inX && Math.abs(w.y - l.sourceY) <= halfW + w.height * 0.5) {
+          if (w.x <= l.sourceX && Math.abs(w.y - l.sourceY) <= halfW + w.height * 0.5) {
             w.hp = Math.max(0, w.hp - l.dps * dt);
           }
         }
@@ -1372,11 +1447,10 @@ class DanmakrewSimulationWorker {
           }
         }
       } else {
-        // Player Master Spark damages fairies & boss
         for (let eIdx = this.enemies.length - 1; eIdx >= 0; eIdx--) {
           const e = this.enemies[eIdx];
           if (e.x >= l.sourceX && Math.abs(e.y - l.sourceY) <= halfW + e.radius) {
-            e.hp -= 90 * dt;
+            e.hp -= 95 * dt;
             if (e.hp <= 0) {
               this.items.push({
                 id: `item_${this.nextEntityId++}`,
@@ -1392,8 +1466,8 @@ class DanmakrewSimulationWorker {
           }
         }
         if (this.boss.isActive && !this.boss.isDefeated) {
-          if (this.boss.x >= l.sourceX && Math.abs(this.boss.y - l.sourceY) <= halfW + 40) {
-            this.damageBoss(55 * dt);
+          if (this.boss.x >= l.sourceX && Math.abs(this.boss.y - l.sourceY) <= halfW + 42) {
+            this.damageBoss(65 * dt);
           }
         }
       }
@@ -1409,12 +1483,14 @@ class DanmakrewSimulationWorker {
     }
 
     const playerLaser = this.lasers.find((l) => l.ownerId !== 'boss' && (l.state === 'charging' || l.state === 'firing'));
-    const bossMega = this.lasers.find((l) => l.ownerId === 'boss' && (l.isMegaBeam || l.maxWidth >= 60) && (l.state === 'charging' || l.state === 'firing'));
+    const bossMega = this.lasers.find(
+      (l) => l.ownerId === 'boss' && (l.isMegaBeam || l.maxWidth >= 60) && (l.state === 'charging' || l.state === 'firing')
+    );
 
     if (!this.struggle.active && !this.struggle.isAligning) {
       if (playerLaser && bossMega && Math.abs(playerLaser.sourceY - bossMega.sourceY) <= 95) {
         this.struggle.isAligning = true;
-        this.alignTimer = 0.55;
+        this.alignTimer = 0.5;
         const midY = (playerLaser.sourceY + bossMega.sourceY) * 0.5;
         playerLaser.sourceY = midY;
         playerLaser.targetY = midY;
@@ -1432,8 +1508,8 @@ class DanmakrewSimulationWorker {
         this.struggle.isAligning = false;
         this.struggle.active = true;
         this.struggle.balance = 50;
-        this.struggle.timer = 5.0;
-        this.struggle.maxTimer = 5.0;
+        this.struggle.timer = 4.5;
+        this.struggle.maxTimer = 4.5;
         if (playerLaser) {
           playerLaser.state = 'firing';
           playerLaser.fireDuration = 8.0;
@@ -1455,9 +1531,12 @@ class DanmakrewSimulationWorker {
       }
 
       this.struggle.timer = Math.max(0, this.struggle.timer - dt);
-      // Boss pushes back steadily
-      const bossPush = 14 * this.getDifficultyMult();
-      this.struggle.balance = Math.max(0, Math.min(100, this.struggle.balance - bossPush * dt));
+      const bossPush = this.difficulty === 'no_mercy' ? 19 : this.difficulty === 'difficult' ? 16.5 : 14;
+      let allyAssist = 0;
+      for (const [, p] of this.players) {
+        if (p.isBot && p.hp > 0) allyAssist += 4.5;
+      }
+      this.struggle.balance = Math.max(0, Math.min(100, this.struggle.balance + (allyAssist - bossPush) * dt));
 
       const minX = playerLaser.sourceX + 40;
       const maxX = bossMega.sourceX - 40;
@@ -1499,7 +1578,6 @@ class DanmakrewSimulationWorker {
         continue;
       }
 
-      // Tank wall absorbs enemy bullets
       for (let bIdx = this.bullets.length - 1; bIdx >= 0; bIdx--) {
         const b = this.bullets[bIdx];
         if (b.ownerId !== 'boss') continue;
@@ -1519,7 +1597,7 @@ class DanmakrewSimulationWorker {
   }
 
   private buildSnapshot(): GameSnapshot {
-    const cfg = getStageMeta(this.difficulty, this.stageIndex, this.customStageProfile);
+    const meta = this.getStageMeta();
     const players = [...this.players.values()].map((p) => {
       const pos = p.body.getPosition();
       return {
@@ -1620,18 +1698,21 @@ class DanmakrewSimulationWorker {
     const campaign: ServerCampaign = {
       difficulty: this.difficulty,
       difficultyLabel,
-      world: cfg.world,
-      stage: cfg.stage,
-      worldName: cfg.worldName,
-      stageTitle: cfg.stageTitle,
+      world: meta.world,
+      stage: meta.stage,
+      worldName: meta.worldName,
+      stageTitle: meta.stageTitle,
+      bossSpawnAt: meta.bossSpawnAt,
+      bossWarningAt: meta.bossWarningAt,
+      spaceTheme: meta.spaceTheme,
       stageState: this.stageState,
       campaignComplete:
         this.stageState === 'stage_clear' &&
         (Boolean(this.customStageProfile) || this.stageIndex >= TOTAL_STAGES_PER_DIFFICULTY - 1),
-      bannerText: cfg.bannerText,
-      bannerSubtext: cfg.bannerSubtext,
-      clearTitle: cfg.clearTitle,
-      clearSubtext: cfg.clearSubtext,
+      bannerText: meta.bannerText,
+      bannerSubtext: meta.bannerSubtext,
+      clearTitle: meta.clearTitle,
+      clearSubtext: meta.clearSubtext,
     };
 
     return {
@@ -1710,4 +1791,3 @@ self.onmessage = (e: MessageEvent) => {
       break;
   }
 };
-
