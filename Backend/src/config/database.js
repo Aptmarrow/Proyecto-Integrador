@@ -18,8 +18,7 @@ db.exec(`
     password    TEXT    NOT NULL,
     is_verified INTEGER NOT NULL DEFAULT 0,
     verification_token TEXT,
-    danmas      INTEGER NOT NULL DEFAULT 0,
-    inventory_id INTEGER NOT NULL UNIQUE REFERENCES inventory(id) ON DELETE CASCADE
+    danmas      INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS user_session (
@@ -101,6 +100,31 @@ for (const sql of migrations) {
     db.exec(sql);
   } catch {
     // Column already exists – ignore
+  }
+}
+
+// Migration: remove user.inventory_id if it exists (avoids circular FK deadlock)
+{
+  const cols = db.prepare('PRAGMA table_info(user)').all();
+  if (cols.some(c => c.name === 'inventory_id')) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_migrated (
+        id          TEXT    NOT NULL PRIMARY KEY,
+        username    TEXT    NOT NULL,
+        email       TEXT    NOT NULL UNIQUE,
+        password    TEXT    NOT NULL,
+        is_verified INTEGER NOT NULL DEFAULT 0,
+        verification_token TEXT,
+        danmas      INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO user_migrated (id, username, email, password, is_verified, verification_token, danmas)
+        SELECT id, username, email, password, is_verified, verification_token, danmas
+        FROM user;
+      DROP TABLE user;
+      ALTER TABLE user_migrated RENAME TO user;
+    `);
+    db.pragma('foreign_keys = ON');
   }
 }
 

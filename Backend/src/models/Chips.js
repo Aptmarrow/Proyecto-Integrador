@@ -13,7 +13,7 @@ const chipWithStatsQuery = db.prepare(`
 function rowToChip(row) {
   if (!row) return null;
   const { HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS, ...chip } = row;
-  const hasStats = HP !== null || ATK !== null || DEF !== null;
+  const hasStats = HP !== null || ATK !== null || DEF !== null || SP_CHARGE !== null || CRIT_CHANCE !== null || SP_DRAIN !== null || HEALING_POINTS !== null || BULLET_ARMOR !== null || ULTIMATE_DAMAGE !== null || ULTIMATE_HEALTH !== null || BUFFS !== null;
   chip.stats = hasStats ? { HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS } : null;
   return chip;
 }
@@ -41,7 +41,7 @@ const Chip = {
 
     if (stats) {
       const { HP = null, ATK = null, DEF = null, SP_CHARGE = null, CRIT_CHANCE = null, SP_DRAIN = null,
-              HEALING_POINTS = null, BULLET_ARMOR = null, ULTIMATE_DAMAGE = null, ULTIMATE_HEALTH = null, BUFFS = null } = stats;
+        HEALING_POINTS = null, BULLET_ARMOR = null, ULTIMATE_DAMAGE = null, ULTIMATE_HEALTH = null, BUFFS = null } = stats;
       db.prepare(
         `INSERT INTO chip_stats (chip_id, ${STATS_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(chipId, HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS);
@@ -55,7 +55,7 @@ const Chip = {
   },
 
   updateStats(chipId, { HP = null, ATK = null, DEF = null, SP_CHARGE = null, CRIT_CHANCE = null, SP_DRAIN = null,
-                        HEALING_POINTS = null, BULLET_ARMOR = null, ULTIMATE_DAMAGE = null, ULTIMATE_HEALTH = null, BUFFS = null }) {
+    HEALING_POINTS = null, BULLET_ARMOR = null, ULTIMATE_DAMAGE = null, ULTIMATE_HEALTH = null, BUFFS = null }) {
     db.prepare(`
       INSERT INTO chip_stats (chip_id, ${STATS_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(chip_id) DO UPDATE SET
