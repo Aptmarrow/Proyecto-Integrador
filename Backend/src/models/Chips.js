@@ -1,52 +1,85 @@
 const db = require('../config/database');
 
-const STATS_COLS = 'HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS';
+const STAT_KEYS = [
+  'HP',
+  'Bullet_Damage',
+  'SP_Charge',
+  'Defense',
+  'Ultimate_Damage',
+  'Cadency',
+  'Critic_Chance',
+  'Crit_Damage',
+];
+
+const STATS_COLS = STAT_KEYS.join(', ');
+const SELECT_STATS_COLS = STAT_KEYS.map((key) => `s.${key}`).join(', ');
+const STATS_PLACEHOLDERS = STAT_KEYS.map(() => '?').join(', ');
+const STATS_UPSERT_SET = STAT_KEYS.map((key) => `${key} = excluded.${key}`).join(', ');
 
 const chipWithStatsQuery = db.prepare(`
-  SELECT c.*, s.HP, s.ATK, s.DEF, s.SP_CHARGE, s.CRIT_CHANCE, s.SP_DRAIN,
-         s.HEALING_POINTS, s.BULLET_ARMOR, s.ULTIMATE_DAMAGE, s.ULTIMATE_HEALTH, s.BUFFS
+  SELECT c.*, ${SELECT_STATS_COLS}
   FROM chip c
   LEFT JOIN chip_stats s ON s.chip_id = c.id
   WHERE c.id = ?
 `);
 
+const chipsByInventoryQuery = db.prepare(`
+  SELECT c.*, ${SELECT_STATS_COLS}
+  FROM chip c
+  LEFT JOIN chip_stats s ON s.chip_id = c.id
+  WHERE c.inventory_id = ?
+`);
+
 function rowToChip(row) {
   if (!row) return null;
-  const { HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS, ...chip } = row;
-  const hasStats = HP !== null || ATK !== null || DEF !== null || SP_CHARGE !== null || CRIT_CHANCE !== null || SP_DRAIN !== null || HEALING_POINTS !== null || BULLET_ARMOR !== null || ULTIMATE_DAMAGE !== null || ULTIMATE_HEALTH !== null || BUFFS !== null;
-  chip.stats = hasStats ? { HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS } : null;
+
+  const chip = {};
+  const stats = {};
+  let hasStats = false;
+
+  for (const [key, value] of Object.entries(row)) {
+    if (STAT_KEYS.includes(key)) {
+      stats[key] = value;
+      if (value !== null && value !== undefined) {
+        hasStats = true;
+      }
+    } else {
+      chip[key] = value;
+    }
+  }
+
+  chip.stats = hasStats ? stats : null;
   return chip;
 }
 
 const Chip = {
+  STAT_KEYS,
+
   findById(id) {
     return rowToChip(chipWithStatsQuery.get(id));
   },
 
   findByInventory(inventoryId) {
-    const rows = db.prepare(`
-      SELECT c.*, s.HP, s.ATK, s.DEF, s.SP_CHARGE, s.CRIT_CHANCE, s.SP_DRAIN,
-             s.HEALING_POINTS, s.BULLET_ARMOR, s.ULTIMATE_DAMAGE, s.ULTIMATE_HEALTH, s.BUFFS
-      FROM chip c
-      LEFT JOIN chip_stats s ON s.chip_id = c.id
-      WHERE c.inventory_id = ?
-    `).all(inventoryId);
-    return rows.map(rowToChip);
+    return chipsByInventoryQuery.all(inventoryId).map(rowToChip);
   },
 
-  create({ inventoryId, name, rarity, level = 1, image = null, stats = null }) {
-    const chipId = db.prepare(
-      'INSERT INTO chip (inventory_id, name, rarity, level, image) VALUES (?, ?, ?, ?, ?)'
-    ).run(inventoryId, name, rarity, level, image).lastInsertRowid;
+  create({ inventoryId, name, rarity = 1, level = 1, image = null, stats = null }) {
+    const insertChip = db.transaction(() => {
+      const chipId = db.prepare(
+        'INSERT INTO chip (inventory_id, name, rarity, level, image) VALUES (?, ?, ?, ?, ?)'
+      ).run(inventoryId, name, rarity, level, image).lastInsertRowid;
 
-    if (stats) {
-      const { HP = null, ATK = null, DEF = null, SP_CHARGE = null, CRIT_CHANCE = null, SP_DRAIN = null,
-        HEALING_POINTS = null, BULLET_ARMOR = null, ULTIMATE_DAMAGE = null, ULTIMATE_HEALTH = null, BUFFS = null } = stats;
-      db.prepare(
-        `INSERT INTO chip_stats (chip_id, ${STATS_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(chipId, HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS);
-    }
+      if (stats && STAT_KEYS.some((key) => stats[key] !== undefined && stats[key] !== null)) {
+        const values = STAT_KEYS.map((key) => stats[key] ?? null);
+        db.prepare(
+          `INSERT INTO chip_stats (chip_id, ${STATS_COLS}) VALUES (?, ${STATS_PLACEHOLDERS})`
+        ).run(chipId, ...values);
+      }
 
+      return chipId;
+    });
+
+    const chipId = insertChip();
     return this.findById(chipId);
   },
 
@@ -54,16 +87,12 @@ const Chip = {
     db.prepare('UPDATE chip SET level = ? WHERE id = ?').run(level, id);
   },
 
-  updateStats(chipId, { HP = null, ATK = null, DEF = null, SP_CHARGE = null, CRIT_CHANCE = null, SP_DRAIN = null,
-    HEALING_POINTS = null, BULLET_ARMOR = null, ULTIMATE_DAMAGE = null, ULTIMATE_HEALTH = null, BUFFS = null }) {
+  updateStats(chipId, stats = {}) {
+    const values = STAT_KEYS.map((key) => stats[key] ?? null);
     db.prepare(`
-      INSERT INTO chip_stats (chip_id, ${STATS_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(chip_id) DO UPDATE SET
-        HP = excluded.HP, ATK = excluded.ATK, DEF = excluded.DEF, SP_CHARGE = excluded.SP_CHARGE,
-        CRIT_CHANCE = excluded.CRIT_CHANCE, SP_DRAIN = excluded.SP_DRAIN, HEALING_POINTS = excluded.HEALING_POINTS,
-        BULLET_ARMOR = excluded.BULLET_ARMOR, ULTIMATE_DAMAGE = excluded.ULTIMATE_DAMAGE,
-        ULTIMATE_HEALTH = excluded.ULTIMATE_HEALTH, BUFFS = excluded.BUFFS
-    `).run(chipId, HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS);
+      INSERT INTO chip_stats (chip_id, ${STATS_COLS}) VALUES (?, ${STATS_PLACEHOLDERS})
+      ON CONFLICT(chip_id) DO UPDATE SET ${STATS_UPSERT_SET}
+    `).run(chipId, ...values);
   },
 };
 

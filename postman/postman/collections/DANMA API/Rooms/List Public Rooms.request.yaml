@@ -1,0 +1,7 @@
+$kind: http-request
+description: Devuelve hasta 50 salas publicas sin contrasena, ordenadas por mas reciente.
+url: "{{base_url}}/api/rooms"
+method: GET
+auth:
+  type: noauth
+order: 3000

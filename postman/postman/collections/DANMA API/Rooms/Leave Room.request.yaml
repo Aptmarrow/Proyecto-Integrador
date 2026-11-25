@@ -1,0 +1,10 @@
+$kind: http-request
+description: |-
+  Sale de la sala. Remueve al usuario del players[] y actualiza playersCount.
+
+  El host no puede usar este endpoint — debe borrar la sala con DELETE /rooms/:roomId.
+
+  Errores: 400 eres el host, 404 sala no encontrada.
+url: "{{base_url}}/api/rooms/{{room_id}}/join"
+method: DELETE
+order: 10000

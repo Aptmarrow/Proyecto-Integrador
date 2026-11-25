@@ -1,0 +1,5 @@
+$kind: http-request
+description: Devuelve la informacion del usuario autenticado.
+url: "{{base_url}}/api/auth/me"
+method: GET
+order: 6000

@@ -1,0 +1,11 @@
+$kind: http-request
+description: Verifica la cuenta de usuario usando los query params enviados por email.
+url: "{{base_url}}/api/auth/verify-email?userId={{userId}}&token=VERIFICATION_TOKEN&email=test@danma.gg"
+method: GET
+queryParams:
+  userId: "{{userId}}"
+  token: VERIFICATION_TOKEN
+  email: test@danma.gg
+auth:
+  type: noauth
+order: 2000

@@ -1,0 +1,13 @@
+$kind: http-request
+description: Genera una chip con solo el campo obligatorio name (sin stats).
+url: "{{base_url}}/api/auth/user/inventory/chips"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Chip Basica"
+    }
+order: 2000

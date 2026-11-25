@@ -1,0 +1,3 @@
+$kind: collection
+description: Endpoints para gestion de salas efimeras (Redis, TTL 2h). Todos los que modifican estado requieren auth heredada de la coleccion.
+order: 4000

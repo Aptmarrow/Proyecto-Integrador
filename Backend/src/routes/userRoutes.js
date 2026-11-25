@@ -1,10 +1,9 @@
 const { z } = require('zod');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { generateId } = require('lucia');
-const lucia = require('../config/auth');
+const { generateUserId, signToken } = require('../config/auth');
 const authenticate = require('../middleware/auth');
-const { User, Friend, FriendRequest, FRIEND_REQUEST_STATUS } = require('../models');
+const { User, Friend, FriendRequest, FRIEND_REQUEST_STATUS, Inventory, Chip } = require('../models');
 const { sendVerificationEmail } = require('../utils/mailer');
 
 // ---- Schemas Zod ----
@@ -25,6 +24,27 @@ const loginSchema = z.object({
 
 const resendVerificationSchema = z.object({
   email: z.string().email('Email inválido.'),
+});
+
+const chipStatsSchema = z
+  .object({
+    HP: z.number().nullable().optional(),
+    Bullet_Damage: z.number().nullable().optional(),
+    SP_Charge: z.number().nullable().optional(),
+    Defense: z.number().nullable().optional(),
+    Ultimate_Damage: z.number().nullable().optional(),
+    Cadency: z.number().nullable().optional(),
+    Critic_Chance: z.number().nullable().optional(),
+    Crit_Damage: z.number().nullable().optional(),
+  })
+  .strict();
+
+const createChipSchema = z.object({
+  name: z.string().trim().min(1, 'El nombre de la chip es obligatorio.'),
+  rarity: z.number().int().min(1).optional(),
+  level: z.number().int().min(1).optional(),
+  image: z.string().nullable().optional(),
+  stats: chipStatsSchema.nullable().optional(),
 });
 
 async function userRoutes(fastify) {
@@ -59,7 +79,7 @@ async function userRoutes(fastify) {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const verificationToken = crypto.randomBytes(32).toString('hex');
-    const userId = generateId(15);
+    const userId = generateUserId();
 
     const newUser = User.create({ id: userId, username, email, password: hashedPassword, verificationToken });
 
@@ -144,14 +164,13 @@ async function userRoutes(fastify) {
       return reply.status(403).send({ message: 'Debes verificar tu email antes de iniciar sesión.' });
     }
 
-    const session = await lucia.createSession(user.id, {});
+    const token = signToken(user);
 
-    return reply.send({ token: session.id, username: user.username, userId: user.id });
+    return reply.send({ token, username: user.username, userId: user.id });
   });
 
   // POST /logout
-  fastify.post('/logout', { preHandler: authenticate }, async (request, reply) => {
-    await lucia.invalidateSession(request.session.id);
+  fastify.post('/logout', { preHandler: authenticate }, async (_request, reply) => {
     return reply.send({ message: 'Sesión cerrada.' });
   });
 
@@ -245,6 +264,33 @@ async function userRoutes(fastify) {
     Friend.createPair(fr.sender_id, fr.receiver_id);
 
     return reply.send({ message: 'Solicitud aceptada. Ahora son amigos.' });
+  });
+
+  // ---- INVENTORY ENDPOINTS ----
+
+  // POST /user/inventory/chips
+  fastify.post('/user/inventory/chips', { preHandler: authenticate }, async (request, reply) => {
+    const result = createChipSchema.safeParse(request.body ?? {});
+    if (!result.success) {
+      return reply.status(400).send({ message: result.error.issues[0].message });
+    }
+
+    let inventory = Inventory.findByOwner(request.user.id);
+    if (!inventory) {
+      inventory = Inventory.create(request.user.id);
+    }
+
+    const { name, rarity, level, image, stats } = result.data;
+    const chip = Chip.create({
+      inventoryId: inventory.id,
+      name,
+      rarity,
+      level,
+      image,
+      stats,
+    });
+
+    return reply.status(201).send(chip);
   });
 }
 

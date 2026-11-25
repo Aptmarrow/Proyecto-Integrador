@@ -1,0 +1,13 @@
+$kind: http-request
+description: "Asigna el rol de personaje del jugador autenticado en la sala. Roles validos: Tank, Support, DPS, Special_Attack."
+url: "{{base_url}}/api/rooms/{{room_id}}/character"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "role": "Tank"
+    }
+order: 7000

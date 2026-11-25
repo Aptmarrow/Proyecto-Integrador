@@ -1,0 +1,7 @@
+$kind: http-request
+description: Endpoint publico de prueba.
+url: "{{base_url}}/api/auth/AllGood"
+method: GET
+auth:
+  type: noauth
+order: 8000

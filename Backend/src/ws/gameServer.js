@@ -1,7 +1,7 @@
 'use strict';
 
 const GameRoom = require('../game/GameRoom');
-const lucia    = require('../config/auth');
+const { verifyToken } = require('../config/auth');
 const redis    = require('../config/redis');
 
 const TICK_RATE = 60;
@@ -21,12 +21,8 @@ const disconnectTimers = new Map();
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function validateToken(token) {
-  try {
-    const { session, user } = await lucia.validateSession(token);
-    return session ? user.id : null;
-  } catch {
-    return null;
-  }
+  const result = verifyToken(token);
+  return result ? result.user.id : null;
 }
 
 function send(ws, payload) {

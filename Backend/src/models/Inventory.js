@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const Chip = require('./Chips');
 
 const Inventory = {
   // Crea el inventario para un usuario recién registrado
@@ -21,18 +22,7 @@ const Inventory = {
       .all(inventory.id)
       .map(r => r.skin_id);
 
-    const chips = db.prepare(`
-      SELECT c.*, s.HP, s.ATK, s.DEF, s.SP_CHARGE, s.CRIT_CHANCE, s.SP_DRAIN,
-             s.HEALING_POINTS, s.BULLET_ARMOR, s.ULTIMATE_DAMAGE, s.ULTIMATE_HEALTH, s.BUFFS
-      FROM chip c
-      LEFT JOIN chip_stats s ON s.chip_id = c.id
-      WHERE c.inventory_id = ?
-    `).all(inventory.id);
-    inventory.chips = chips.map(({ HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS, ...chip }) => {
-      const hasStats = HP !== null || ATK !== null || DEF !== null;
-      chip.stats = hasStats ? { HP, ATK, DEF, SP_CHARGE, CRIT_CHANCE, SP_DRAIN, HEALING_POINTS, BULLET_ARMOR, ULTIMATE_DAMAGE, ULTIMATE_HEALTH, BUFFS } : null;
-      return chip;
-    });
+    inventory.chips = Chip.findByInventory(inventory.id);
 
     return inventory;
   },

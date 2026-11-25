@@ -1,0 +1,17 @@
+$kind: http-request
+description: Registra un nuevo usuario y crea su inventario automaticamente. No requiere autenticacion.
+url: "{{base_url}}/api/auth/register"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "TestPlayer",
+      "email": "test@danma.gg",
+      "password": "secret123"
+    }
+auth:
+  type: noauth
+order: 1000

@@ -1,0 +1,30 @@
+$kind: http-request
+description: |-
+  Genera una chip y la agrega al inventario del usuario autenticado.
+
+  Unico campo obligatorio en el body: name.
+  Campos opcionales: rarity (default 1), level (default 1), image (default null), stats (todas las stats son opcionales: HP, Bullet_Damage, SP_Charge, Defense, Ultimate_Damage, Cadency, Critic_Chance, Crit_Damage).
+url: "{{base_url}}/api/auth/user/inventory/chips"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Chip Ofensiva",
+      "rarity": 3,
+      "level": 1,
+      "image": null,
+      "stats": {
+        "HP": 50,
+        "Bullet_Damage": 12,
+        "SP_Charge": 8,
+        "Defense": 5,
+        "Ultimate_Damage": 15,
+        "Cadency": 10,
+        "Critic_Chance": 7.5,
+        "Crit_Damage": 25
+      }
+    }
+order: 1000

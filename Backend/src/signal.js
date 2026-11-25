@@ -24,7 +24,7 @@
 const uWS = require('uWebSockets.js');
 const { setupGameRoute } = require('./ws/gameServer');
 const redis = require('./config/redis');
-const lucia = require('./config/auth');
+const { verifyToken } = require('./config/auth');
 const {
   addPlayer,
   removePlayer,
@@ -91,16 +91,12 @@ async function cleanupRoom(roomId) {
 }
 
 /**
- * Validate a Lucia session token.
+ * Validate a JWT token.
  * Returns the userId string or null.
  */
 async function validateToken(token) {
-  try {
-    const { session, user } = await lucia.validateSession(token);
-    return session ? user.id : null;
-  } catch {
-    return null;
-  }
+  const result = verifyToken(token);
+  return result ? result.user.id : null;
 }
 
 // ── µWebSockets app ──────────────────────────────────────────────────────────

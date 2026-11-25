@@ -10,7 +10,7 @@ const User = {
   },
 
   findAll() {
-    return db.prepare('SELECT id, username, email FROM user').all();
+    return db.prepare('SELECT id, username, email, password FROM user').all();
   },
 
   create({ id, username, email, password, verificationToken, danmas }) {

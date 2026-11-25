@@ -1,0 +1,7 @@
+$kind: http-request
+description: Lista todos los usuarios. Endpoint de desarrollo, no requiere auth.
+url: "{{base_url}}/api/auth"
+method: GET
+auth:
+  type: noauth
+order: 7000

@@ -1,0 +1,15 @@
+$kind: http-request
+description: |-
+  Une al usuario autenticado a la sala. Sale automaticamente de su sala anterior si estaba en una.
+
+  Devuelve { room } con players[] y playersCount actualizados.
+
+  Errores: 400 eres el host, 403 contrasena incorrecta, 404 no encontrada, 409 sala llena.
+url: "{{base_url}}/api/rooms/{{room_id}}/join"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: "{}"
+order: 8000

@@ -1,0 +1,7 @@
+$kind: http-request
+description: Devuelve detalles de una sala por UUID. Incluye players[], playersCount y playerCharacters.
+url: "{{base_url}}/api/rooms/{{room_id}}"
+method: GET
+auth:
+  type: noauth
+order: 4000

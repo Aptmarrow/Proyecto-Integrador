@@ -1,25 +1,40 @@
-const { Lucia } = require('lucia');
-const { BetterSqlite3Adapter } = require('@lucia-auth/adapter-sqlite');
-const db = require('./database');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 
-const adapter = new BetterSqlite3Adapter(db, {
-  user: 'user',
-  session: 'user_session',
-});
+const JWT_SECRET = process.env.JWT_SECRET || 'danma-dev-secret-change-in-production';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
-const lucia = new Lucia(adapter, {
-  sessionCookie: {
-    attributes: {
-      secure: process.env.NODE_ENV === 'production',
+function generateUserId() {
+  return crypto.randomBytes(10).toString('hex');
+}
+
+function signToken(user) {
+  return jwt.sign(
+    {
+      sub: user.id,
+      username: user.username,
+      email: user.email,
     },
-  },
-  getUserAttributes(attributes) {
-    return {
-      username: attributes.username,
-      email: attributes.email,
-      isVerified: attributes.is_verified === 1,
-    };
-  },
-});
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+}
 
-module.exports = lucia;
+function verifyToken(token) {
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    const user = User.findById(payload.sub);
+    if (!user) return null;
+    return { user, payload };
+  } catch {
+    return null;
+  }
+}
+
+module.exports = {
+  generateUserId,
+  signToken,
+  verifyToken,
+};

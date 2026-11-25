@@ -1,0 +1,5 @@
+$kind: http-request
+description: Invalida la sesion activa. Requiere autenticacion (usa {{token}} heredado).
+url: "{{base_url}}/api/auth/logout"
+method: POST
+order: 5000
