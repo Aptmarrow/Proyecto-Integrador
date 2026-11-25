@@ -433,9 +433,12 @@ export class GameEngine extends BaseStageEngine {
   // ── Sincronización de Red ───────────────────────────────────────────────────
 
   public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string): void {
-    super.applyBackendSnapshot(players, myPlayerId, (x, y) => {
+    super.applyBackendSnapshot(players, myPlayerId, (x, y, characterRole) => {
       this.player.targetPos.x = x;
       this.player.targetPos.y = y;
+      if (characterRole && this.player.characterClassId !== characterRole) {
+        this.player.setCharacterClass(characterRole as CharacterClass);
+      }
     });
     this.networkSync.applySnapshot(players, myPlayerId, this.player);
   }

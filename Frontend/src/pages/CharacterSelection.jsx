@@ -17,6 +17,262 @@ import {
 
 const CHARACTER_ROLE = ['Special_Attack', 'Support', 'Tank', 'DPS'];
 
+const ROLE_PORTRAITS = {
+  DPS: '/assets/sprites/Attackpng.png',
+  Special_Attack: '/assets/sprites/FlanPortraitpng.png',
+  Tank: '/assets/sprites/defenceporpng.png',
+  Support: '/assets/sprites/HealerPortraitpng.png',
+};
+
+const ROLE_BACKGROUNDS = {
+  DPS: '/assets/sprites/Nebulosa2.png',
+  Special_Attack: '/assets/sprites/Nebulosa3.png',
+  Tank: '/assets/sprites/Nebulosa1.png',
+  Support: '/assets/sprites/Nebulosa4.png',
+};
+
+const ROLE_THEMES = {
+  DPS: {
+    name: 'DPS',
+    label: 'DPS',
+    bgGradient: 'radial-gradient(circle at 50% 35%, rgba(16, 185, 129, 0.65) 0%, rgba(5, 150, 105, 0.45) 35%, rgba(6, 44, 30, 0.92) 65%, rgba(2, 20, 14, 0.98) 100%)',
+    backlight: 'radial-gradient(circle, #34d399 0%, rgba(16, 185, 129, 0) 70%)',
+    glowColor: 'rgba(16, 185, 129, 0.8)',
+    tagBg: 'rgba(2, 38, 22, 0.94)',
+    tagBorder: '#10b981',
+    tagColor: '#6ee7b7',
+    imgPosition: '60% 36%',
+    scale: 1.95,
+    translateX: '-34px',
+    translateY: '10px',
+  },
+  Special_Attack: {
+    name: 'Special_Attack',
+    label: 'SP.ATK',
+    bgGradient: 'radial-gradient(circle at 50% 45%, rgba(245, 158, 11, 0.6) 0%, rgba(180, 83, 9, 0.45) 35%, rgba(85, 48, 4, 0.92) 65%, rgba(28, 15, 2, 0.98) 100%)',
+    backlight: 'radial-gradient(circle, #fbbf24 0%, rgba(245, 158, 11, 0) 70%)',
+    glowColor: 'rgba(245, 158, 11, 0.8)',
+    tagBg: 'rgba(45, 24, 3, 0.94)',
+    tagBorder: '#f59e0b',
+    tagColor: '#fde68a',
+    imgPosition: '54% 53%',
+    scale: 1.75,
+    translateX: '0px',
+    translateY: '0px',
+  },
+  Support: {
+    name: 'Support',
+    label: 'SUPPORT',
+    bgGradient: 'radial-gradient(circle at 50% 32%, rgba(14, 165, 233, 0.6) 0%, rgba(2, 132, 199, 0.45) 35%, rgba(7, 43, 74, 0.92) 65%, rgba(3, 18, 36, 0.98) 100%)',
+    backlight: 'radial-gradient(circle, #38bdf8 0%, rgba(14, 165, 233, 0) 70%)',
+    glowColor: 'rgba(14, 165, 233, 0.8)',
+    tagBg: 'rgba(2, 28, 54, 0.94)',
+    tagBorder: '#0ea5e9',
+    tagColor: '#7dd3fc',
+    imgPosition: '52% 16%',
+    scale: 1.40,
+    translateX: '0px',
+    translateY: '58px',
+  },
+  Tank: {
+    name: 'Tank',
+    label: 'TANK',
+    bgGradient: 'radial-gradient(circle at 50% 38%, rgba(239, 68, 68, 0.6) 0%, rgba(220, 38, 38, 0.45) 35%, rgba(69, 10, 10, 0.92) 65%, rgba(28, 4, 4, 0.98) 100%)',
+    backlight: 'radial-gradient(circle, #f87171 0%, rgba(239, 68, 68, 0) 70%)',
+    glowColor: 'rgba(239, 68, 68, 0.8)',
+    tagBg: 'rgba(48, 6, 6, 0.94)',
+    tagBorder: '#ef4444',
+    tagColor: '#fca5a5',
+    imgPosition: '48% 40%',
+    scale: 1.58,
+    translateX: '-26px',
+    translateY: '6px',
+  },
+};
+
+const DPS_TRACERS = [
+  { left: '8%', delay: '0s', duration: '1.05s', height: '55px' },
+  { left: '16%', delay: '0.45s', duration: '0.9s', height: '68px' },
+  { left: '28%', delay: '0.25s', duration: '1.15s', height: '48px' },
+  { left: '46%', delay: '0.7s', duration: '1.2s', height: '46px' },
+  { left: '66%', delay: '0.15s', duration: '1.0s', height: '62px' },
+  { left: '80%', delay: '0.55s', duration: '1.1s', height: '58px' },
+  { left: '91%', delay: '0.85s', duration: '0.88s', height: '64px' },
+];
+
+const SUPPORT_CROSSES = [
+  { left: '9%', delay: '0s', duration: '3.4s', size: '22px' },
+  { left: '20%', delay: '1.1s', duration: '3.9s', size: '18px' },
+  { left: '34%', delay: '2.2s', duration: '3.5s', size: '16px' },
+  { left: '52%', delay: '0.5s', duration: '4.1s', size: '24px' },
+  { left: '70%', delay: '1.6s', duration: '3.7s', size: '20px' },
+  { left: '83%', delay: '2.6s', duration: '3.3s', size: '25px' },
+  { left: '91%', delay: '0.8s', duration: '3.8s', size: '19px' },
+];
+
+const SPATK_SPARKS = [
+  { left: '9%', delay: '0s', duration: '1.5s', size: '8px' },
+  { left: '20%', delay: '0.4s', duration: '1.35s', size: '10px' },
+  { left: '36%', delay: '0.85s', duration: '1.7s', size: '7px' },
+  { left: '54%', delay: '0.2s', duration: '1.45s', size: '9px' },
+  { left: '72%', delay: '0.65s', duration: '1.3s', size: '11px' },
+  { left: '84%', delay: '1.05s', duration: '1.6s', size: '8px' },
+  { left: '92%', delay: '0.3s', duration: '1.4s', size: '9px' },
+];
+
+const TANK_EMBERS = [
+  { left: '9%', delay: '0s', duration: '2.6s', size: '7px' },
+  { left: '22%', delay: '0.7s', duration: '3.0s', size: '8px' },
+  { left: '38%', delay: '1.4s', duration: '2.5s', size: '6px' },
+  { left: '62%', delay: '0.35s', duration: '2.8s', size: '9px' },
+  { left: '79%', delay: '1.8s', duration: '2.7s', size: '7px' },
+  { left: '90%', delay: '1.0s', duration: '2.9s', size: '8px' },
+];
+
+function RoleBackgroundEffects({ roleKey }) {
+  if (roleKey === 'DPS') {
+    return (
+      <div className="cs-role-fx-layer cs-fx-dps" aria-hidden="true">
+        <div className="cs-fx-dps-grid" />
+        <div className="cs-fx-dps-radar" />
+        <div className="cs-fx-dps-reticle">
+          <span className="cs-fx-dps-tick top" />
+          <span className="cs-fx-dps-tick right" />
+          <span className="cs-fx-dps-tick bottom" />
+          <span className="cs-fx-dps-tick left" />
+        </div>
+        <div className="cs-fx-dps-reticle-inner" />
+        {DPS_TRACERS.map((t, i) => (
+          <span
+            key={i}
+            className="cs-fx-dps-tracer"
+            style={{
+              left: t.left,
+              height: t.height,
+              animationDelay: t.delay,
+              animationDuration: t.duration,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (roleKey === 'Support') {
+    return (
+      <div className="cs-role-fx-layer cs-fx-support" aria-hidden="true">
+        <div className="cs-fx-support-pulse" />
+        <div className="cs-fx-support-pulse delay" />
+        {SUPPORT_CROSSES.map((c, i) => (
+          <span
+            key={i}
+            className="cs-fx-support-cross"
+            style={{
+              left: c.left,
+              fontSize: c.size,
+              animationDelay: c.delay,
+              animationDuration: c.duration,
+            }}
+          >
+            +
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  if (roleKey === 'Special_Attack') {
+    return (
+      <div className="cs-role-fx-layer cs-fx-spatk" aria-hidden="true">
+        <div className="cs-fx-spatk-rays" />
+        <div className="cs-fx-spatk-ring outer" />
+        <div className="cs-fx-spatk-ring inner" />
+        {SPATK_SPARKS.map((s, i) => (
+          <span
+            key={i}
+            className="cs-fx-spatk-spark"
+            style={{
+              left: s.left,
+              width: s.size,
+              height: s.size,
+              animationDelay: s.delay,
+              animationDuration: s.duration,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (roleKey === 'Tank') {
+    return (
+      <div className="cs-role-fx-layer cs-fx-tank" aria-hidden="true">
+        <div className="cs-fx-tank-hexgrid" />
+        <div className="cs-fx-tank-armor-ring" />
+        <div className="cs-fx-tank-shockwave" />
+        {TANK_EMBERS.map((e, i) => (
+          <span
+            key={i}
+            className="cs-fx-tank-ember"
+            style={{
+              left: e.left,
+              width: e.size,
+              height: e.size,
+              animationDelay: e.delay,
+              animationDuration: e.duration,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function CharacterRoleDisplay({ roleKey }) {
+  const theme = ROLE_THEMES[roleKey] || ROLE_THEMES.DPS;
+  return (
+    <div
+      className={`cs-character-display role-${theme.name}`}
+      style={{
+        background: `${theme.bgGradient}, url(${ROLE_BACKGROUNDS[roleKey] || ROLE_BACKGROUNDS.DPS})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        boxShadow: `inset 0 0 35px rgba(0, 0, 0, 0.85), inset 0 0 15px ${theme.glowColor}`,
+      }}
+    >
+      <RoleBackgroundEffects roleKey={roleKey} />
+      <div
+        className="cs-character-backlight"
+        style={{ background: theme.backlight }}
+      />
+      <div className="cs-character-img-wrapper">
+        <img
+          src={ROLE_PORTRAITS[roleKey] || ROLE_PORTRAITS.DPS}
+          alt={roleKey}
+          className="cs-character-sprite-standalone"
+          style={{
+            objectPosition: theme.imgPosition,
+            transform: `translate(${theme.translateX || '0px'}, ${theme.translateY || '0px'}) scale(${theme.scale})`,
+          }}
+        />
+      </div>
+      <div
+        className="cs-character-role-tag"
+        style={{
+          background: theme.tagBg,
+          borderColor: theme.tagBorder,
+          color: theme.tagColor,
+          boxShadow: `0 4px 15px rgba(0, 0, 0, 0.85), 0 0 10px ${theme.glowColor}`,
+        }}
+      >
+        {theme.label}
+      </div>
+    </div>
+  );
+}
+
 const DIFFICULTY_META = DIFFICULTY_UI_META;
 
 function clampLevelNum(value, fallback = 1) {
@@ -1179,11 +1435,7 @@ export default function CharacterSelection() {
                   onClick={hostId === currentUserId ? () => handleToggleCharacterForPlayer(hostId, 'up') : undefined}
                   style={hostId === currentUserId ? undefined : { opacity: 0.5, cursor: 'not-allowed' }}
                 ></div>
-                <div className="cs-character-display">
-                  <div className={`cs-character-box ${getPlayerColor(hostId)}`}>
-                    {getPlayerColor(hostId) === 'Special_Attack' ? 'SP.ATK' : getPlayerColor(hostId).toUpperCase()}
-                  </div>
-                </div>
+                <CharacterRoleDisplay roleKey={getPlayerColor(hostId)} />
                 <div
                   className="cs-select-arrow down"
                   onClick={hostId === currentUserId ? () => handleToggleCharacterForPlayer(hostId, 'down') : undefined}
@@ -1245,11 +1497,7 @@ export default function CharacterSelection() {
                   onClick={joinerId === currentUserId ? () => handleToggleCharacterForPlayer(joinerId, 'up') : undefined}
                   style={joinerId === currentUserId ? undefined : { opacity: 0.5, cursor: 'not-allowed' }}
                 ></div>
-                <div className="cs-character-display">
-                  <div className={`cs-character-box ${getPlayerColor(joinerId)}`}>
-                    {getPlayerColor(joinerId) === 'Special_Attack' ? 'SP.ATK' : getPlayerColor(joinerId).toUpperCase()}
-                  </div>
-                </div>
+                <CharacterRoleDisplay roleKey={getPlayerColor(joinerId)} />
                 <div
                   className="cs-select-arrow down"
                   onClick={joinerId === currentUserId ? () => handleToggleCharacterForPlayer(joinerId, 'down') : undefined}

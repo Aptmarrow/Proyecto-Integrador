@@ -5,6 +5,14 @@ import { CANVAS_WIDTH, CANVAS_HEIGHT, OFFSCREEN_MARGIN } from '../physics/Render
 export class BulletSystem {
   public playerBullets: Bullet[] = [];
   public bullets: Bullet[] = [];
+  public spriteContainer = new PIXI.Container();
+  private spritePool: PIXI.Sprite[] = [];
+  private bulletTextures: Record<string, PIXI.Texture> = {
+    dps: PIXI.Texture.from('/assets/sprites/PhyAttackBulletpng.png'),
+    special_attack: PIXI.Texture.from('/assets/sprites/SpeAttackBulletpng.png'),
+    tank: PIXI.Texture.from('/assets/sprites/tankbulletpng.png'),
+    support: PIXI.Texture.from('/assets/sprites/healerBulletpng.png'),
+  };
 
   public spawnPlayerBullet(
     x: number,
@@ -13,7 +21,8 @@ export class BulletSystem {
     vy: number,
     radius: number = 5,
     color: number = 0x00f2fe,
-    damage: number = 0.5
+    damage: number = 0.5,
+    bulletType?: string
   ): Bullet {
     const b: Bullet = {
       x,
@@ -24,6 +33,7 @@ export class BulletSystem {
       color,
       damage,
       isPlayerBullet: true,
+      bulletType,
     };
     this.playerBullets.push(b);
     return b;
@@ -120,18 +130,52 @@ export class BulletSystem {
   public render(graphics: PIXI.Graphics): void {
     graphics.clear();
 
-    // 1. Player energy bolts (luminous plasma lance + bright white core)
+    if (this.spriteContainer.parent !== graphics) {
+      graphics.addChild(this.spriteContainer);
+    }
+
+    // 1. Player energy bolts using character bullet sprites
+    let spriteIndex = 0;
     for (const pb of this.playerBullets) {
-      const col = pb.color || 0x00f2fe;
-      graphics.beginFill(col, 0.35);
-      graphics.drawRoundedRect(pb.x - 2, pb.y - 4, 24, 8, 4);
-      graphics.endFill();
-      graphics.beginFill(col, 0.95);
-      graphics.drawRoundedRect(pb.x, pb.y - 2.5, 20, 5, 2.5);
-      graphics.endFill();
-      graphics.beginFill(0xffffff, 0.9);
-      graphics.drawRect(pb.x + 3, pb.y - 1, 13, 2);
-      graphics.endFill();
+      let sprite = this.spritePool[spriteIndex];
+      if (!sprite) {
+        sprite = new PIXI.Sprite();
+        this.spritePool.push(sprite);
+        this.spriteContainer.addChild(sprite);
+      }
+      const rawKey = (pb.bulletType || 'dps').toLowerCase();
+      const typeKey =
+        rawKey === 'attack' || rawKey === 'physical'
+          ? 'dps'
+          : rawKey === 'defense'
+            ? 'tank'
+            : rawKey === 'healer'
+              ? 'support'
+              : rawKey;
+
+      const tex = this.bulletTextures[typeKey] || this.bulletTextures.dps;
+      if (sprite.texture !== tex) {
+        sprite.texture = tex;
+      }
+      sprite.anchor.set(0.5);
+      sprite.position.set(pb.x, pb.y);
+      sprite.rotation = Math.atan2(pb.vy, pb.vx);
+
+      if (typeKey === 'tank') {
+        sprite.scale.set(0.35);
+      } else if (typeKey === 'dps') {
+        sprite.scale.set(0.75);
+      } else {
+        sprite.scale.set(0.55);
+      }
+
+      sprite.visible = true;
+      spriteIndex++;
+    }
+
+    // Ocultar sprites no usados del pool
+    for (let i = spriteIndex; i < this.spritePool.length; i++) {
+      this.spritePool[i].visible = false;
     }
 
     // 2. Touhou-style Space Danmaku Orbs (outer colored aura + saturated rim + crisp white core)
@@ -154,5 +198,8 @@ export class BulletSystem {
   public clear(): void {
     this.playerBullets = [];
     this.bullets = [];
+    for (const s of this.spritePool) {
+      s.visible = false;
+    }
   }
 }

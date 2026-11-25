@@ -11,6 +11,7 @@ export interface Bullet {
   damage?: number;
   isPlayerBullet?: boolean;
   isLaserShard?: boolean;
+  bulletType?: string;
 }
 
 export interface RemotePlayer {

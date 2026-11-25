@@ -7,6 +7,7 @@ import { WallSystem } from './systems/WallSystem';
 import { LaserSystem } from './systems/LaserSystem';
 import { BulletSystem } from './systems/BulletSystem';
 import { SCALE_X, SCALE_Y, CANVAS_WIDTH, CANVAS_HEIGHT } from './physics/RenderConstants';
+import { normalizeRole } from '../session/squadState';
 
 export class BaseStageEngine {
   public app: PIXI.Application;
@@ -37,6 +38,7 @@ export class BaseStageEngine {
 
   // Sprites de jugadores remotos (Multijugador)
   protected remotePlayerSprites = new Map<string, PIXI.Container>();
+  protected playerRoleMap = new Map<string, string>();
 
   // Estado compartido
   public stageTime: number = 0;
@@ -122,7 +124,7 @@ export class BaseStageEngine {
     }
   }
 
-  public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string, onTargetPlayerPos?: (x: number, y: number) => void): void {
+  public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string, onTargetPlayerPos?: (x: number, y: number, characterRole?: string) => void): void {
     this.isBackendConnected = true;
     this.useBackendBullets = true;
     const currentIds = new Set(players.map(p => p.id));
@@ -137,9 +139,11 @@ export class BaseStageEngine {
     for (const p of players) {
       const scaledX = p.x * this.SCALE_X;
       const scaledY = p.y * this.SCALE_Y;
+      const normRole = p.character ? normalizeRole(p.character) : 'DPS';
+      this.playerRoleMap.set(p.id, normRole);
 
       if (p.id === myPlayerId) {
-        if (onTargetPlayerPos) onTargetPlayerPos(scaledX, scaledY);
+        if (onTargetPlayerPos) onTargetPlayerPos(scaledX, scaledY, normRole);
       } else {
         let sprite = this.remotePlayerSprites.get(p.id);
         if (!sprite) {
@@ -183,7 +187,7 @@ export class BaseStageEngine {
     }
   }
 
-  public applyBackendBullets(bullets: ServerBullet[]): void {
+  public applyBackendBullets(bullets: ServerBullet[], myPlayerId?: string): void {
     if (!bullets) return;
     this.useBackendBullets = true;
     this.bulletSystem.playerBullets = [];
@@ -195,8 +199,28 @@ export class BaseStageEngine {
       const scaledRadius = Math.max(3, (b.radius || 4) * this.SCALE_X);
 
       if (b.ownerId && b.ownerId !== 'boss') {
-        const bulletColor = b.type === 'autoaim' ? 0xff00ff : 0x00f2fe;
-        this.bulletSystem.spawnPlayerBullet(scaledX, scaledY, 0, 0, scaledRadius, bulletColor, 0.5);
+        const ownerRole = this.playerRoleMap.get(b.ownerId) || (b.type === 'autoaim' ? 'Support' : b.type === 'tank' ? 'Tank' : 'DPS');
+        let bulletType = 'dps';
+        if (b.type === 'autoaim' || ownerRole === 'Support') {
+          bulletType = 'support';
+        } else if (b.type === 'tank' || ownerRole === 'Tank') {
+          bulletType = 'tank';
+        } else if (b.type === 'special' || ownerRole === 'Special_Attack') {
+          bulletType = 'special_attack';
+        } else {
+          bulletType = 'dps';
+        }
+
+        const bulletColor =
+          bulletType === 'support'
+            ? 0xff00ff
+            : bulletType === 'tank'
+              ? 0x00ff88
+              : bulletType === 'special_attack'
+                ? 0xa855f7
+                : 0x00f2fe;
+
+        this.bulletSystem.spawnPlayerBullet(scaledX, scaledY, 0, 0, scaledRadius, bulletColor, 0.5, bulletType);
       } else {
         this.bulletSystem.spawnEnemyBullet(
           scaledX,
