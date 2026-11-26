@@ -6,6 +6,7 @@ const redis = require('./config/redis');
 
 const userRoutes = require('./routes/userRoutes');
 const roomRoutes = require('./routes/roomRoutes');
+const assistantRoutes = require('./routes/assistantRoutes');
 
 // Start the WebSocket signaling server in the same process
 require('./signal');
@@ -56,6 +57,7 @@ async function start() {
 
   fastify.register(userRoutes, { prefix: '/api/auth' });
   fastify.register(roomRoutes, { prefix: '/api' });
+  fastify.register(assistantRoutes, { prefix: '/api' });
 
   try {
     await fastify.listen({ port: PORT, host: HOST });
