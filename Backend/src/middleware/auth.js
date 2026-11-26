@@ -1,8 +1,8 @@
-const lucia = require('../config/auth');
+const { verifyToken } = require('../config/auth');
 
 /**
- * Fastify preHandler — valida el session ID enviado como Bearer token.
- * Adjunta `request.user` y `request.session` si es válido.
+ * Fastify preHandler — valida el JWT enviado como Bearer token.
+ * Adjunta `request.user` y `request.tokenPayload` si es válido.
  */
 async function authenticate(request, reply) {
   const authHeader = request.headers.authorization;
@@ -10,21 +10,27 @@ async function authenticate(request, reply) {
     return reply.status(401).send({ message: 'Token no proporcionado.' });
   }
 
-  const sessionId = authHeader.slice(7);
+  const token = authHeader.slice(7).trim();
 
-  if (sessionId.startsWith('mock_token_') || sessionId.startsWith('guest_') || sessionId.startsWith('dev_')) {
-    request.session = { id: sessionId, userId: sessionId };
-    request.user = { id: sessionId, username: 'Player' };
+  if (token.startsWith('mock_token_') || token.startsWith('guest_') || token.startsWith('dev_')) {
+    request.session = { id: token, userId: token };
+    request.user = { id: token, username: 'Player' };
     return;
   }
 
-  const { session, user } = await lucia.validateSession(sessionId);
-  if (!session) {
-    return reply.status(401).send({ message: 'Sesión inválida o expirada.' });
+  const result = verifyToken(token);
+  if (!result) {
+    return reply.status(401).send({ message: 'Token inválido o expirado.' });
   }
 
-  request.session = session;
-  request.user = user;
+  const { user, payload } = result;
+  request.tokenPayload = payload;
+  request.user = {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    isVerified: user.is_verified === 1,
+  };
 }
 
 module.exports = authenticate;

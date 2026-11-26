@@ -1,0 +1,4 @@
+$kind: collection
+name: Inventory / Chips
+description: Endpoints para gestionar el inventario y las chips del usuario autenticado.
+order: 2000

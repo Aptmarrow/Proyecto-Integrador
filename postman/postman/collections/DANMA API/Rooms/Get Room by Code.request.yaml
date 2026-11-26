@@ -1,0 +1,7 @@
+$kind: http-request
+description: Resuelve una sala por su codigo de 6 caracteres (funciona para salas publicas y privadas).
+url: "{{base_url}}/api/rooms/by-code/{{room_code}}"
+method: GET
+auth:
+  type: noauth
+order: 5000

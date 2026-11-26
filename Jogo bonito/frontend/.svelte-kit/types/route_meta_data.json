@@ -1,0 +1,15 @@
+{
+	"/": [
+		"src/routes/+layout.ts",
+		"src/routes/+layout.ts"
+	],
+	"/lobby": [
+		"src/routes/+layout.ts"
+	],
+	"/play": [
+		"src/routes/+layout.ts"
+	],
+	"/test": [
+		"src/routes/+layout.ts"
+	]
+}

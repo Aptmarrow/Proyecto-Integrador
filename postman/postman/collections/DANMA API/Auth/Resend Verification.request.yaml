@@ -1,0 +1,15 @@
+$kind: http-request
+description: Reenvia el correo de verificacion a una cuenta no verificada.
+url: "{{base_url}}/api/auth/resend-verification"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "email": "test@danma.gg"
+    }
+auth:
+  type: noauth
+order: 3000

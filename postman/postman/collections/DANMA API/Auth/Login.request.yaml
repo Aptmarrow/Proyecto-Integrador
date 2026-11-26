@@ -1,0 +1,29 @@
+$kind: http-request
+description: Autentica al usuario. Guarda automaticamente {{token}} y {{userId}} para el resto de la coleccion.
+url: "{{base_url}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "email": "test@danma.gg",
+      "password": "secret123"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      var json = pm.response.json();
+      if (json.token) {
+          pm.collectionVariables.set('token', json.token);
+          console.log('[DANMA] token guardado:', json.token);
+      }
+      if (json.userId) {
+          pm.collectionVariables.set('userId', json.userId);
+          console.log('[DANMA] userId guardado:', json.userId);
+      }
+    language: text/javascript
+order: 4000

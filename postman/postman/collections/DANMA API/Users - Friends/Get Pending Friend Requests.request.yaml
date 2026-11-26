@@ -1,0 +1,5 @@
+$kind: http-request
+description: Devuelve las solicitudes de amistad pendientes del usuario autenticado.
+url: "{{base_url}}/api/auth/{{userId}}/friend-requests"
+method: GET
+order: 2000

@@ -1,10 +1,10 @@
 'use strict';
 
 const GameRoom = require('../game/GameRoom');
+const { verifyToken } = require('../config/auth');
 const { RoomInputGuard } = require('./gameInputGuard');
 const { parseAllowedOrigins, isOriginAllowed, validateClientMessage } = require('./gameSecurity');
 const { CHARACTER_ROLES, getAvailableCharacterRole } = require('../utils/roomUtils');
-const lucia    = require('../config/auth');
 const redis    = require('../config/redis');
 
 const TICK_RATE = 60;
@@ -33,12 +33,8 @@ async function validateToken(token) {
   if (token.startsWith('mock_token_') || token.startsWith('guest_') || token.startsWith('dev_') || token.startsWith('test-')) {
     return token;
   }
-  try {
-    const { session, user } = await lucia.validateSession(token);
-    return session ? user.id : null;
-  } catch {
-    return null;
-  }
+  const result = verifyToken(token);
+  return result ? result.user.id : null;
 }
 
 function send(ws, payload) {

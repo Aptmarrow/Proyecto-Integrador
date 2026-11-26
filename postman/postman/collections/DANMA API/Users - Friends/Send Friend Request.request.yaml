@@ -1,0 +1,5 @@
+$kind: http-request
+description: Envia una solicitud de amistad al usuario con el ID indicado en la URL.
+url: "{{base_url}}/api/auth/2/friend-request"
+method: POST
+order: 1000

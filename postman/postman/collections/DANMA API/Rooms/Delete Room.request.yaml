@@ -1,0 +1,8 @@
+$kind: http-request
+description: |-
+  Elimina la sala. Solo puede hacerlo el host.
+
+  Errores: 400 roomId invalido, 403 no es el host, 404 no encontrada.
+url: "{{base_url}}/api/rooms/{{room_id}}"
+method: DELETE
+order: 11000

@@ -1,0 +1,5 @@
+$kind: http-request
+description: Acepta la solicitud de amistad con el ID indicado.
+url: "{{base_url}}/api/auth/friend-requests/1/accept"
+method: POST
+order: 3000

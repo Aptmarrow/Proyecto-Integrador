@@ -18,8 +18,7 @@ db.exec(`
     password    TEXT    NOT NULL,
     is_verified INTEGER NOT NULL DEFAULT 0,
     verification_token TEXT,
-    danmas      INTEGER NOT NULL DEFAULT 0,
-    inventory_id INTEGER NOT NULL UNIQUE REFERENCES inventory(id) ON DELETE CASCADE
+    danmas      INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS user_session (
@@ -68,25 +67,22 @@ db.exec(`
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
     name         TEXT    NOT NULL,
-    rarity       INTEGER NOT NULL,
+    rarity       INTEGER NOT NULL DEFAULT 1,
     level        INTEGER NOT NULL DEFAULT 1,
     image        TEXT
   );
 
   CREATE TABLE IF NOT EXISTS chip_stats (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    chip_id INTEGER NOT NULL UNIQUE REFERENCES chip(id) ON DELETE CASCADE,
-    HP      INTEGER,
-    ATK     INTEGER,
-    DEF     INTEGER,
-    SP_CHARGE     INTEGER,
-    CRIT_CHANCE    INTEGER,
-    SP_DRAIN     INTEGER,
-    HEALING_POINTS     INTEGER,
-    BULLET_ARMOR     INTEGER,
-    ULTIMATE_DAMAGE     INTEGER,
-    ULTIMATE_HEALTH     INTEGER,
-    BUFFS     STRING
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    chip_id         INTEGER NOT NULL UNIQUE REFERENCES chip(id) ON DELETE CASCADE,
+    HP              NUMERIC,
+    Bullet_Damage   NUMERIC,
+    SP_Charge       NUMERIC,
+    Defense         NUMERIC,
+    Ultimate_Damage NUMERIC,
+    Cadency         NUMERIC,
+    Critic_Chance   NUMERIC,
+    Crit_Damage     NUMERIC
   );
 `);
 
@@ -104,6 +100,31 @@ for (const sql of migrations) {
   }
 }
 
+// Migration: remove user.inventory_id if it exists (avoids circular FK deadlock)
+{
+  const cols = db.prepare('PRAGMA table_info(user)').all();
+  if (cols.some(c => c.name === 'inventory_id')) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_migrated (
+        id          TEXT    NOT NULL PRIMARY KEY,
+        username    TEXT    NOT NULL,
+        email       TEXT    NOT NULL UNIQUE,
+        password    TEXT    NOT NULL,
+        is_verified INTEGER NOT NULL DEFAULT 0,
+        verification_token TEXT,
+        danmas      INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO user_migrated (id, username, email, password, is_verified, verification_token, danmas)
+        SELECT id, username, email, password, is_verified, verification_token, danmas
+        FROM user;
+      DROP TABLE user;
+      ALTER TABLE user_migrated RENAME TO user;
+    `);
+    db.pragma('foreign_keys = ON');
+  }
+}
+
 // Migration: move chip.owner_id (user) -> chip.inventory_id (inventory)
 {
   const cols = db.prepare('PRAGMA table_info(chip)').all();
@@ -113,7 +134,7 @@ for (const sql of migrations) {
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
         name         TEXT    NOT NULL,
-        rarity       INTEGER NOT NULL,
+        rarity       INTEGER NOT NULL DEFAULT 1,
         level        INTEGER NOT NULL DEFAULT 1,
         image        TEXT
       );
@@ -124,6 +145,45 @@ for (const sql of migrations) {
       DROP TABLE chip;
       ALTER TABLE chip_migrated RENAME TO chip;
     `);
+  }
+}
+
+// Migration: update chip_stats columns to the 8 allowed optional stats
+{
+  const cols = db.prepare('PRAGMA table_info(chip_stats)').all();
+  const hasOldCols = cols.some(c => ['ATK', 'DEF', 'SP_DRAIN', 'HEALING_POINTS', 'BULLET_ARMOR', 'ULTIMATE_HEALTH', 'BUFFS'].includes(c.name));
+  const hasNewCols = cols.some(c => c.name === 'Bullet_Damage') && cols.some(c => c.name === 'Crit_Damage');
+  if (hasOldCols || !hasNewCols) {
+    const colNames = new Set(cols.map(c => c.name.toLowerCase()));
+    const spExpr = colNames.has('sp_charge') ? 'SP_CHARGE' : 'NULL';
+    const defExpr = colNames.has('defense') ? 'Defense' : (colNames.has('def') ? 'DEF' : 'NULL');
+    const ultExpr = colNames.has('ultimate_damage') ? 'ULTIMATE_DAMAGE' : 'NULL';
+    const critChanceExpr = colNames.has('critic_chance') ? 'Critic_Chance' : (colNames.has('crit_chance') ? 'CRIT_CHANCE' : 'NULL');
+    const bulletDmgExpr = colNames.has('bullet_damage') ? 'Bullet_Damage' : 'NULL';
+    const cadencyExpr = colNames.has('cadency') ? 'Cadency' : 'NULL';
+    const critDmgExpr = colNames.has('crit_damage') ? 'Crit_Damage' : 'NULL';
+
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS chip_stats_migrated (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        chip_id         INTEGER NOT NULL UNIQUE REFERENCES chip(id) ON DELETE CASCADE,
+        HP              NUMERIC,
+        Bullet_Damage   NUMERIC,
+        SP_Charge       NUMERIC,
+        Defense         NUMERIC,
+        Ultimate_Damage NUMERIC,
+        Cadency         NUMERIC,
+        Critic_Chance   NUMERIC,
+        Crit_Damage     NUMERIC
+      );
+      INSERT INTO chip_stats_migrated (id, chip_id, HP, Bullet_Damage, SP_Charge, Defense, Ultimate_Damage, Cadency, Critic_Chance, Crit_Damage)
+        SELECT id, chip_id, HP, ${bulletDmgExpr}, ${spExpr}, ${defExpr}, ${ultExpr}, ${cadencyExpr}, ${critChanceExpr}, ${critDmgExpr}
+        FROM chip_stats;
+      DROP TABLE chip_stats;
+      ALTER TABLE chip_stats_migrated RENAME TO chip_stats;
+    `);
+    db.pragma('foreign_keys = ON');
   }
 }
 

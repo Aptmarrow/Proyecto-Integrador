@@ -1,0 +1,11 @@
+$kind: collection
+description: Coleccion completa de endpoints para el proyecto DANMA - Bullet Hell Arena.
+variables:
+  token: ""
+  userId: ""
+  room_id: ""
+  room_code: ""
+auth:
+  type: bearer
+  credentials:
+    token: "{{token}}"

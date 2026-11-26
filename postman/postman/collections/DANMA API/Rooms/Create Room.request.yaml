@@ -1,0 +1,31 @@
+$kind: http-request
+description: |-
+  Crea una sala efimera. Respuesta 201 con objeto sala. Guarda {{room_id}} y {{room_code}} automaticamente.
+
+  Campos: name (3-30), map, maxPlayers (1-4), password (opcional), isPublic, difficulty (normal|difficult|no_mercy).
+url: "{{base_url}}/api/rooms"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Sala de prueba",
+      "map": "classic",
+      "maxPlayers": 4,
+      "isPublic": true,
+      "difficulty": "normal"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      var json = pm.response.json();
+      if (json.id) {
+          pm.collectionVariables.set('room_id', json.id);
+          var code = String(json.id).replace(/-/g, '').slice(0, 6).toUpperCase();
+          pm.collectionVariables.set('room_code', code);
+          console.log('[DANMA] room_id guardado:', json.id, 'room_code:', code);
+      }
+    language: text/javascript
+order: 1000
