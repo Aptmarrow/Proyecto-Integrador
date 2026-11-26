@@ -11,6 +11,13 @@ export default defineConfig({
       includeAssets: ['vite.svg'],
       workbox: {
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+        globIgnores: ['**/assets/sprites/FirstBoss.png'],
+        runtimeCaching: [
+          {
+            urlPattern: /\/assets\/sprites\/FirstBoss\.png/,
+            handler: 'NetworkOnly',
+          },
+        ],
       },
       manifest: {
         name: 'Danmakrew',
@@ -32,6 +39,31 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('pixi.js') || id.includes('@pixi')) {
+              return 'vendor-pixi';
+            }
+            if (id.includes('react-router') || id.includes('react-dom') || id.includes('react') || id.includes('scheduler')) {
+              return 'vendor-react';
+            }
+          }
+          if (
+            id.includes('World1SpaceDirector') ||
+            id.includes('World2SpaceDirector') ||
+            id.includes('World3SpaceDirector') ||
+            id.includes('StageDirectorRenderer')
+          ) {
+            return 'game-worlds';
+          }
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 3000,

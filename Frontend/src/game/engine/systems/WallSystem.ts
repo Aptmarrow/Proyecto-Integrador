@@ -3,6 +3,7 @@ import type { WallBarrier, Bullet } from '../types';
 
 export class WallSystem {
   public walls: WallBarrier[] = [];
+  private wasEmpty: boolean = true;
 
   public spawnWall(x: number, y: number, vx: number = 45, vy: number = 0, width: number = 18, height: number = 64, hp: number = 25, ttl: number = 1.0): WallBarrier {
     const wall: WallBarrier = {
@@ -52,6 +53,14 @@ export class WallSystem {
   }
 
   public render(graphics: PIXI.Graphics, animTimer: number): void {
+    if (this.walls.length === 0) {
+      if (!this.wasEmpty) {
+        graphics.clear();
+        this.wasEmpty = true;
+      }
+      return;
+    }
+    this.wasEmpty = false;
     graphics.clear();
 
     for (const w of this.walls) {

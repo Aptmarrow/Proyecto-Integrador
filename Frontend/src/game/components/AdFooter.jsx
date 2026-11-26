@@ -1,4 +1,6 @@
-export default function AdFooter() {
+import { memo } from 'react';
+
+function AdFooter() {
   return (
     <footer className="dk-ad-space-footer">
       <div className="dk-billboard-container">
@@ -7,6 +9,7 @@ export default function AdFooter() {
             <img
               src="/assets/sprites/ad_banner.png"
               alt="Espacio Publicitario"
+              decoding="async"
               className="dk-ad-banner-img"
             />
             <div className="dk-ad-label-tag">DANMAKREW • NO MERCY GAMES</div>
@@ -16,4 +19,6 @@ export default function AdFooter() {
     </footer>
   );
 }
+
+export default memo(AdFooter);
 

@@ -1,4 +1,6 @@
-export default function GameHudHeader({
+import { memo } from 'react';
+
+function GameHudHeader({
   selectedClass,
   playerAvatarSrc,
   playerHpPercent,
@@ -8,14 +10,23 @@ export default function GameHudHeader({
   showBossHpBar,
   bossRemainingStocks,
   spellcardName,
+  bossAvatarSrc = '/assets/sprites/FirstBoss.png',
+  isMiniboss = false,
   isBossRefilling,
   bossDisplayHpPercent,
   workerModeLabel,
   difficultyLabel = 'Normal',
   world = 1,
   stage = 1,
+  stageTitle = '',
+  bossEtaSeconds = 0,
   onExitLobby,
 }) {
+  const formatEta = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = Math.max(0, Math.floor(sec % 60));
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
   return (
     <header className={`dk-top-hud-bar ${showBossHpBar ? 'mode-boss' : 'mode-squad'}`}>
       <div className={`dk-squad-container ${showBossHpBar ? 'squad-compact' : 'squad-full'}`}>
@@ -153,11 +164,23 @@ export default function GameHudHeader({
         <div className="dk-hud-status-cluster">
           <div
             className="dk-stage-hud-pill"
-            title={`Dificultad ${difficultyLabel} — Mundo ${world}, Nivel ${stage}`}
+            title={`Dificultad ${difficultyLabel} — Mundo ${world}-${stage}${stageTitle ? `: ${stageTitle}` : ''}`}
           >
             <span>{String(difficultyLabel).toUpperCase()}</span>
             <span className="dk-stage-hud-sep">·</span>
             <span>NIVEL {world}-{stage}</span>
+            {stageTitle && (
+              <>
+                <span className="dk-stage-hud-sep">·</span>
+                <span>{stageTitle.toUpperCase()}</span>
+              </>
+            )}
+            {bossEtaSeconds > 0 && (
+              <>
+                <span className="dk-stage-hud-sep">·</span>
+                <span>JEFE EN {formatEta(bossEtaSeconds)}</span>
+              </>
+            )}
           </div>
           {workerModeLabel && (
             <div className="dk-worker-status-pill" title={workerModeLabel}>
@@ -180,8 +203,8 @@ export default function GameHudHeader({
                   ))}
                 </div>
                 <div className="dk-boss-title-badge">
-                  <span className="dk-boss-name">{spellcardName || 'STAGE BOSS'}</span>
-                  <span className="dk-boss-tag">BOSS</span>
+                  <span className="dk-boss-name">{spellcardName || (isMiniboss ? 'MINIBOSS' : 'STAGE BOSS')}</span>
+                  <span className="dk-boss-tag">{isMiniboss ? 'MINIBOSS' : 'BOSS'}</span>
                 </div>
               </div>
 
@@ -191,7 +214,7 @@ export default function GameHudHeader({
                   style={{ width: `${bossDisplayHpPercent}%` }}
                 />
                 <div className="dk-capsule-bar-content">
-                  <span className="dk-bar-name">BOSS HP</span>
+                  <span className="dk-bar-name">{isMiniboss ? 'MINIBOSS HP' : 'BOSS HP'}</span>
                   <span className="dk-bar-percent">
                     {isBossRefilling ? 'CHARGING...' : `${Math.round(bossDisplayHpPercent)}%`}
                   </span>
@@ -200,7 +223,12 @@ export default function GameHudHeader({
             </div>
 
             <div className="dk-avatar-box dk-boss-avatar-box">
-              <img src="/assets/sprites/FirstBoss.png" alt="Jefe" className="dk-avatar-img dk-boss-img" />
+              <img
+                src={bossAvatarSrc || '/assets/sprites/FirstBoss.png'}
+                alt={isMiniboss ? 'Minijefe' : 'Jefe'}
+                decoding="async"
+                className="dk-avatar-img dk-boss-img"
+              />
               <span className="dk-boss-active-pulse" />
             </div>
           </div>
@@ -209,4 +237,6 @@ export default function GameHudHeader({
     </header>
   );
 }
+
+export default memo(GameHudHeader);
 

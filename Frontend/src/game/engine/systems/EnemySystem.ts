@@ -5,15 +5,57 @@ import type { LaserSystem } from './LaserSystem';
 import type { ItemType } from '../types';
 import type { ServerEnemy } from '../../network/wsClient';
 
+const ENEMY_SPRITE_URLS: Record<string, string> = {
+  first_enemy: '/assets/sprites/FirstEnemypng.png',
+  second_enemy: '/assets/sprites/SecondEnemypng.png',
+  third_enemy: '/assets/sprites/ThirdEnemypng.png',
+  fb_mini1: '/assets/sprites/FBmini1png.png',
+  fb_mini2: '/assets/sprites/FBmini2png.png',
+  gfg_enemy1: '/assets/sprites/GFGEnemy1png.png',
+  gfg_enemy2: '/assets/sprites/GFGEnemy2png.png',
+  gfg_enemy3: '/assets/sprites/GFGEnemy3png.png',
+  gfg_mini1: '/assets/sprites/GFGMini1png.png',
+  gfg_mini2: '/assets/sprites/GFGMini2png.png',
+  mo_enemy1: '/assets/sprites/MOenemy1png.png',
+  mo_enemy2: '/assets/sprites/MOenemy2png.png',
+  mo_enemy3: '/assets/sprites/MOenemy3png.png',
+  mo_mini1: '/assets/sprites/MOmini1png.png',
+  mo_mini2: '/assets/sprites/MOmini2png.png',
+};
+
+export interface KamikazeExplosionFx {
+  x: number;
+  y: number;
+  timer: number;
+  duration: number;
+  maxRadius: number;
+  armed: boolean;
+  blobs: Array<{ angle: number; distFactor: number; size: number; color: number }>;
+}
+
 export class EnemySystem {
   public enemies: Enemy[] = [];
   public container: PIXI.Container;
+  public onKamikazeExplode?: (x: number, y: number, armed: boolean) => void;
   private textures: Record<string, PIXI.Texture> = {};
+  private enemyMap = new Map<string, Enemy>();
+  private activeIds = new Set<string>();
+  private customTextures: Record<string, PIXI.Texture> = {};
+  private enemyFuseMap = new Map<string, number>();
+  private enemyAngleMap = new Map<string, number>();
+  private explosions: KamikazeExplosionFx[] = [];
+  private explosionGraphics = new PIXI.Graphics();
+  private difficultyTint: number = 0xffffff;
+  private difficultyFilter: PIXI.Filter | null = null;
 
   constructor(parentContainer?: PIXI.Container) {
     this.container = new PIXI.Container();
     if (parentContainer) {
       parentContainer.addChild(this.container);
+    }
+    this.container.addChild(this.explosionGraphics);
+    for (const [key, url] of Object.entries(ENEMY_SPRITE_URLS)) {
+      this.customTextures[key] = PIXI.Texture.from(url);
     }
   }
 
@@ -21,25 +63,67 @@ export class EnemySystem {
     this.textures = textures;
   }
 
+  public setDifficultyTint(tint: number): void {
+    if (this.difficultyTint === tint) return;
+    this.difficultyTint = tint;
+    for (const enemy of this.enemies) {
+      enemy.setDifficultyTint(tint);
+    }
+  }
+
+  public setDifficultyFilter(filter: PIXI.Filter | null): void {
+    if (this.difficultyFilter === filter) return;
+    this.difficultyFilter = filter;
+    for (const enemy of this.enemies) {
+      enemy.setDifficultyFilter(filter);
+    }
+  }
+
+  private resolveTextureForType(type: string, spriteOverride?: string): PIXI.Texture | undefined {
+    if (spriteOverride) {
+      if (!this.customTextures[spriteOverride]) {
+        this.customTextures[spriteOverride] = PIXI.Texture.from(spriteOverride);
+      }
+      return this.customTextures[spriteOverride];
+    }
+    if (this.customTextures[type]) return this.customTextures[type];
+    if (type === 'green_fairy') return this.textures.fairyGreen;
+    if (type === 'red_fairy') return this.textures.fairyRed;
+    if (type === 'big_fairy') return this.textures.fairyBig;
+    return undefined;
+  }
+
   public applyBackendEnemies(serverEnemies: ServerEnemy[], scaleX: number, scaleY: number): void {
-    const currentIds = new Set(serverEnemies.map(e => e.id));
+    this.activeIds.clear();
+    for (let i = 0; i < serverEnemies.length; i++) {
+      this.activeIds.add(serverEnemies[i].id);
+    }
+
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
-      if (!currentIds.has(e.id)) {
+      if (!this.activeIds.has(e.id)) {
+        const fuseVal = this.enemyFuseMap.get(e.id) ?? 0;
+        if (e.type === 'mo_enemy2') {
+          const armed = fuseVal > 0.03;
+          this.spawnKamikazeExplosion(e.pos.x, e.pos.y, armed);
+          this.onKamikazeExplode?.(e.pos.x, e.pos.y, armed);
+        }
+        this.enemyMap.delete(e.id);
+        this.enemyFuseMap.delete(e.id);
+        this.enemyAngleMap.delete(e.id);
         e.destroy();
-        this.enemies.splice(i, 1);
+        const last = this.enemies.pop()!;
+        if (i < this.enemies.length) this.enemies[i] = last;
       }
     }
 
-    for (const se of serverEnemies) {
-      let existing = this.enemies.find(e => e.id === se.id);
+    for (let i = 0; i < serverEnemies.length; i++) {
+      const se = serverEnemies[i];
+      let existing = this.enemyMap.get(se.id);
       const targetX = se.x * scaleX;
       const targetY = se.y * scaleY;
       if (!existing) {
-        let tex = undefined;
-        if (se.type === 'green_fairy') tex = this.textures.fairyGreen;
-        else if (se.type === 'red_fairy') tex = this.textures.fairyRed;
-        else if (se.type === 'big_fairy') tex = this.textures.fairyBig;
+        const tex = this.resolveTextureForType(se.type, se.sprite);
 
         existing = new Enemy(this.container, {
           id: se.id,
@@ -48,16 +132,119 @@ export class EnemySystem {
           startY: targetY,
           hp: se.hp,
           radius: se.radius * scaleX,
+          isMiniboss: Boolean(se.isMiniboss),
+          difficultyTint: this.difficultyTint,
+          difficultyFilter: this.difficultyFilter,
           texture: tex,
         });
         this.enemies.push(existing);
+        this.enemyMap.set(se.id, existing);
       }
-      existing.pos.x += (targetX - existing.pos.x) * 0.4;
-      existing.pos.y += (targetY - existing.pos.y) * 0.4;
+      existing.pos.x += (targetX - existing.pos.x) * 0.45;
+      existing.pos.y += (targetY - existing.pos.y) * 0.45;
       existing.hp = se.hp;
       existing.maxHp = se.maxHp;
+      if (typeof se.fuseProgress === 'number') {
+        this.enemyFuseMap.set(se.id, se.fuseProgress);
+      }
+      if (typeof se.angle === 'number') {
+        this.enemyAngleMap.set(se.id, se.angle);
+      }
       existing.container.position.set(existing.pos.x, existing.pos.y);
     }
+  }
+
+  public spawnKamikazeExplosion(x: number, y: number, armed: boolean = true): void {
+    const palette = [0xffffff, 0xfef08a, 0xf97316, 0xff2b5b, 0xdc2626];
+    const blobs = [];
+    const count = armed ? 12 : 8;
+    for (let i = 0; i < count; i++) {
+      blobs.push({
+        angle: (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.35,
+        distFactor: 0.45 + Math.random() * 0.55,
+        size: (armed ? 14 : 9) + Math.random() * (armed ? 14 : 9),
+        color: palette[i % palette.length],
+      });
+    }
+    this.explosions.push({
+      x,
+      y,
+      timer: 0,
+      duration: armed ? 0.58 : 0.4,
+      maxRadius: armed ? 84 : 52,
+      armed,
+      blobs,
+    });
+    // Keep explosion overlay above active enemy sprites
+    this.container.addChild(this.explosionGraphics);
+  }
+
+  private updateExplosions(dt: number): void {
+    const g = this.explosionGraphics;
+    g.clear();
+    for (let i = this.explosions.length - 1; i >= 0; i--) {
+      const ex = this.explosions[i];
+      ex.timer += dt;
+      const p = Math.min(1, ex.timer / ex.duration);
+      if (p >= 1) {
+        this.explosions.splice(i, 1);
+        continue;
+      }
+
+      const easeOut = 1 - Math.pow(1 - p, 3);
+      const fade = Math.max(0, 1 - p);
+
+      // 1. Bright core flash during initial detonation
+      if (p < 0.36) {
+        const flashRatio = 1 - p / 0.36;
+        g.beginFill(0xffffff, 0.9 * flashRatio);
+        g.drawCircle(ex.x, ex.y, ex.maxRadius * (0.18 + (p / 0.36) * 0.48));
+        g.endFill();
+      }
+
+      // 2. Outer crimson shockwave + inner plasma ring
+      const outerR = ex.maxRadius * (0.24 + easeOut * 0.92);
+      g.lineStyle(Math.max(1.2, 5.5 * fade), ex.armed ? 0xff2b5b : 0xf97316, 0.88 * fade);
+      g.drawCircle(ex.x, ex.y, outerR);
+
+      const innerR = ex.maxRadius * (0.14 + easeOut * 0.65);
+      g.lineStyle(Math.max(1, 3.2 * fade), 0xfef08a, 0.85 * fade);
+      g.drawCircle(ex.x, ex.y, innerR);
+      g.lineStyle(0);
+
+      // 3. Sharp radial blast rays
+      if (p < 0.68) {
+        const rayAlpha = (1 - p / 0.68) * 0.9;
+        g.lineStyle(2.2, 0xfef08a, rayAlpha);
+        for (let rIdx = 0; rIdx < 10; rIdx++) {
+          const ra = (Math.PI * 2 * rIdx) / 10 + (ex.armed ? 0.12 : 0);
+          const rStart = outerR * 0.35;
+          const rEnd = outerR * 1.08;
+          g.moveTo(ex.x + Math.cos(ra) * rStart, ex.y + Math.sin(ra) * rStart);
+          g.lineTo(ex.x + Math.cos(ra) * rEnd, ex.y + Math.sin(ra) * rEnd);
+        }
+        g.lineStyle(0);
+      }
+
+      // 4. Radial fireball & smoke plumes
+      for (const blob of ex.blobs) {
+        const dist = ex.maxRadius * blob.distFactor * easeOut;
+        const bx = ex.x + Math.cos(blob.angle) * dist;
+        const by = ex.y + Math.sin(blob.angle) * dist;
+        const blobScale = p < 0.35 ? 0.6 + (p / 0.35) * 0.5 : Math.max(0.1, 1.1 - ((p - 0.35) / 0.65));
+        const col = p > 0.62 ? 0x451a03 : blob.color;
+        g.beginFill(col, 0.72 * fade);
+        g.drawCircle(bx, by, blob.size * blobScale);
+        g.endFill();
+      }
+    }
+  }
+
+  public syncRemoteVisuals(animTimer: number, playerPos?: { x: number; y: number }, dt: number = 1 / 60): void {
+    for (const enemy of this.enemies) {
+      enemy.syncRemoteVisuals(animTimer, this.enemyFuseMap.get(enemy.id), this.enemyAngleMap.get(enemy.id), playerPos);
+    }
+    this.updateExplosions(dt);
   }
 
   public spawnEnemy(config: EnemyConfig): Enemy {
@@ -70,6 +257,8 @@ export class EnemySystem {
 
     const enemy = new Enemy(this.container, {
       ...config,
+      difficultyTint: config.difficultyTint ?? this.difficultyTint,
+      difficultyFilter: config.difficultyFilter !== undefined ? config.difficultyFilter : this.difficultyFilter,
       texture: tex,
     });
     this.enemies.push(enemy);
@@ -248,6 +437,11 @@ export class EnemySystem {
       enemy.destroy();
     }
     this.enemies = [];
+    this.enemyMap.clear();
+    this.enemyFuseMap.clear();
+    this.enemyAngleMap.clear();
+    this.explosions = [];
+    this.explosionGraphics.clear();
   }
 
   public update(

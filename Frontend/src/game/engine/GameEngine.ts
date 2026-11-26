@@ -6,8 +6,11 @@ import { Boss } from './entities/Boss';
 import { EnemySystem } from './systems/EnemySystem';
 import { ItemSystem } from './systems/ItemSystem';
 import { BeamStruggleSystem } from './systems/BeamStruggleSystem';
-import { loadStage1Sprites } from './SpriteFactory';
+import { getCachedLutProfile } from './SpriteLutCache';
+import { getSpaceStageConfig } from '../campaign/spaceCampaignCatalog';
+import type { StageDirectorPreviewVariant } from './systems/StageDirectorRenderer';
 import { NetworkSyncController } from './controllers/NetworkSyncController';
+import { DifficultyGlintFilter, ENABLE_DIFFICULTY_GLINT } from './filters/DifficultyGlintFilter';
 
 export class GameEngine extends BaseStageEngine {
   public player: Player;
@@ -24,6 +27,39 @@ export class GameEngine extends BaseStageEngine {
   public spellcardBanner: { active: boolean; name: string; timer: number } = { active: false, name: '', timer: 0 };
   private _showBossHpBar: boolean = false;
   private lastBannerText: string = '';
+  private lastSyncedSpellcard: string = '';
+  private lastStageKey: string = '';
+  private hasSyncedStageTime: boolean = false;
+  public stageTransitionBlackAlpha: number = 0;
+  public stageRevealFlashAlpha: number = 0;
+  private revealCurtainTimer: number = 0;
+  private revealFlashTimer: number = 0;
+  private lastMoIntroLocked: boolean = false;
+  private difficultyGlintFilter: DifficultyGlintFilter | null = null;
+  private hadSpellcardOverlay: boolean = false;
+  private readonly reusableStruggleState = {
+    active: false,
+    isAligning: false,
+    balance: 50,
+    clashX: 400,
+    clashY: 300,
+    playerTipX: undefined as number | undefined,
+    bossTipX: undefined as number | undefined,
+    vortexX: undefined as number | undefined,
+    vortexY: undefined as number | undefined,
+    winner: null as 'player' | 'boss' | null,
+    resolutionTimer: 0,
+  };
+  private readonly laserCallbacks = {
+    onPlayerHit: () => {},
+    onBossHit: () => {},
+    onShake: (mag: number) => {
+      this.shakeTimer = mag;
+    },
+    onSound: (path: string, vol: number) => {
+      this.playSound(path, vol);
+    },
+  };
 
   public get showBossHpBar(): boolean {
     return this._showBossHpBar || (!!this.boss && this.boss.isActive && !this.boss.isDefeated);
@@ -32,27 +68,45 @@ export class GameEngine extends BaseStageEngine {
     this._showBossHpBar = val;
   }
 
-  constructor(canvas: HTMLCanvasElement, width: number = 1024, height: number = 576, options?: { difficulty?: string }) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    width: number = 1024,
+    height: number = 576,
+    options?: { difficulty?: string; world?: number; stage?: number }
+  ) {
     super(canvas, width, height);
 
     this.player = new Player(this.playerContainer, 'DPS');
     this.boss = new Boss(this.enemyContainer, '/assets/sprites/FirstBoss.png', 100);
     this.enemySystem = new EnemySystem(this.enemyContainer);
+    this.enemySystem.onKamikazeExplode = (x, y, armed) => {
+      this.particleSystem.spawnBurst(
+        x,
+        y,
+        armed ? 22 : 12,
+        armed ? 260 : 170,
+        [0xffffff, 0xfef08a, 0xf97316, 0xff2b5b],
+        true
+      );
+      this.shakeTimer = Math.max(this.shakeTimer, armed ? 0.3 : 0.14);
+    };
     this.itemSystem = new ItemSystem(this.playfieldContainer);
+    this.applyDifficultyVisuals(options?.difficulty);
 
-    // Cargar sprites de hadas y efectos de forma asíncrona
-    loadStage1Sprites().then((sprites) => {
-      if (sprites && sprites.isReady) {
-        this.backgroundRenderer.setTexture(sprites.bgTexture);
-        this.enemySystem.setTextures({
-          fairyGreen: sprites.fairyGreen,
-          fairyRed: sprites.fairyRed,
-          fairyBig: sprites.fairyBig,
-        });
-      }
-    }).catch(() => {
-      // Fallback a gráficos procedimentales vectoriales
-    });
+    const activeLut = getCachedLutProfile();
+    const hasCustomPass = Boolean(
+      activeLut?.id &&
+        options?.difficulty === activeLut.id &&
+        (activeLut?.stagePass?.spriteDirector ||
+          activeLut?.stagePass?.fragmentSrc ||
+          activeLut?.stagePass?.variants?.length)
+    );
+    if (hasCustomPass) {
+      this.backgroundRenderer.setLutStagePass(activeLut.stagePass);
+    } else {
+      const initialCfg = getSpaceStageConfig(options?.difficulty || 'normal', options?.world || 1, options?.stage || 1);
+      this.backgroundRenderer.setSpaceTheme(initialCfg.spaceTheme);
+    }
 
     // Configurar callbacks del Jefe
     this.boss.onPhaseChange = (phase: BossPhase, spellName: string, isSpellCard: boolean) => {
@@ -94,8 +148,23 @@ export class GameEngine extends BaseStageEngine {
     return this.networkSync.campaignState?.stage || 1;
   }
 
+  public get currentStageTitle(): string {
+    return this.networkSync.campaignState?.stageTitle || '';
+  }
+
+  public get bossEtaSeconds(): number {
+    if (this.showBossHpBar || this.isStageClear) return 0;
+    const spawnAt = this.networkSync.campaignState?.bossSpawnAt;
+    if (typeof spawnAt !== 'number' || spawnAt <= 0) return 0;
+    return Math.max(0, spawnAt - this.stageTime);
+  }
+
   public get canAdvanceStage(): boolean {
     return this.isStageClear && !(this.networkSync.campaignState?.campaignComplete);
+  }
+
+  public get isAutoAdvancingStage(): boolean {
+    return Boolean(this.networkSync.campaignState?.autoAdvancing);
   }
 
   public get isCampaignComplete(): boolean {
@@ -124,6 +193,22 @@ export class GameEngine extends BaseStageEngine {
 
   public get isSpellCard(): boolean {
     return this.boss.isSpellCard;
+  }
+
+  public get bossAvatarSrc(): string {
+    return this.boss.currentSpriteUrl || '/assets/sprites/FirstBoss.png';
+  }
+
+  public get isMinibossEncounter(): boolean {
+    return Boolean(this.boss.isMinibossHud);
+  }
+
+  public get moIntroActive(): boolean {
+    return Boolean(this.boss.moIntroActive);
+  }
+
+  public get moIntroProgress(): number {
+    return this.boss.moIntroProgress || 0;
   }
 
   public get playerPos() {
@@ -339,6 +424,27 @@ export class GameEngine extends BaseStageEngine {
     return { x: this.player.pos.x + 800, y: this.player.pos.y };
   }
 
+  public setSyncedStageTime(value: number): void {
+    this.stageTime = value;
+    this.hasSyncedStageTime = true;
+  }
+
+  public hasStagePreviewVariants(): boolean {
+    return this.backgroundRenderer.hasStagePreviewVariants();
+  }
+
+  public getStagePreviewVariants(): StageDirectorPreviewVariant[] {
+    return this.backgroundRenderer.getStagePreviewVariants();
+  }
+
+  public getActiveStagePreviewVariantIndex(): number {
+    return this.backgroundRenderer.getActiveStagePreviewVariantIndex();
+  }
+
+  public selectStagePreviewVariant(index: number): boolean {
+    return this.backgroundRenderer.selectStagePreviewVariant(index);
+  }
+
   public restartStage(): void {
     this.score = 0;
     this.isStageClear = false;
@@ -349,6 +455,7 @@ export class GameEngine extends BaseStageEngine {
     this.stageBanner = null;
     this.lastBannerText = '';
     this.stageTime = 0;
+    this.hasSyncedStageTime = false;
     this.boss.reset();
     this.enemySystem.clear();
     this.itemSystem.clear();
@@ -373,21 +480,35 @@ export class GameEngine extends BaseStageEngine {
   // ── Sincronización de Red ───────────────────────────────────────────────────
 
   public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string): void {
-    super.applyBackendSnapshot(players, myPlayerId, (x, y) => {
+    super.applyBackendSnapshot(players, myPlayerId, (x, y, characterRole) => {
       this.player.targetPos.x = x;
       this.player.targetPos.y = y;
+      if (characterRole && this.player.characterClassId !== characterRole) {
+        this.player.setCharacterClass(characterRole as CharacterClass);
+      }
     });
     this.networkSync.applySnapshot(players, myPlayerId, this.player);
   }
 
   public applyBackendBoss(boss: ServerBoss): void {
     this.networkSync.applyBossSnapshot(boss, this.boss, this.SCALE_X, this.SCALE_Y);
-    if (boss.isActive && !boss.isDefeated) {
+    const hudBossActive = Boolean(boss.isActive || boss.renderHudOnly);
+    if (hudBossActive && !boss.isDefeated) {
       this.showBossHpBar = true;
       this.isStageClear = false;
-    } else if (!boss.isActive && !boss.isDefeated) {
+      const nextSpell = boss.spellcardName || boss.spellcard || '';
+      if (nextSpell && nextSpell !== this.lastSyncedSpellcard) {
+        this.lastSyncedSpellcard = nextSpell;
+        if (boss.isSpellCard) {
+          this.spellcardBanner = { active: true, name: nextSpell, timer: 3.6 };
+          this.playSound('/assets/sounds/gasterintro.wav', 0.65);
+          this.shakeTimer = Math.max(this.shakeTimer, 0.35);
+        }
+      }
+    } else if (!hudBossActive && !boss.isDefeated) {
       this.showBossHpBar = false;
       this.boss.isActive = false;
+      this.lastSyncedSpellcard = '';
     }
     if (boss.isDefeated) {
       this.stageState = 'stage_clear';
@@ -410,9 +531,58 @@ export class GameEngine extends BaseStageEngine {
     this.itemSystem.applyBackendItems(items, this.SCALE_X, this.SCALE_Y);
   }
 
+  private applyDifficultyVisuals(difficulty?: string): void {
+    const norm = difficulty === 'no_mercy' ? 'no_mercy' : difficulty === 'difficult' ? 'difficult' : 'normal';
+    const bulletTint = norm === 'difficult' ? 0xffb4b4 : norm === 'no_mercy' ? 0xddbfff : 0xffffff;
+
+    // Keep base sprites untouched (0xffffff) and layer a Minecraft-style animated glint filter on top
+    if (ENABLE_DIFFICULTY_GLINT && (norm === 'difficult' || norm === 'no_mercy')) {
+      if (!this.difficultyGlintFilter) {
+        this.difficultyGlintFilter = new DifficultyGlintFilter(norm);
+      } else {
+        this.difficultyGlintFilter.setMode(norm);
+      }
+      this.enemySystem.setDifficultyTint(0xffffff);
+      this.boss.setDifficultyTint(0xffffff);
+      this.enemySystem.setDifficultyFilter(this.difficultyGlintFilter);
+      this.boss.setDifficultyFilter(this.difficultyGlintFilter);
+    } else {
+      this.enemySystem.setDifficultyTint(0xffffff);
+      this.boss.setDifficultyTint(0xffffff);
+      this.enemySystem.setDifficultyFilter(null);
+      this.boss.setDifficultyFilter(null);
+    }
+    this.bulletSystem.setDifficultyBulletTint(bulletTint, norm);
+  }
+
   public applyBackendCampaign(campaign?: ServerCampaign): void {
     if (!campaign) return;
     this.networkSync.applyCampaignSnapshot(campaign);
+
+    const nextStageKey = `${campaign.difficulty}:${campaign.world}-${campaign.stage}`;
+    if (this.lastStageKey && this.lastStageKey !== nextStageKey) {
+      // Seamless arrival in new level: brief black lift + crisp luminous reveal flash!
+      this.revealCurtainTimer = 0.36;
+      this.revealFlashTimer = 0.85;
+      this.stageTransitionBlackAlpha = 1.0;
+      this.stageRevealFlashAlpha = 1.0;
+      this.lastSyncedSpellcard = '';
+      this.bossWarningActive = false;
+      this.showBossHpBar = false;
+      this.boss.reset();
+      this.playSound('/assets/sounds/gasterintro.wav', 0.45);
+    }
+    this.lastStageKey = nextStageKey;
+
+    if (campaign.autoAdvancing && typeof campaign.transitionBlackAlpha === 'number') {
+      this.stageTransitionBlackAlpha = Math.max(this.stageTransitionBlackAlpha, campaign.transitionBlackAlpha);
+    }
+
+    const theme =
+      campaign.spaceTheme ||
+      getSpaceStageConfig(campaign.difficulty, campaign.world, campaign.stage).spaceTheme;
+    this.backgroundRenderer.setSpaceTheme(theme);
+    this.applyDifficultyVisuals(campaign.difficulty);
 
     if (campaign.stageState) {
       this.stageState = campaign.stageState as StageState;
@@ -442,14 +612,27 @@ export class GameEngine extends BaseStageEngine {
 
   public update(dt: number, keys: Record<string, boolean>, moveVec?: { dx: number; dy: number }): void {
     this.animTimer += dt;
+    this.difficultyGlintFilter?.advance(dt);
 
     // Detectar si el Master Spark está en fase de carga o de disparo
     const masterSpark = this.laserSystem.lasers.find(l => l.ownerId === 'player');
     const isMasterSparkCharging = masterSpark && masterSpark.state === 'charging';
     this.isLaserFiring = !!(masterSpark && masterSpark.state === 'firing');
 
+    if (!this.hasSyncedStageTime && !isMasterSparkCharging) {
+      this.stageTime += dt;
+    }
+
     // 1. Renderizar Fondo Procedural
-    this.backgroundRenderer.update(isMasterSparkCharging ? 0 : dt);
+    const bossHpRatio = this.boss.maxHp > 0 ? this.boss.hp / this.boss.maxHp : 1;
+    this.backgroundRenderer.updateWithContext(isMasterSparkCharging ? 0 : dt, {
+      stageTime: this.stageTime,
+      playerX: this.player.pos.x,
+      playerY: this.player.pos.y,
+      bossActive: this.boss.isActive && !this.boss.isDefeated,
+      bossPhase: this.boss.phase,
+      bossHpRatio,
+    });
 
     // 2. Movimiento y Animación del Jugador (Interpolación visual de targetPos)
     const isMovementLocked = this.isStruggleActive;
@@ -461,11 +644,10 @@ export class GameEngine extends BaseStageEngine {
       true
     );
 
-    // 3. Efecto de Micro-Pausa & Spotlight al Acumular Poder
-    this.spellcardOverlayGraphics.clear();
+    // 3. Efecto de Micro-Pausa & Spotlight al Acumular Poder (solo limpia/redibuja si está activo)
     if (isMasterSparkCharging) {
-      const progress = masterSpark.timer / masterSpark.chargeDuration;
-
+      this.hadSpellcardOverlay = true;
+      this.spellcardOverlayGraphics.clear();
       this.spellcardOverlayGraphics.beginFill(0x020108, 0.65);
       this.spellcardOverlayGraphics.drawRect(0, 0, 1024, 576);
       this.spellcardOverlayGraphics.endFill();
@@ -493,9 +675,29 @@ export class GameEngine extends BaseStageEngine {
         this.spellcardOverlayGraphics.lineTo(x2, y2);
       }
       this.spellcardOverlayGraphics.lineStyle(0);
+    } else if (this.hadSpellcardOverlay) {
+      this.spellcardOverlayGraphics.clear();
+      this.hadSpellcardOverlay = false;
     }
 
-    // 4. Actualizar Banners de Texto
+    // 4. Actualizar Banners de Texto y Transición Automática (Negro -> Mini Destello)
+    if (this.revealCurtainTimer > 0) {
+      this.revealCurtainTimer = Math.max(0, this.revealCurtainTimer - dt);
+      this.stageTransitionBlackAlpha = this.revealCurtainTimer / 0.36;
+    } else if (!this.isAutoAdvancingStage) {
+      this.stageTransitionBlackAlpha = Math.max(0, this.stageTransitionBlackAlpha - dt * 3.5);
+    }
+
+    if (this.revealFlashTimer > 0) {
+      this.revealFlashTimer = Math.max(0, this.revealFlashTimer - dt);
+      // Slight delay while black lifts, then crisp luminous flash fading cleanly
+      const progress = 1 - this.revealFlashTimer / 0.85;
+      const peak = progress < 0.22 ? progress / 0.22 : Math.pow(1 - (progress - 0.22) / 0.78, 1.85);
+      this.stageRevealFlashAlpha = Math.max(0, Math.min(1, peak * 0.92));
+    } else {
+      this.stageRevealFlashAlpha = 0;
+    }
+
     if (this.stageBanner) {
       this.stageBanner.timer -= dt;
       if (this.stageBanner.timer <= 0) this.stageBanner = null;
@@ -506,25 +708,43 @@ export class GameEngine extends BaseStageEngine {
       if (this.spellcardBanner.timer <= 0) this.spellcardBanner.active = false;
     }
 
-    // 5. Boss & Item visual sync (render magic circles, refilling aura, dropped items)
-    this.boss.syncVisuals(dt, this.animTimer);
+    // 5. Boss, Enemy & Item visual sync
+    if (this.boss.moIntroActive) {
+      const isLocked = this.boss.moIntroProgress >= 0.7;
+      if (isLocked && !this.lastMoIntroLocked) {
+        this.lastMoIntroLocked = true;
+        this.shakeTimer = Math.max(this.shakeTimer, 0.36);
+        this.particleSystem.spawnBurst(
+          this.boss.pos.x,
+          this.boss.pos.y,
+          28,
+          290,
+          [0xffffff, 0xfef08a, 0xfacc15, 0xff2b5b],
+          true
+        );
+        this.playSound('/assets/sounds/gasterintro.wav', 0.65);
+      }
+    } else {
+      this.lastMoIntroLocked = false;
+    }
+    this.boss.syncVisuals(dt, this.animTimer, this.SCALE_X, this.SCALE_Y);
+    this.enemySystem.syncRemoteVisuals(this.animTimer, this.player.pos, dt);
     this.itemSystem.render(this.animTimer);
 
-    // 6. Actualizar Láseres y Renderizado de Choque
+    // 6. Actualizar Láseres y Renderizado de Choque (reutilizando objetos sin asignaciones por frame)
     const authoritativeStruggleState = this.networkSync.getStruggleState();
-    const renderStruggleState = {
-      active: !!authoritativeStruggleState?.active,
-      isAligning: !!authoritativeStruggleState?.isAligning,
-      balance: authoritativeStruggleState?.balance ?? 50,
-      clashX: (authoritativeStruggleState?.clashX ?? 400) * this.SCALE_X,
-      clashY: (authoritativeStruggleState?.clashY ?? 300) * this.SCALE_Y,
-      playerTipX: authoritativeStruggleState?.playerTipX !== undefined ? authoritativeStruggleState.playerTipX * this.SCALE_X : undefined,
-      bossTipX: authoritativeStruggleState?.bossTipX !== undefined ? authoritativeStruggleState.bossTipX * this.SCALE_X : undefined,
-      vortexX: authoritativeStruggleState?.vortexX !== undefined ? authoritativeStruggleState.vortexX * this.SCALE_X : undefined,
-      vortexY: authoritativeStruggleState?.vortexY !== undefined ? authoritativeStruggleState.vortexY * this.SCALE_Y : undefined,
-      winner: authoritativeStruggleState?.winner ?? null,
-      resolutionTimer: authoritativeStruggleState?.resolutionTimer ?? 0,
-    };
+    const rs = this.reusableStruggleState;
+    rs.active = !!authoritativeStruggleState?.active;
+    rs.isAligning = !!authoritativeStruggleState?.isAligning;
+    rs.balance = authoritativeStruggleState?.balance ?? 50;
+    rs.clashX = (authoritativeStruggleState?.clashX ?? 400) * this.SCALE_X;
+    rs.clashY = (authoritativeStruggleState?.clashY ?? 300) * this.SCALE_Y;
+    rs.playerTipX = authoritativeStruggleState?.playerTipX !== undefined ? authoritativeStruggleState.playerTipX * this.SCALE_X : undefined;
+    rs.bossTipX = authoritativeStruggleState?.bossTipX !== undefined ? authoritativeStruggleState.bossTipX * this.SCALE_X : undefined;
+    rs.vortexX = authoritativeStruggleState?.vortexX !== undefined ? authoritativeStruggleState.vortexX * this.SCALE_X : undefined;
+    rs.vortexY = authoritativeStruggleState?.vortexY !== undefined ? authoritativeStruggleState.vortexY * this.SCALE_Y : undefined;
+    rs.winner = authoritativeStruggleState?.winner ?? null;
+    rs.resolutionTimer = authoritativeStruggleState?.resolutionTimer ?? 0;
 
     this.laserSystem.update(
       dt,
@@ -535,17 +755,8 @@ export class GameEngine extends BaseStageEngine {
       this.player.pos,
       this.boss,
       this.particleSystem,
-      {
-        onPlayerHit: () => {},
-        onBossHit: () => {},
-        onShake: (mag) => {
-          this.shakeTimer = mag;
-        },
-        onSound: (path, vol) => {
-          this.playSound(path, vol);
-        },
-      },
-      renderStruggleState
+      this.laserCallbacks,
+      rs
     );
 
     // 7. Renderizar Partículas FX
@@ -555,10 +766,15 @@ export class GameEngine extends BaseStageEngine {
     this.wallSystem.render(this.wallGraphics, this.animTimer);
 
     // 9. Renderizar Balas
-    this.bulletSystem.render(this.bulletGraphics);
+    this.bulletSystem.render(this.bulletGraphics, this.animTimer);
 
     // 10. Aplicar Temblor de Pantalla
     this.applyScreenShake(dt, 8);
+  }
+
+  public override destroy(): void {
+    this.itemSystem.destroy();
+    super.destroy();
   }
 }
 

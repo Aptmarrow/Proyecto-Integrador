@@ -4,9 +4,9 @@ import type { BulletSystem } from '../systems/BulletSystem';
 
 export interface EnemyConfig {
   id?: string;
-  type?: EnemyType;
-  trajectory?: TrajectoryType;
-  attackPattern?: AttackPatternType;
+  type?: EnemyType | string;
+  trajectory?: TrajectoryType | string;
+  attackPattern?: AttackPatternType | string;
   startX: number;
   startY: number;
   hp?: number;
@@ -17,6 +17,9 @@ export interface EnemyConfig {
   shootInterval?: number;
   shootDelay?: number;
   texture?: PIXI.Texture;
+  isMiniboss?: boolean;
+  difficultyTint?: number;
+  difficultyFilter?: PIXI.Filter | null;
   customParams?: Record<string, any>;
 }
 
@@ -26,9 +29,9 @@ export class Enemy {
   public initialPos: { x: number; y: number };
   public hp: number;
   public maxHp: number;
-  public type: EnemyType;
-  public trajectory: TrajectoryType;
-  public attackPattern: AttackPatternType;
+  public type: EnemyType | string;
+  public trajectory: TrajectoryType | string;
+  public attackPattern: AttackPatternType | string;
   public speed: number;
   public radius: number;
   public scoreValue: number;
@@ -39,6 +42,11 @@ export class Enemy {
   public isDead: boolean = false;
   public isOffscreen: boolean = false;
   public flashTimer: number = 0;
+  public isMiniboss: boolean = false;
+  public fuseProgress: number = 0;
+  public facingAngle: number = Math.PI;
+  public difficultyTint: number = 0xffffff;
+  private difficultyFilter: PIXI.Filter | null = null;
   public customParams: Record<string, any>;
 
   public container = new PIXI.Container();
@@ -53,6 +61,7 @@ export class Enemy {
     this.attackPattern = config.attackPattern || 'aimed_single';
     this.pos = { x: config.startX, y: config.startY };
     this.initialPos = { x: config.startX, y: config.startY };
+    this.isMiniboss = Boolean(config.isMiniboss);
     this.speed = config.speed ?? (this.type === 'big_fairy' ? 90 : 160);
     this.hp = config.hp ?? (this.type === 'big_fairy' ? 80 : (this.type === 'red_fairy' ? 25 : 12));
     this.maxHp = this.hp;
@@ -61,6 +70,8 @@ export class Enemy {
     this.itemDrop = config.itemDrop ?? (this.type === 'big_fairy' ? 'bomb_frag' : (this.type === 'red_fairy' ? 'power' : 'point'));
     this.shootInterval = config.shootInterval ?? (this.type === 'big_fairy' ? 0.35 : 1.2);
     this.shootTimer = -(config.shootDelay ?? 0.4);
+    this.difficultyTint = config.difficultyTint ?? 0xffffff;
+    this.difficultyFilter = config.difficultyFilter ?? null;
     this.customParams = config.customParams || {};
 
     parentContainer.addChild(this.container);
@@ -68,17 +79,87 @@ export class Enemy {
     if (config.texture) {
       const sprite = new PIXI.Sprite(config.texture);
       sprite.anchor.set(0.5);
-      this.baseScale = this.type === 'big_fairy' ? 1.0 : 0.8;
+      this.baseScale = this.isMiniboss ? 0.84 : (this.type === 'third_enemy' ? 0.54 : (this.type === 'big_fairy' ? 0.9 : 0.44));
       sprite.scale.set(this.baseScale);
+      sprite.tint = this.difficultyTint;
+      sprite.filters = this.difficultyFilter ? [this.difficultyFilter] : null;
       this.sprite = sprite;
+      if (this.isMiniboss) {
+        const ring = this.wingGlow;
+        ring.lineStyle(2.5, 0x00f2fe, 0.55);
+        ring.drawCircle(0, 0, 56);
+        this.container.addChild(ring);
+      }
       this.container.addChild(sprite);
     } else {
       this.sprite = this.createProceduralGraphics();
+      this.initStaticWings();
       this.container.addChild(this.wingGlow);
       this.container.addChild(this.sprite);
     }
 
     this.container.position.set(this.pos.x, this.pos.y);
+  }
+
+  private applySpriteOrientation(sprite: PIXI.Sprite, sx: number, sy: number, worldAngle: number): void {
+    // Textures face LEFT by default (angle = PI). When aiming right, flip horizontally to avoid rendering upside-down.
+    if (Math.cos(worldAngle) > 0) {
+      sprite.scale.set(-sx, sy);
+      sprite.rotation = worldAngle;
+    } else {
+      sprite.scale.set(sx, sy);
+      sprite.rotation = Math.atan2(Math.sin(worldAngle - Math.PI), Math.cos(worldAngle - Math.PI));
+    }
+  }
+
+  public setDifficultyTint(tint: number): void {
+    this.difficultyTint = tint;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.tint = tint;
+    }
+  }
+
+  public setDifficultyFilter(filter: PIXI.Filter | null): void {
+    this.difficultyFilter = filter;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.filters = filter ? [filter] : null;
+    }
+  }
+
+  public syncRemoteVisuals(
+    animTimer: number,
+    fuseProgress?: number,
+    angle?: number,
+    playerPos?: { x: number; y: number }
+  ): void {
+    if (typeof fuseProgress === 'number') {
+      this.fuseProgress = fuseProgress;
+    }
+
+    const desiredAngle =
+      typeof angle === 'number'
+        ? angle
+        : playerPos
+          ? Math.atan2(playerPos.y - this.pos.y, playerPos.x - this.pos.x)
+          : this.facingAngle;
+    const diff = Math.atan2(Math.sin(desiredAngle - this.facingAngle), Math.cos(desiredAngle - this.facingAngle));
+    this.facingAngle += diff * 0.4;
+
+    if (this.sprite instanceof PIXI.Sprite) {
+      const pulseSpeed = this.type === 'mo_enemy2' ? 8 + this.fuseProgress * 28 : 7;
+      const pulseAmp = this.type === 'mo_enemy2' ? 0.04 + this.fuseProgress * 0.14 : 0.025;
+      const breath = Math.sin(animTimer * pulseSpeed) * pulseAmp;
+      this.applySpriteOrientation(this.sprite, this.baseScale + breath, this.baseScale - breath * 0.6, this.facingAngle);
+      if (this.type === 'mo_enemy2' && this.fuseProgress > 0.03) {
+        const warnFlash = Math.sin(animTimer * (12 + this.fuseProgress * 30)) > 0;
+        this.sprite.tint = warnFlash ? 0xff4444 : this.difficultyTint;
+      } else {
+        this.sprite.tint = this.difficultyTint;
+      }
+    }
+    if (this.isMiniboss) {
+      this.wingGlow.rotation = animTimer * 1.4;
+    }
   }
 
   private createProceduralGraphics(): PIXI.Graphics {
@@ -108,25 +189,25 @@ export class Enemy {
     return g;
   }
 
-  private renderWings(animTimer: number): void {
-    if (this.sprite instanceof PIXI.Sprite) return;
-
+  private initStaticWings(): void {
     this.wingGlow.clear();
-    const flap = Math.sin(animTimer * 18);
     const isBig = this.type === 'big_fairy';
     const isPurple = this.type === 'purple_fairy';
     const wingColor = this.type === 'red_fairy' ? 0xff5588 : (isBig ? 0xffea00 : (isPurple ? 0xcc66ff : 0x55ffaa));
 
-    this.wingGlow.beginFill(wingColor, 0.5 + flap * 0.2);
-    // Ala superior izquierda
-    this.wingGlow.drawEllipse(-12, -10, (isBig ? 18 : 12) + flap * 3, isBig ? 10 : 6);
-    // Ala superior derecha
-    this.wingGlow.drawEllipse(12, -10, (isBig ? 18 : 12) + flap * 3, isBig ? 10 : 6);
-    // Ala inferior izquierda
-    this.wingGlow.drawEllipse(-10, 8, (isBig ? 12 : 8), isBig ? 7 : 4);
-    // Ala inferior derecha
-    this.wingGlow.drawEllipse(10, 8, (isBig ? 12 : 8), isBig ? 7 : 4);
+    this.wingGlow.beginFill(wingColor, 0.72);
+    this.wingGlow.drawEllipse(-12, -10, isBig ? 18 : 12, isBig ? 10 : 6);
+    this.wingGlow.drawEllipse(12, -10, isBig ? 18 : 12, isBig ? 10 : 6);
+    this.wingGlow.drawEllipse(-10, 8, isBig ? 12 : 8, isBig ? 7 : 4);
+    this.wingGlow.drawEllipse(10, 8, isBig ? 12 : 8, isBig ? 7 : 4);
     this.wingGlow.endFill();
+  }
+
+  private renderWings(animTimer: number): void {
+    if (this.sprite instanceof PIXI.Sprite) return;
+    const flap = Math.sin(animTimer * 18);
+    this.wingGlow.scale.set(1.0 + flap * 0.16, 1.0 - flap * 0.06);
+    this.wingGlow.alpha = 0.68 + flap * 0.25;
   }
 
   public update(
@@ -164,9 +245,12 @@ export class Enemy {
     this.renderWings(animTimer);
 
     if (this.sprite instanceof PIXI.Sprite) {
+      const desired = Math.atan2(playerPos.y - this.pos.y, playerPos.x - this.pos.x);
+      const diff = Math.atan2(Math.sin(desired - this.facingAngle), Math.cos(desired - this.facingAngle));
+      this.facingAngle += diff * Math.min(1, dt * 12);
       const breath = Math.sin(animTimer * 12) * 0.05;
-      this.sprite.scale.set(this.baseScale + breath, this.baseScale - breath);
-      this.sprite.tint = this.flashTimer > 0 ? 0xffffff : 0xffffff;
+      this.applySpriteOrientation(this.sprite, this.baseScale + breath, this.baseScale - breath, this.facingAngle);
+      this.sprite.tint = this.flashTimer > 0 ? 0xffffff : this.difficultyTint;
     }
   }
 

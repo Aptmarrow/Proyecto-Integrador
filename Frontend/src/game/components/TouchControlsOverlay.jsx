@@ -1,4 +1,6 @@
-export default function TouchControlsOverlay({
+import { memo } from 'react';
+
+function TouchControlsOverlay({
   joystickActive,
   joystickStickPos,
   touchFocus,
@@ -77,4 +79,6 @@ export default function TouchControlsOverlay({
     </div>
   );
 }
+
+export default memo(TouchControlsOverlay);
 
