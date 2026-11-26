@@ -232,8 +232,15 @@ export class GameWSClient {
       };
 
       let url = '';
-      if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL) {
-        url = `${import.meta.env.VITE_WS_URL}/game?token=${encodeURIComponent(this.token)}`;
+      const wsEnv =
+        typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL
+          ? String(import.meta.env.VITE_WS_URL).trim()
+          : '';
+      if (wsEnv === 'same-origin' && typeof window !== 'undefined') {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        url = `${protocol}//${window.location.host}/game?token=${encodeURIComponent(this.token)}`;
+      } else if (wsEnv) {
+        url = `${wsEnv.replace(/\/$/, '')}/game?token=${encodeURIComponent(this.token)}`;
       } else if (typeof window !== 'undefined') {
         if (window.location.protocol === 'https:') {
           url = `wss://${window.location.host}/game?token=${encodeURIComponent(this.token)}`;
