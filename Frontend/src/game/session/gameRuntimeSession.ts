@@ -90,6 +90,8 @@ export class GameRuntimeSession {
   private workerBridge: GameWorkerBridge | null = null;
   private snapshotWorker: Worker | null = null;
   private readonly keys: Record<string, boolean> = {};
+  private readonly effectiveKeys: Record<string, boolean> = {};
+  private readonly moveVec = { dx: 0, dy: 0 };
   private readonly options: RuntimeSessionOptions;
   private runtimeMode: WorkerRuntimeMode = 'connecting';
   private myPlayerId = '';
@@ -208,23 +210,7 @@ export class GameRuntimeSession {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
 
-    // 1. Dedicated Web Worker for 60 FPS Snapshot Buffering & Entity Interpolation
-    try {
-      this.snapshotWorker = new Worker(
-        new URL('../workers/snapshot.worker.ts', import.meta.url),
-        { type: 'module' }
-      );
-      this.snapshotWorker.onmessage = (e: MessageEvent) => {
-        const { type, payload } = e.data || {};
-        if (type === 'RENDER_FRAME' && payload) {
-          this.applySnapshot(payload as GameSnapshot);
-        }
-      };
-    } catch {
-      this.snapshotWorker = null;
-    }
-
-    // 2. Connect to Authoritative Backend WS if valid room UUID + token, with automatic Local Physics Worker fallback
+    // 1. Connect to Authoritative Backend WS if valid room UUID + token, with automatic Local Physics Worker fallback
     const calProfile = getCachedLutProfile();
     const isCustomCalStage = Boolean(calProfile?.id && this.options.difficulty === calProfile.id);
     const canUseBackendWs = Boolean(
@@ -232,6 +218,22 @@ export class GameRuntimeSession {
     );
 
     if (canUseBackendWs) {
+      // Only allocate Snapshot Interpolation Worker when running online multiplayer WS!
+      try {
+        this.snapshotWorker = new Worker(
+          new URL('../workers/snapshot.worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+        this.snapshotWorker.onmessage = (e: MessageEvent) => {
+          const { type, payload } = e.data || {};
+          if (type === 'RENDER_FRAME' && payload) {
+            this.applySnapshot(payload as GameSnapshot);
+          }
+        };
+      } catch {
+        this.snapshotWorker = null;
+      }
+
       this.setMode('connecting', 'Sincronizando sala multijugador...');
       this.gameClient = new GameWSClient(this.options.token);
       this.gameClient
@@ -263,6 +265,10 @@ export class GameRuntimeSession {
           if (this.stopped) return;
           this.gameClient?.disconnect();
           this.gameClient = null;
+          if (this.snapshotWorker) {
+            this.snapshotWorker.terminate();
+            this.snapshotWorker = null;
+          }
           this.startLocalSimulationWorker();
         });
     } else {
@@ -443,30 +449,37 @@ export class GameRuntimeSession {
       frameInput.touchFocus
     );
 
-    const effectiveKeys: Record<string, boolean> = {
-      ...this.keys,
-      KeyZ: isShooting,
-      Space: isShooting,
-      ShiftLeft: isFocusing,
-      ShiftRight: isFocusing,
-      Shift: isFocusing,
-      focus: isFocusing,
-      isFocus: isFocusing,
-    };
+    const ek = this.effectiveKeys;
+    ek.ArrowLeft = !!this.keys.ArrowLeft;
+    ek.ArrowRight = !!this.keys.ArrowRight;
+    ek.ArrowUp = !!this.keys.ArrowUp;
+    ek.ArrowDown = !!this.keys.ArrowDown;
+    ek.KeyA = !!this.keys.KeyA;
+    ek.KeyD = !!this.keys.KeyD;
+    ek.KeyW = !!this.keys.KeyW;
+    ek.KeyS = !!this.keys.KeyS;
+    ek.KeyZ = isShooting;
+    ek.Space = isShooting;
+    ek.ShiftLeft = isFocusing;
+    ek.ShiftRight = isFocusing;
+    ek.Shift = isFocusing;
+    ek.focus = isFocusing;
+    ek.isFocus = isFocusing;
 
     const action = isShooting && !this.engine.isBeamStruggle ? 'shoot' : null;
 
     if (this.gameClient && this.runtimeMode === 'backend-worker') {
       this.gameClient.sendInput(dx, dy, action, isFocusing);
+      if (this.snapshotWorker) {
+        this.snapshotWorker.postMessage({ type: 'GET_INTERPOLATED_STATE' });
+      }
     } else if (this.workerBridge?.isActive()) {
       this.workerBridge.sendInput(dx, dy, action, isFocusing);
     }
 
-    if (this.snapshotWorker) {
-      this.snapshotWorker.postMessage({ type: 'GET_INTERPOLATED_STATE' });
-    }
-
-    this.engine.update(dt, effectiveKeys, { dx, dy });
+    this.moveVec.dx = dx;
+    this.moveVec.dy = dy;
+    this.engine.update(dt, ek, this.moveVec);
     this.options.onEngineFrame(this.engine);
     this.animFrameId = requestAnimationFrame(this.loop);
   };

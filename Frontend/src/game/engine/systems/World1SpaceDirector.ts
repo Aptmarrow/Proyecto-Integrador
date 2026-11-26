@@ -1024,6 +1024,7 @@ export class World1SpaceDirector {
     } else {
       this.updateStage1_3(t, clk, dt, pxNorm, pyNorm, bossBoost);
     }
+    this.phaseVeilSprite.visible = this.phaseVeilSprite.alpha > 0.005;
   }
 
   private updateCommonParticles(

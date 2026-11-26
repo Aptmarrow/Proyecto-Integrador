@@ -1,4 +1,6 @@
-export default function FloatingControlsBar({
+import { memo } from 'react';
+
+function FloatingControlsBar({
   selectedClass,
   isFullscreen,
   canSwitchRole = false,
@@ -117,4 +119,6 @@ export default function FloatingControlsBar({
     </div>
   );
 }
+
+export default memo(FloatingControlsBar);
 

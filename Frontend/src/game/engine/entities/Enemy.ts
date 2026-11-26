@@ -89,6 +89,7 @@ export class Enemy {
       this.container.addChild(sprite);
     } else {
       this.sprite = this.createProceduralGraphics();
+      this.initStaticWings();
       this.container.addChild(this.wingGlow);
       this.container.addChild(this.sprite);
     }
@@ -177,25 +178,25 @@ export class Enemy {
     return g;
   }
 
-  private renderWings(animTimer: number): void {
-    if (this.sprite instanceof PIXI.Sprite) return;
-
+  private initStaticWings(): void {
     this.wingGlow.clear();
-    const flap = Math.sin(animTimer * 18);
     const isBig = this.type === 'big_fairy';
     const isPurple = this.type === 'purple_fairy';
     const wingColor = this.type === 'red_fairy' ? 0xff5588 : (isBig ? 0xffea00 : (isPurple ? 0xcc66ff : 0x55ffaa));
 
-    this.wingGlow.beginFill(wingColor, 0.5 + flap * 0.2);
-    // Ala superior izquierda
-    this.wingGlow.drawEllipse(-12, -10, (isBig ? 18 : 12) + flap * 3, isBig ? 10 : 6);
-    // Ala superior derecha
-    this.wingGlow.drawEllipse(12, -10, (isBig ? 18 : 12) + flap * 3, isBig ? 10 : 6);
-    // Ala inferior izquierda
-    this.wingGlow.drawEllipse(-10, 8, (isBig ? 12 : 8), isBig ? 7 : 4);
-    // Ala inferior derecha
-    this.wingGlow.drawEllipse(10, 8, (isBig ? 12 : 8), isBig ? 7 : 4);
+    this.wingGlow.beginFill(wingColor, 0.72);
+    this.wingGlow.drawEllipse(-12, -10, isBig ? 18 : 12, isBig ? 10 : 6);
+    this.wingGlow.drawEllipse(12, -10, isBig ? 18 : 12, isBig ? 10 : 6);
+    this.wingGlow.drawEllipse(-10, 8, isBig ? 12 : 8, isBig ? 7 : 4);
+    this.wingGlow.drawEllipse(10, 8, isBig ? 12 : 8, isBig ? 7 : 4);
     this.wingGlow.endFill();
+  }
+
+  private renderWings(animTimer: number): void {
+    if (this.sprite instanceof PIXI.Sprite) return;
+    const flap = Math.sin(animTimer * 18);
+    this.wingGlow.scale.set(1.0 + flap * 0.16, 1.0 - flap * 0.06);
+    this.wingGlow.alpha = 0.68 + flap * 0.25;
   }
 
   public update(

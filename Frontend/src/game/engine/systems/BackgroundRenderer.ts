@@ -1,6 +1,8 @@
 import * as PIXI from 'pixi.js';
 import { StageDirectorRenderer, StageDirectorPreviewVariant, StageDirectorSpec } from './StageDirectorRenderer';
 import { World1SpaceDirector, isWorld1NormalStage } from './World1SpaceDirector';
+import { World2SpaceDirector, isWorld2NormalStage } from './World2SpaceDirector';
+import { World3SpaceDirector, isWorld3NormalStage } from './World3SpaceDirector';
 import type { SpaceThemeSpec } from '../../campaign/spaceCampaignCatalog';
 
 interface StarParticle {
@@ -95,6 +97,8 @@ export class BackgroundRenderer {
   private lutFilter: PIXI.Filter | null = null;
   private stageDirector: StageDirectorRenderer | null = null;
   private world1Director: World1SpaceDirector | null = null;
+  private world2Director: World2SpaceDirector | null = null;
+  private world3Director: World3SpaceDirector | null = null;
   private lutClock: number = 0;
   private stars: StarParticle[] = [];
 
@@ -182,18 +186,44 @@ export class BackgroundRenderer {
     }
   }
 
+  private clearWorld2Director(): void {
+    if (this.world2Director) {
+      this.world2Director.destroy();
+      this.world2Director = null;
+    }
+  }
+
+  private clearWorld3Director(): void {
+    if (this.world3Director) {
+      this.world3Director.destroy();
+      this.world3Director = null;
+    }
+  }
+
+  private clearWorldDirectors(): void {
+    this.clearWorld1Director();
+    this.clearWorld2Director();
+    this.clearWorld3Director();
+  }
+
   /**
    * Apply one of the 27 Space Sector backdrop themes (cached static WebGL geometry, 0 per-frame redraws).
-   * World 1 Normal (`normal-1-1`, `normal-1-2`, `normal-1-3`) activates the cohesive multi-phase WebGL World1SpaceDirector.
+   * World 1..3 Normal (`normal-1-1..3-3`) activate dedicated cohesive multi-phase WebGL directors.
    */
   public setSpaceTheme(theme?: SpaceThemeSpec | null): void {
     if (!theme || this.hasActiveLutStagePass()) return;
     const world1StageId = isWorld1NormalStage(theme.id) ? theme.id : null;
+    const world2StageId = isWorld2NormalStage(theme.id) ? theme.id : null;
+    const world3StageId = isWorld3NormalStage(theme.id) ? theme.id : null;
     const needsWorld1Init = world1StageId !== null && !this.world1Director;
-    if (!needsWorld1Init && this.activeSpaceTheme.id === theme.id && this.cachedWidth > 0) return;
+    const needsWorld2Init = world2StageId !== null && !this.world2Director;
+    const needsWorld3Init = world3StageId !== null && !this.world3Director;
+    if (!needsWorld1Init && !needsWorld2Init && !needsWorld3Init && this.activeSpaceTheme.id === theme.id && this.cachedWidth > 0) return;
     this.activeSpaceTheme = theme;
 
     if (world1StageId !== null && this.renderer) {
+      this.clearWorld2Director();
+      this.clearWorld3Director();
       if (!this.world1Director) {
         try {
           this.world1Director = new World1SpaceDirector(
@@ -213,8 +243,52 @@ export class BackgroundRenderer {
         this.setNormalLayersVisible(false);
         return;
       }
-    } else if (this.world1Director) {
+    } else if (world2StageId !== null && this.renderer) {
       this.clearWorld1Director();
+      this.clearWorld3Director();
+      if (!this.world2Director) {
+        try {
+          this.world2Director = new World2SpaceDirector(
+            this.container,
+            this.renderer,
+            world2StageId,
+            this.cachedWidth || 1024,
+            this.cachedHeight || 576
+          );
+          this.setNormalLayersVisible(false);
+          return;
+        } catch {
+          this.clearWorld2Director();
+        }
+      } else {
+        this.world2Director.setStage(world2StageId);
+        this.setNormalLayersVisible(false);
+        return;
+      }
+    } else if (world3StageId !== null && this.renderer) {
+      this.clearWorld1Director();
+      this.clearWorld2Director();
+      if (!this.world3Director) {
+        try {
+          this.world3Director = new World3SpaceDirector(
+            this.container,
+            this.renderer,
+            world3StageId,
+            this.cachedWidth || 1024,
+            this.cachedHeight || 576
+          );
+          this.setNormalLayersVisible(false);
+          return;
+        } catch {
+          this.clearWorld3Director();
+        }
+      } else {
+        this.world3Director.setStage(world3StageId);
+        this.setNormalLayersVisible(false);
+        return;
+      }
+    } else if (this.world1Director || this.world2Director || this.world3Director) {
+      this.clearWorldDirectors();
       this.setNormalLayersVisible(true);
     }
 
@@ -316,7 +390,7 @@ export class BackgroundRenderer {
 
   public setLutStagePass(spec?: LutStagePassSpec | null, width: number = 1024, height: number = 576): void {
     if (!spec?.spriteDirector && !spec?.fragmentSrc && !spec?.variants?.length) return;
-    this.clearWorld1Director();
+    this.clearWorldDirectors();
     this.clearLutStagePass();
 
     if (spec.spriteDirector && this.renderer) {
@@ -494,6 +568,30 @@ export class BackgroundRenderer {
       return;
     }
 
+    if (this.world2Director) {
+      this.world2Director.update({
+        stageTime: ctx?.stageTime ?? this.lutClock,
+        clockTime: this.lutClock,
+        playerX: ctx?.playerX ?? 220,
+        playerY: ctx?.playerY ?? 288,
+        bossActive: ctx?.bossActive,
+        bossPhase: ctx?.bossPhase,
+      });
+      return;
+    }
+
+    if (this.world3Director) {
+      this.world3Director.update({
+        stageTime: ctx?.stageTime ?? this.lutClock,
+        clockTime: this.lutClock,
+        playerX: ctx?.playerX ?? 220,
+        playerY: ctx?.playerY ?? 288,
+        bossActive: ctx?.bossActive,
+        bossPhase: ctx?.bossPhase,
+      });
+      return;
+    }
+
     if (this.lutMesh && this.lutVariants.length > 0) {
       const stageTime = ctx?.stageTime ?? this.lutClock;
       const targetShader = this.selectVariantShader(stageTime);
@@ -525,7 +623,7 @@ export class BackgroundRenderer {
   }
 
   public destroy(): void {
-    this.clearWorld1Director();
+    this.clearWorldDirectors();
     this.clearLutStagePass();
     this.starSprites = [];
     if (this.starTexture && this.starTexture !== PIXI.Texture.WHITE) {

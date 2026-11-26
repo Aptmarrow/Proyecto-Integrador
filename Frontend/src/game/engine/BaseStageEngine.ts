@@ -39,6 +39,9 @@ export class BaseStageEngine {
   // Sprites de jugadores remotos (Multijugador)
   protected remotePlayerSprites = new Map<string, PIXI.Container>();
   protected playerRoleMap = new Map<string, string>();
+  private activePlayerIds = new Set<string>();
+  private soundPool = new Map<string, HTMLAudioElement[]>();
+  private lastSoundTime = new Map<string, number>();
 
   // Estado compartido
   public stageTime: number = 0;
@@ -57,14 +60,17 @@ export class BaseStageEngine {
   public useBackendBullets: boolean = false;
 
   constructor(canvas: HTMLCanvasElement, width: number = 1024, height: number = 576) {
+    const cappedResolution =
+      typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 1.25) : 1;
     this.app = new PIXI.Application({
       view: canvas,
       width: CANVAS_WIDTH,
       height: CANVAS_HEIGHT,
       backgroundColor: 0x06040a,
-      resolution: window.devicePixelRatio || 1,
+      resolution: cappedResolution,
       autoDensity: true,
-      antialias: true,
+      antialias: false,
+      powerPreference: 'high-performance',
     });
 
     // Añadir capas en orden de profundidad
@@ -96,14 +102,35 @@ export class BaseStageEngine {
   ]);
 
   public playSound(soundPath: string, volume: number = 0.5): void {
-    if (typeof window !== 'undefined' && BaseStageEngine.AVAILABLE_SOUNDS.has(soundPath)) {
-      try {
-        const audio = new Audio(soundPath);
-        audio.volume = volume;
-        audio.play().catch(() => {});
-      } catch {
-        // Fallback
+    if (typeof window === 'undefined' || !BaseStageEngine.AVAILABLE_SOUNDS.has(soundPath)) return;
+    const now = performance.now();
+    const prev = this.lastSoundTime.get(soundPath) ?? 0;
+    if (now - prev < 55) return;
+    this.lastSoundTime.set(soundPath, now);
+
+    try {
+      let pool = this.soundPool.get(soundPath);
+      if (!pool) {
+        pool = [];
+        this.soundPool.set(soundPath, pool);
       }
+      let audio = pool.find((a) => a.paused || a.ended);
+      if (!audio) {
+        if (pool.length < 4) {
+          audio = new Audio(soundPath);
+          audio.preload = 'auto';
+          pool.push(audio);
+        } else {
+          audio = pool[0];
+          audio.currentTime = 0;
+        }
+      } else {
+        audio.currentTime = 0;
+      }
+      audio.volume = volume;
+      audio.play().catch(() => {});
+    } catch {
+      // Fallback
     }
   }
 
@@ -127,11 +154,15 @@ export class BaseStageEngine {
   public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string, onTargetPlayerPos?: (x: number, y: number, characterRole?: string) => void): void {
     this.isBackendConnected = true;
     this.useBackendBullets = true;
-    const currentIds = new Set(players.map(p => p.id));
+    this.activePlayerIds.clear();
+    for (let i = 0; i < players.length; i++) {
+      this.activePlayerIds.add(players[i].id);
+    }
 
     for (const [id, sprite] of this.remotePlayerSprites.entries()) {
-      if (!currentIds.has(id)) {
+      if (!this.activePlayerIds.has(id)) {
         this.remotePlayersContainer.removeChild(sprite);
+        sprite.destroy({ children: true, texture: false, baseTexture: false });
         this.remotePlayerSprites.delete(id);
       }
     }
@@ -190,10 +221,10 @@ export class BaseStageEngine {
   public applyBackendBullets(bullets: ServerBullet[], myPlayerId?: string): void {
     if (!bullets) return;
     this.useBackendBullets = true;
-    this.bulletSystem.playerBullets = [];
-    this.bulletSystem.bullets = [];
+    this.bulletSystem.recycleAllForSnapshot();
 
-    for (const b of bullets) {
+    for (let i = 0; i < bullets.length; i++) {
+      const b = bullets[i];
       const scaledX = b.x * this.SCALE_X;
       const scaledY = b.y * this.SCALE_Y;
       const scaledRadius = Math.max(3, (b.radius || 4) * this.SCALE_X);
@@ -277,6 +308,9 @@ export class BaseStageEngine {
 
   public destroy(): void {
     this.backgroundRenderer.destroy();
+    this.bulletSystem.destroy();
+    this.particleSystem.destroy();
+    this.soundPool.clear();
     this.app.destroy(true, { children: true, texture: false });
   }
 }

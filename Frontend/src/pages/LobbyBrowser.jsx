@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getPublicRooms, getUsersList, joinRoom } from '../services/api';
 import '../styles/lobby-browser.css';
@@ -49,11 +49,13 @@ export default function LobbyBrowser() {
   const [selectedDifficulty, setSelectedDifficulty] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const lastRoomsSigRef = useRef('');
 
   useEffect(() => {
     fetchRooms(true);
 
     const intervalId = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       fetchRooms(false);
     }, 2000);
 
@@ -90,7 +92,13 @@ export default function LobbyBrowser() {
       const onlyPublicRooms = Array.isArray(rooms)
         ? rooms.filter((room) => room?.isPublic !== false)
         : [];
-      setLobbies(onlyPublicRooms);
+      const nextSig = onlyPublicRooms
+        .map((r) => `${r.id}:${r.name}:${r.difficulty}:${r.world}:${r.stage}:${resolvePlayersCount(r)}:${r.maxPlayers}:${r.hostId}`)
+        .join('|');
+      if (nextSig !== lastRoomsSigRef.current) {
+        lastRoomsSigRef.current = nextSig;
+        setLobbies(onlyPublicRooms);
+      }
       setError(null);
     } catch (err) {
       console.warn('Error fetching rooms:', err);

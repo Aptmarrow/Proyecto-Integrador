@@ -1,4 +1,6 @@
-export default function GameArenaOverlays({
+import { memo } from 'react';
+
+function GameArenaOverlays({
   stageBanner,
   bossWarningActive,
   spellcardBanner,
@@ -239,4 +241,6 @@ export default function GameArenaOverlays({
     </>
   );
 }
+
+export default memo(GameArenaOverlays);
 
