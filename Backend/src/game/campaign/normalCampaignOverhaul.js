@@ -189,13 +189,24 @@ function buildNormalWorldWaves(world, stage, bossSpawnAt, baseWaves, meta = {}) 
       enemies = buildWorld3NormalWave(i, v, stage, palette, baseWave);
     }
 
-    const scaledEnemies = enemies.map((e) => ({
-      ...e,
-      hp: Math.max(8, Math.round((e.hp || 18) * statScale)),
-      speed: Math.round((e.speed || 130) * statScale),
-      shootInterval: Number(((e.shootInterval || 1.5) / statScale).toFixed(3)),
-      customParams: { ...(e.customParams || {}), statScale },
-    }));
+    const moveScale = statScale > 1.0 ? 0.84 : 1.0;
+    const kamikazeMoveScale = statScale >= 1.2 ? 1.08 : statScale > 1.0 ? 1.04 : 1.0;
+    const hoverMult = statScale >= 1.2 ? 1.4 : statScale > 1.0 ? 1.25 : 1.0;
+
+    const scaledEnemies = enemies.map((e) => {
+      const cp = { ...(e.customParams || {}), statScale };
+      if (typeof cp.hoverTime === 'number') {
+        cp.hoverTime = Number((cp.hoverTime * hoverMult).toFixed(2));
+      }
+      const speedFactor = e.trajectory === 'kamikaze_homing' ? kamikazeMoveScale : moveScale;
+      return {
+        ...e,
+        hp: Math.max(8, Math.round((e.hp || 18) * statScale)),
+        speed: Math.round((e.speed || 130) * speedFactor),
+        shootInterval: Number(((e.shootInterval || 1.5) / statScale).toFixed(3)),
+        customParams: cp,
+      };
+    });
 
     waves.push({
       key: `w_${i + 1}`,
@@ -932,11 +943,11 @@ function getNormalWorldBossConfig(world, difficulty = 'normal') {
       speedScale: Number((1.0 * scale).toFixed(3)),
       statScale: scale,
       phases: scalePhases([
-        { name: 'Fase 1 "Arsenal Cinético"', pattern: 'gfg_boss_p1_mix', shootInterval: 0.48, laserMode: 'targeted', laserInterval: 4.6, megaLaserInterval: 0 },
-        { name: 'Sello Balístico "Francotirador #022"', pattern: 'gfg_boss_p2_sniper', shootInterval: 0.06, laserMode: 'targeted', laserInterval: 4.4, megaLaserInterval: 7.2 },
-        { name: 'Fase 3 "Cortina Acelerada"', pattern: 'gfg_boss_p3_accel', shootInterval: 0.55, laserMode: 'none', laserInterval: 4.8, megaLaserInterval: 0 },
-        { name: 'Protocolo Cubo "Fuego y Perdigones"', pattern: 'gfg_boss_p4_shotgun_rapid', shootInterval: 0.12, laserMode: 'both', laserInterval: 3.8, megaLaserInterval: 6.5 },
-        { name: 'Sobrecarga Total "Guns For Guns"', pattern: 'gfg_boss_p5_all_bullets', shootInterval: 0.36, laserMode: 'both', laserInterval: 3.6, megaLaserInterval: 6.0 },
+        { name: 'Fase 1 "Arsenal Cinético"', pattern: 'gfg_boss_p1_mix', shootInterval: 0.56, laserMode: 'none', laserInterval: 99, megaLaserInterval: 0 },
+        { name: 'Sello Balístico "Francotirador #022"', pattern: 'gfg_boss_p2_sniper', shootInterval: 0.075, laserMode: 'none', laserInterval: 99, megaLaserInterval: 0 },
+        { name: 'Fase 3 "Cortina Acelerada"', pattern: 'gfg_boss_p3_accel', shootInterval: 0.58, laserMode: 'none', laserInterval: 99, megaLaserInterval: 0 },
+        { name: 'Protocolo Cubo "Fuego y Perdigones"', pattern: 'gfg_boss_p4_shotgun_rapid', shootInterval: 0.13, laserMode: 'none', laserInterval: 99, megaLaserInterval: 0 },
+        { name: 'Sobrecarga Total "Guns For Guns"', pattern: 'gfg_boss_p5_all_bullets', shootInterval: 0.42, laserMode: 'none', laserInterval: 99, megaLaserInterval: 0 },
       ]),
     };
   }
@@ -1074,32 +1085,61 @@ function fireNormalBossPattern(patternId, ctx, rawEmitBullet) {
       return true;
     }
 
-    // ── WORLD 2 BOSS (GunsForGunsCube): rotates across GFGbullet1..GFGbullet5 ──
+    // ── WORLD 2 BOSS (GunsForGunsCube): pure bullet arsenal combining 2-3 World 2 weapons per attack ──
     case 'gfg_boss_p1_mix': {
+      // Weapon 1: Fast rifle fan (GFGbullet1png)
+      for (const off of [-0.22, 0, 0.22]) {
+        emitBullet(bossX - 28, bossY, aim + off, 275, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
+      }
+      // Weapon 2: Shotgun spread (GFGbullet4png)
+      for (let k = 0; k < 6; k++) {
+        const sp = ((k / 5) - 0.5) * 0.54;
+        emitBullet(bossX - 26, bossY, aim + sp, 245 + (k % 3) * 32, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet4png' });
+      }
+      // Weapon 3: Flanking accelerating homing missiles (GFGbullet3png)
       if (shotIndex % 2 === 0) {
-        for (const off of [-0.28, -0.1, 0.1, 0.28]) {
-          emitBullet(bossX - 28, bossY, aim + off, 275, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
-        }
-      } else {
-        for (let k = 0; k < 8; k++) {
-          const sp = ((k / 7) - 0.5) * 0.58;
-          emitBullet(bossX - 26, bossY, aim + sp, 260 + (k % 3) * 35, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet4png' });
+        for (const off of [-0.48, 0.48]) {
+          emitBullet(bossX - 24, bossY, aim + off, 52, 5.5, 0xf97316, 5, {
+            spriteType: 'GFGbullet3png',
+            expAccel: 1.45,
+            maxSpeed: 460,
+            homeRate: 0.65,
+            homeTime: 1.15,
+          });
         }
       }
       return true;
     }
 
     case 'gfg_boss_p2_sniper': {
-      // Sniper #022 bursts (GFGbullet2png) with brief pause + accelerating ring (GFGbullet3png)
-      const cycle = shotIndex % 26;
+      // Sniper #022 burst (GFGbullet2png) + rifle cover (GFGbullet1png) + accelerating ring / shotgun
+      const cycle = shotIndex % 24;
       if (cycle < 8) {
-        emitBullet(bossX - 28, bossY, aim + Math.sin(cycle) * 0.04, 395, 5.5, 0xef4444, 5, { spriteType: 'GFGbullet2png' });
+        emitBullet(bossX - 28, bossY, aim + Math.sin(cycle) * 0.03, 395, 5.5, 0xef4444, 5, { spriteType: 'GFGbullet2png' });
+        if (cycle % 3 === 0) {
+          for (const off of [-0.34, 0.34]) {
+            emitBullet(bossX - 26, bossY, aim + off, 270, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
+          }
+        }
+        if (cycle === 0) {
+          for (let k = 0; k < 10; k++) {
+            emitBullet(bossX, bossY, (Math.PI * 2 * k) / 10 + animTimer * 0.4, 44, 5, 0xf97316, 5, {
+              spriteType: 'GFGbullet3png',
+              expAccel: 1.55,
+              maxSpeed: 485,
+            });
+          }
+        }
       } else if (cycle === 14) {
-        for (let k = 0; k < 12; k++) {
-          emitBullet(bossX, bossY, (Math.PI * 2 * k) / 12 + animTimer * 0.4, 42, 5, 0xf97316, 5, {
+        for (let k = 0; k < 7; k++) {
+          const sp = ((k / 6) - 0.5) * 0.6;
+          emitBullet(bossX - 26, bossY, aim + sp, 255 + (k % 3) * 32, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet4png' });
+        }
+        for (let k = 0; k < 8; k++) {
+          emitBullet(bossX, bossY, (Math.PI * 2 * k) / 8 + animTimer * 0.5, 44, 5, 0xf97316, 5, {
             spriteType: 'GFGbullet3png',
-            expAccel: 1.65,
-            maxSpeed: 510,
+            expAccel: 1.55,
+            maxSpeed: 485,
           });
         }
       }
@@ -1107,58 +1147,109 @@ function fireNormalBossPattern(patternId, ctx, rawEmitBullet) {
     }
 
     case 'gfg_boss_p3_accel': {
-      const shift = Math.sin(animTimer * 2.2) * 0.3;
-      for (const off of [-0.48, -0.24, 0, 0.24, 0.48]) {
-        emitBullet(bossX - 26, bossY, Math.PI + off + shift, 42, 5, 0xf97316, 5, {
+      // Weapon 1: Waving accelerating curtain (GFGbullet3png)
+      const shift = Math.sin(animTimer * 2.2) * 0.28;
+      for (const off of [-0.46, -0.23, 0, 0.23, 0.46]) {
+        emitBullet(bossX - 26, bossY, Math.PI + off + shift, 44, 5, 0xf97316, 5, {
           spriteType: 'GFGbullet3png',
-          expAccel: 1.65,
-          maxSpeed: 510,
+          expAccel: 1.55,
+          maxSpeed: 490,
         });
       }
-      if (shotIndex % 2 === 0) {
-        emitBullet(bossX - 28, bossY, aim, 285, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
+      // Weapon 2: Aimed tactical burst spread (GFGbullet5png)
+      for (const off of [-0.16, 0, 0.16]) {
+        emitBullet(bossX - 28, bossY, aim + off, 325, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet5png' });
+      }
+      // Weapon 3: Flanking fast rifle shots (GFGbullet1png)
+      for (const off of [-0.36, 0.36]) {
+        emitBullet(bossX - 28, bossY, aim + off, 285, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
       }
       return true;
     }
 
     case 'gfg_boss_p4_shotgun_rapid': {
-      const cyc = shotIndex % 22;
+      const cyc = shotIndex % 20;
       if (cyc < 10) {
-        const sweep = Math.sin(animTimer * 6.5) * 0.26;
+        // Weapon 1: Sweeping rapid burst (GFGbullet5png)
+        const sweep = Math.sin(animTimer * 6.5) * 0.24;
         emitBullet(bossX - 28, bossY, aim + sweep, 330, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet5png' });
-      } else if (cyc === 15) {
-        for (let k = 0; k < 11; k++) {
-          const sp = ((k / 10) - 0.5) * 0.72;
-          emitBullet(bossX - 28, bossY, aim + sp, 265 + (k % 4) * 32, 5.5, 0xef4444, 5, { spriteType: 'GFGbullet4png' });
+        // Weapon 2: Cover rifle shots (GFGbullet1png)
+        if (cyc % 4 === 0) {
+          for (const off of [-0.24, 0.24]) {
+            emitBullet(bossX - 26, bossY, aim + off, 280, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
+          }
+        }
+        // Weapon 3: Aimed sniper lance (GFGbullet2png)
+        if (cyc === 2 || cyc === 7) {
+          emitBullet(bossX - 28, bossY, aim, 415, 5.5, 0xef4444, 5, { spriteType: 'GFGbullet2png' });
+        }
+      } else if (cyc === 14) {
+        // Wide shotgun (GFGbullet4png) + sniper twin (GFGbullet2png) + homing flankers (GFGbullet3png)
+        for (let k = 0; k < 9; k++) {
+          const sp = ((k / 8) - 0.5) * 0.68;
+          emitBullet(bossX - 28, bossY, aim + sp, 260 + (k % 3) * 34, 5.5, 0xef4444, 5, { spriteType: 'GFGbullet4png' });
+        }
+        for (const off of [-0.06, 0.06]) {
+          emitBullet(bossX - 28, bossY, aim + off, 405, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet2png' });
+        }
+        for (const off of [-0.52, 0.52]) {
+          emitBullet(bossX - 24, bossY, aim + off, 52, 5.5, 0xf97316, 5, {
+            spriteType: 'GFGbullet3png',
+            expAccel: 1.45,
+            maxSpeed: 465,
+            homeRate: 0.65,
+            homeTime: 1.15,
+          });
         }
       }
       return true;
     }
 
     case 'gfg_boss_p5_all_bullets': {
-      const m = shotIndex % 5;
+      // Every volley combines 3 World 2 weapons simultaneously across all 5 bullet types
+      const m = shotIndex % 3;
       if (m === 0) {
-        for (const off of [-0.3, 0, 0.3]) {
+        for (const off of [-0.26, 0, 0.26]) {
           emitBullet(bossX - 28, bossY, aim + off, 290, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
         }
-      } else if (m === 1) {
-        emitBullet(bossX - 28, bossY, aim, 410, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet2png' });
-      } else if (m === 2) {
-        for (let k = 0; k < 10; k++) {
-          emitBullet(bossX, bossY, (Math.PI * 2 * k) / 10 + animTimer, 42, 5, 0xf97316, 5, {
+        for (let k = 0; k < 7; k++) {
+          const sp = ((k / 6) - 0.5) * 0.6;
+          emitBullet(bossX - 26, bossY, aim + sp, 255 + (k % 3) * 32, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet4png' });
+        }
+        for (let k = 0; k < 8; k++) {
+          emitBullet(bossX, bossY, (Math.PI * 2 * k) / 8 + animTimer, 44, 5, 0xf97316, 5, {
             spriteType: 'GFGbullet3png',
-            expAccel: 1.7,
-            maxSpeed: 520,
+            expAccel: 1.6,
+            maxSpeed: 500,
           });
         }
-      } else if (m === 3) {
-        for (let k = 0; k < 9; k++) {
-          const sp = ((k / 8) - 0.5) * 0.65;
-          emitBullet(bossX - 28, bossY, aim + sp, 260 + (k % 3) * 35, 5.5, 0xef4444, 5, { spriteType: 'GFGbullet4png' });
+      } else if (m === 1) {
+        for (const off of [-0.08, 0, 0.08]) {
+          emitBullet(bossX - 28, bossY, aim + off, 410, 5.5, 0xef4444, 5, { spriteType: 'GFGbullet2png' });
+        }
+        const sw = Math.sin(animTimer * 5.0) * 0.18;
+        for (const off of [-0.22, 0.22]) {
+          emitBullet(bossX - 28, bossY, aim + off + sw, 335, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet5png' });
+        }
+        for (const off of [-0.46, 0.46]) {
+          emitBullet(bossX - 24, bossY, aim + off, 54, 5.5, 0xf97316, 5, {
+            spriteType: 'GFGbullet3png',
+            expAccel: 1.45,
+            maxSpeed: 470,
+            homeRate: 0.68,
+            homeTime: 1.15,
+          });
         }
       } else {
+        for (let k = 0; k < 7; k++) {
+          const sp = ((k / 6) - 0.5) * 0.64;
+          emitBullet(bossX - 28, bossY, aim + sp, 260 + (k % 3) * 34, 5.5, 0xef4444, 5, { spriteType: 'GFGbullet4png' });
+        }
+        for (const off of [-0.32, -0.11, 0.11, 0.32]) {
+          emitBullet(bossX - 28, bossY, aim + off, 330, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet5png' });
+        }
         for (const off of [-0.18, 0.18]) {
-          emitBullet(bossX - 28, bossY, aim + off, 335, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet5png' });
+          emitBullet(bossX - 26, bossY, aim + off, 295, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
         }
       }
       return true;
@@ -1463,9 +1554,9 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
       for (const sgn of [-1, 1]) {
         const perp = boss.angle + sgn * (Math.PI / 2);
         for (let sp = 0; sp < pairsPerSide; sp++) {
-          const jitter = (Math.random() - 0.5) * 0.42;
-          const spd = (110 + sp * 28 + Math.random() * 25) * statScale;
-          bulletSystem.spawn('boss', boss.x, boss.y, perp + jitter, spd, 4.5, 12.0, 'normal', Math.max(1, Math.round(4 * statScale)), 0xfef08a, {
+          const fanOffset = (sp - (pairsPerSide - 1) / 2) * 0.06;
+          const spd = (118 + sp * 32) * statScale;
+          bulletSystem.spawn('boss', boss.x, boss.y, perp + fanOffset, spd, 4.5, 12.0, 'normal', Math.max(1, Math.round(4 * statScale)), 0xfef08a, {
             spriteType: 'MObullet3png',
           });
         }
@@ -1502,9 +1593,9 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
           for (const sgn of [-1, 1]) {
             const perp = lineAngle + sgn * (Math.PI / 2);
             for (let sp = 0; sp < sparksPerSide; sp++) {
-              const spread = (Math.random() - 0.5) * 0.48;
-              const spd = (100 + sp * 30 + Math.random() * 30) * statScale;
-              bulletSystem.spawn('boss', nx, ny, perp + spread, spd, 4.5, 12.0, 'normal', Math.max(1, Math.round(4 * statScale)), 0xfef08a, {
+              const fanOffset = (sp - (sparksPerSide - 1) / 2) * 0.05;
+              const spd = (108 + sp * 32) * statScale;
+              bulletSystem.spawn('boss', nx, ny, perp + fanOffset, spd, 4.5, 12.0, 'normal', Math.max(1, Math.round(4 * statScale)), 0xfef08a, {
                 spriteType: 'MObullet3png',
               });
             }

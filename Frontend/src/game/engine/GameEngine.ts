@@ -10,6 +10,7 @@ import { getCachedLutProfile } from './SpriteLutCache';
 import { getSpaceStageConfig } from '../campaign/spaceCampaignCatalog';
 import type { StageDirectorPreviewVariant } from './systems/StageDirectorRenderer';
 import { NetworkSyncController } from './controllers/NetworkSyncController';
+import { DifficultyGlintFilter, ENABLE_DIFFICULTY_GLINT } from './filters/DifficultyGlintFilter';
 
 export class GameEngine extends BaseStageEngine {
   public player: Player;
@@ -34,6 +35,7 @@ export class GameEngine extends BaseStageEngine {
   private revealCurtainTimer: number = 0;
   private revealFlashTimer: number = 0;
   private lastMoIntroLocked: boolean = false;
+  private difficultyGlintFilter: DifficultyGlintFilter | null = null;
   private hadSpellcardOverlay: boolean = false;
   private readonly reusableStruggleState = {
     active: false,
@@ -531,10 +533,25 @@ export class GameEngine extends BaseStageEngine {
 
   private applyDifficultyVisuals(difficulty?: string): void {
     const norm = difficulty === 'no_mercy' ? 'no_mercy' : difficulty === 'difficult' ? 'difficult' : 'normal';
-    const entityTint = norm === 'difficult' ? 0xff8a8a : norm === 'no_mercy' ? 0xcea0ff : 0xffffff;
     const bulletTint = norm === 'difficult' ? 0xffb4b4 : norm === 'no_mercy' ? 0xddbfff : 0xffffff;
-    this.enemySystem.setDifficultyTint(entityTint);
-    this.boss.setDifficultyTint(entityTint);
+
+    // Keep base sprites untouched (0xffffff) and layer a Minecraft-style animated glint filter on top
+    if (ENABLE_DIFFICULTY_GLINT && (norm === 'difficult' || norm === 'no_mercy')) {
+      if (!this.difficultyGlintFilter) {
+        this.difficultyGlintFilter = new DifficultyGlintFilter(norm);
+      } else {
+        this.difficultyGlintFilter.setMode(norm);
+      }
+      this.enemySystem.setDifficultyTint(0xffffff);
+      this.boss.setDifficultyTint(0xffffff);
+      this.enemySystem.setDifficultyFilter(this.difficultyGlintFilter);
+      this.boss.setDifficultyFilter(this.difficultyGlintFilter);
+    } else {
+      this.enemySystem.setDifficultyTint(0xffffff);
+      this.boss.setDifficultyTint(0xffffff);
+      this.enemySystem.setDifficultyFilter(null);
+      this.boss.setDifficultyFilter(null);
+    }
     this.bulletSystem.setDifficultyBulletTint(bulletTint, norm);
   }
 
@@ -595,6 +612,7 @@ export class GameEngine extends BaseStageEngine {
 
   public update(dt: number, keys: Record<string, boolean>, moveVec?: { dx: number; dy: number }): void {
     this.animTimer += dt;
+    this.difficultyGlintFilter?.advance(dt);
 
     // Detectar si el Master Spark está en fase de carga o de disparo
     const masterSpark = this.laserSystem.lasers.find(l => l.ownerId === 'player');

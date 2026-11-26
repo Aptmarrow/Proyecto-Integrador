@@ -19,6 +19,7 @@ export interface EnemyConfig {
   texture?: PIXI.Texture;
   isMiniboss?: boolean;
   difficultyTint?: number;
+  difficultyFilter?: PIXI.Filter | null;
   customParams?: Record<string, any>;
 }
 
@@ -45,6 +46,7 @@ export class Enemy {
   public fuseProgress: number = 0;
   public facingAngle: number = Math.PI;
   public difficultyTint: number = 0xffffff;
+  private difficultyFilter: PIXI.Filter | null = null;
   public customParams: Record<string, any>;
 
   public container = new PIXI.Container();
@@ -69,6 +71,7 @@ export class Enemy {
     this.shootInterval = config.shootInterval ?? (this.type === 'big_fairy' ? 0.35 : 1.2);
     this.shootTimer = -(config.shootDelay ?? 0.4);
     this.difficultyTint = config.difficultyTint ?? 0xffffff;
+    this.difficultyFilter = config.difficultyFilter ?? null;
     this.customParams = config.customParams || {};
 
     parentContainer.addChild(this.container);
@@ -79,6 +82,7 @@ export class Enemy {
       this.baseScale = this.isMiniboss ? 0.84 : (this.type === 'third_enemy' ? 0.54 : (this.type === 'big_fairy' ? 0.9 : 0.44));
       sprite.scale.set(this.baseScale);
       sprite.tint = this.difficultyTint;
+      sprite.filters = this.difficultyFilter ? [this.difficultyFilter] : null;
       this.sprite = sprite;
       if (this.isMiniboss) {
         const ring = this.wingGlow;
@@ -112,6 +116,13 @@ export class Enemy {
     this.difficultyTint = tint;
     if (this.sprite instanceof PIXI.Sprite) {
       this.sprite.tint = tint;
+    }
+  }
+
+  public setDifficultyFilter(filter: PIXI.Filter | null): void {
+    this.difficultyFilter = filter;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.filters = filter ? [filter] : null;
     }
   }
 

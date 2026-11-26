@@ -1897,9 +1897,9 @@ class DanmakrewSimulationWorker {
         for (const sgn of [-1, 1]) {
           const perp = b.angle + sgn * (Math.PI / 2);
           for (let sp = 0; sp < pairsPerSide; sp++) {
-            const jitter = (Math.random() - 0.5) * 0.42;
-            const spd = (110 + sp * 28 + Math.random() * 25) * statScale;
-            this.spawnEnemyBullet(b.x, b.y, perp + jitter, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
+            const fanOffset = (sp - (pairsPerSide - 1) / 2) * 0.06;
+            const spd = (118 + sp * 32) * statScale;
+            this.spawnEnemyBullet(b.x, b.y, perp + fanOffset, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
           }
         }
       }
@@ -1936,9 +1936,9 @@ class DanmakrewSimulationWorker {
             for (const sgn of [-1, 1]) {
               const perp = lineAngle + sgn * (Math.PI / 2);
               for (let sp = 0; sp < sparksPerSide; sp++) {
-                const spread = (Math.random() - 0.5) * 0.48;
-                const spd = (100 + sp * 30 + Math.random() * 30) * statScale;
-                this.spawnEnemyBullet(nx, ny, perp + spread, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
+                const fanOffset = (sp - (sparksPerSide - 1) / 2) * 0.05;
+                const spd = (108 + sp * 32) * statScale;
+                this.spawnEnemyBullet(nx, ny, perp + fanOffset, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
               }
             }
           }

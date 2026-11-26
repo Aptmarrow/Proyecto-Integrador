@@ -41,6 +41,7 @@ export class Boss {
   public bossId: string = 'first_boss';
   public currentSpriteUrl: string = '/assets/sprites/FirstBoss.png';
   public difficultyTint: number = 0xffffff;
+  private difficultyFilter: PIXI.Filter | null = null;
   public angle: number = Math.PI;
   private displayAngle: number = Math.PI;
   public renderHudOnly: boolean = false;
@@ -117,6 +118,13 @@ export class Boss {
     }
   }
 
+  public setDifficultyFilter(filter: PIXI.Filter | null): void {
+    this.difficultyFilter = filter;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.filters = filter ? [filter] : null;
+    }
+  }
+
   private initStaticAura(): void {
     this.auraGraphics.clear();
     this.auraGraphics.beginFill(0x00f2fe, 0.25);
@@ -135,6 +143,7 @@ export class Boss {
       this.sprite.texture = tex;
       this.sprite.scale.set(0.42);
       this.sprite.tint = this.difficultyTint;
+      this.sprite.filters = this.difficultyFilter ? [this.difficultyFilter] : null;
     } else {
       if (this.sprite && this.sprite.parent) {
         this.sprite.parent.removeChild(this.sprite);
@@ -143,6 +152,7 @@ export class Boss {
       next.anchor.set(0.5);
       next.scale.set(0.42);
       next.tint = this.difficultyTint;
+      next.filters = this.difficultyFilter ? [this.difficultyFilter] : null;
       next.position.set(0, 0);
       this.sprite = next;
       this.container.addChild(next);
@@ -155,6 +165,7 @@ export class Boss {
       sprite.anchor.set(0.5);
       sprite.scale.set(0.42);
       sprite.tint = this.difficultyTint;
+      sprite.filters = this.difficultyFilter ? [this.difficultyFilter] : null;
       sprite.position.set(0, 0);
       this.sprite = sprite;
       this.container.addChild(sprite);

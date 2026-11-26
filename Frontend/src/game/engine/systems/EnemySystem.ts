@@ -46,6 +46,7 @@ export class EnemySystem {
   private explosions: KamikazeExplosionFx[] = [];
   private explosionGraphics = new PIXI.Graphics();
   private difficultyTint: number = 0xffffff;
+  private difficultyFilter: PIXI.Filter | null = null;
 
   constructor(parentContainer?: PIXI.Container) {
     this.container = new PIXI.Container();
@@ -67,6 +68,14 @@ export class EnemySystem {
     this.difficultyTint = tint;
     for (const enemy of this.enemies) {
       enemy.setDifficultyTint(tint);
+    }
+  }
+
+  public setDifficultyFilter(filter: PIXI.Filter | null): void {
+    if (this.difficultyFilter === filter) return;
+    this.difficultyFilter = filter;
+    for (const enemy of this.enemies) {
+      enemy.setDifficultyFilter(filter);
     }
   }
 
@@ -125,6 +134,7 @@ export class EnemySystem {
           radius: se.radius * scaleX,
           isMiniboss: Boolean(se.isMiniboss),
           difficultyTint: this.difficultyTint,
+          difficultyFilter: this.difficultyFilter,
           texture: tex,
         });
         this.enemies.push(existing);
@@ -248,6 +258,7 @@ export class EnemySystem {
     const enemy = new Enemy(this.container, {
       ...config,
       difficultyTint: config.difficultyTint ?? this.difficultyTint,
+      difficultyFilter: config.difficultyFilter !== undefined ? config.difficultyFilter : this.difficultyFilter,
       texture: tex,
     });
     this.enemies.push(enemy);
