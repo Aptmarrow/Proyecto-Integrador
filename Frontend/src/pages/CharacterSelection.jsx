@@ -376,6 +376,10 @@ function normalizePlayerReady(roomData, fallbackReady = {}) {
 
 function getWsSignalUrl() {
   const wsEnv = (import.meta.env.VITE_WS_URL || '').trim();
+  if (wsEnv === 'same-origin') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/signal`;
+  }
   if (wsEnv) {
     return wsEnv.endsWith('/signal') ? wsEnv : `${wsEnv.replace(/\/$/, '')}/signal`;
   }

@@ -1,0 +1,22 @@
+.git
+.github
+**/node_modules
+**/dist
+**/dist-ssr
+**/.env
+**/.env.*
+!**/.env.example
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.log
+**/*.key
+**/*.pem
+**/*.crt
+HttpsNmg-*
+Jogo bonito
+postman
+scripts
+Backend/data
+Backend/test
+
