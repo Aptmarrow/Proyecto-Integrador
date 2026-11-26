@@ -10,6 +10,9 @@
     "dev:frontend": "npm --prefix ./Frontend run dev",
     "build:frontend": "npm --prefix ./Frontend run build",
     "typecheck:frontend": "npm --prefix ./Frontend run typecheck",
-    "test:physics": "node ./Backend/scripts/testPhysics.js"
+    "test:backend": "npm --prefix ./Backend test",
+    "test:coverage": "npm --prefix ./Backend run test:coverage",
+    "test:physics": "node ./Backend/scripts/testPhysics.js",
+    "docs:openapi": "npm --prefix ./Backend run docs:openapi"
   }
 }

@@ -5,11 +5,17 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "test": "node --test test/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage test/*.test.js",
+    "test:physics": "node scripts/testPhysics.js",
+    "docs:openapi": "node scripts/generateOpenApi.js"
   },
   "dependencies": {
     "@fastify/cors": "^8.5.0",
     "@fastify/rate-limit": "^8.1.1",
+    "@fastify/swagger": "^8.15.0",
+    "@fastify/swagger-ui": "^4.2.0",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
     "fastify": "^4.29.1",

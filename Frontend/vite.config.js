@@ -74,6 +74,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/docs': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false,
+      },
       '/signal': {
         target: 'ws://localhost:9001',
         ws: true,
@@ -93,6 +98,11 @@ export default defineConfig({
     // En Docker, el backend es alcanzable por el nombre del servicio "api"
     proxy: {
       '/api': {
+        target: 'http://api:8080',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/docs': {
         target: 'http://api:8080',
         changeOrigin: true,
         secure: false,
