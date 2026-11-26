@@ -37,32 +37,27 @@ jobs:
     needs: build-containers
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Railway Deploy Webhook (if configured)
-        if: ${{ secrets.RAILWAY_WEBHOOK_URL != '' }}
+      - name: Deploy to configured Cloud target (Railway or VPS)
         env:
           RAILWAY_WEBHOOK_URL: ${{ secrets.RAILWAY_WEBHOOK_URL }}
-        run: |
-          curl --fail --silent --show-error -X POST "$RAILWAY_WEBHOOK_URL"
-          echo "Railway deployment triggered successfully."
-
-      - name: Deploy via SSH to Cloud VPS (if configured)
-        if: ${{ secrets.VPS_HOST != '' && secrets.VPS_USER != '' && secrets.VPS_SSH_KEY != '' }}
-        env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH || '~/Proyecto-Integrador' }}
+          VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$VPS_SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
-          ssh -i ~/.ssh/deploy_key "${VPS_USER}@${VPS_HOST}" \
-            "cd ${VPS_DEPLOY_PATH} && git pull --ff-only origin main && docker compose up -d --build"
-
-      - name: Deployment target status
-        if: ${{ secrets.RAILWAY_WEBHOOK_URL == '' && secrets.VPS_HOST == '' }}
-        run: |
-          echo "Docker build & tests passed."
-          echo "Configure GitHub Secrets (RAILWAY_WEBHOOK_URL, or VPS_HOST + VPS_USER + VPS_SSH_KEY) to enable automatic remote rollout."
-
+          if [ -n "$RAILWAY_WEBHOOK_URL" ]; then
+            curl --fail --silent --show-error -X POST "$RAILWAY_WEBHOOK_URL"
+            echo "Railway deployment triggered successfully."
+          elif [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_SSH_KEY" ]; then
+            DEPLOY_DIR="${VPS_DEPLOY_PATH:-~/Proyecto-Integrador}"
+            mkdir -p ~/.ssh
+            printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+            chmod 600 ~/.ssh/deploy_key
+            ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+            ssh -i ~/.ssh/deploy_key "${VPS_USER}@${VPS_HOST}" \
+              "cd ${DEPLOY_DIR} && git pull --ff-only origin main && docker compose up -d --build"
+            echo "VPS deployment completed successfully."
+          else
+            echo "Docker build & tests passed."
+            echo "Configure GitHub Secrets (RAILWAY_WEBHOOK_URL, or VPS_HOST + VPS_USER + VPS_SSH_KEY) to enable automatic remote rollout."
+          fi
