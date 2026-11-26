@@ -20,13 +20,12 @@
 
 'use strict';
 
+require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const { WebSocket } = require('ws');
-const Database = require('better-sqlite3');
-const path = require('path');
+const db = require('../src/config/database');
 
-const API     = process.env.API_URL  || 'http://localhost:8080';
-const WS      = process.env.WS_URL   || 'ws://localhost:9001';
-const DB_PATH = process.env.DB_PATH  || path.join(__dirname, '../data/danmakrew.db');
+const API = process.env.API_URL || 'http://localhost:8080';
+const WS  = process.env.WS_URL  || 'ws://localhost:9001';
 
 const P1 = { email: process.env.P1_EMAIL || 'p1@debug.com', password: process.env.P1_PASS || 'debug1234' };
 const P2 = { email: process.env.P2_EMAIL || 'p2@debug.com', password: process.env.P2_PASS || 'debug1234' };
@@ -56,11 +55,12 @@ async function tryRegister(email, password, username) {
   await api('POST', '/api/auth/register', { email, password, username });
 }
 
-function forceVerify(email) {
-  const db = new Database(DB_PATH);
-  const result = db.prepare('UPDATE users SET is_verified = 1, verification_token = NULL WHERE email = ?').run(email);
-  db.close();
-  if (result.changes > 0) log('setup', `${email} verificado en DB`);
+async function forceVerify(email) {
+  const result = await db.query(
+    'UPDATE users SET is_verified = 1, verification_token = NULL WHERE email = $1',
+    [email]
+  );
+  if (result.rowCount > 0) log('setup', `${email} verificado en DB`);
 }
 
 function wsConnect(url, label) {
@@ -116,8 +116,8 @@ async function main() {
   log('setup', 'Registrando jugadores…');
   await tryRegister(P1.email, P1.password, 'DebugP1');
   await tryRegister(P2.email, P2.password, 'DebugP2');
-  forceVerify(P1.email);
-  forceVerify(P2.email);
+  await forceVerify(P1.email);
+  await forceVerify(P2.email);
 
   const token1 = await login(P1.email, P1.password);
   const token2 = await login(P2.email, P2.password);

@@ -57,14 +57,14 @@ async function userRoutes(fastify) {
 
     const { username, email, password } = result.data;
 
-    const existingUser = User.findByEmail(email);
+    const existingUser = await User.findByEmail(email);
     if (existingUser) {
       if (existingUser.is_verified) {
         return reply.status(400).send({ message: 'El email ya está registrado.' });
       }
 
       const verificationToken = crypto.randomBytes(32).toString('hex');
-      User.setVerificationToken(existingUser.id, verificationToken);
+      await User.setVerificationToken(existingUser.id, verificationToken);
 
       try {
         await sendVerificationEmail(existingUser.email, existingUser.id, verificationToken);
@@ -80,7 +80,7 @@ async function userRoutes(fastify) {
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const userId = generateUserId();
 
-    const newUser = User.create({ id: userId, username, email, password: hashedPassword, verificationToken });
+    const newUser = await User.create({ id: userId, username, email, password: hashedPassword, verificationToken });
 
     try {
       await sendVerificationEmail(newUser.email, newUser.id, verificationToken);
@@ -99,12 +99,12 @@ async function userRoutes(fastify) {
       return reply.status(400).send({ message: 'Faltan parámetros de verificación.' });
     }
 
-    const user = User.findById(userId);
+    const user = await User.findById(userId);
     if (!user || user.email !== email || user.verification_token !== token) {
       return reply.status(400).send({ message: 'Enlace de verificación inválido o expirado.' });
     }
 
-    User.verify(userId);
+    await User.verify(userId);
 
     return reply.send({ message: 'Correo verificado exitosamente. Ya puedes iniciar sesión.' });
   });
@@ -117,7 +117,7 @@ async function userRoutes(fastify) {
     }
 
     const { email } = result.data;
-    const user = User.findByEmail(email);
+    const user = await User.findByEmail(email);
 
     if (!user) {
       return reply.status(404).send({ message: 'No existe una cuenta con ese email.' });
@@ -128,7 +128,7 @@ async function userRoutes(fastify) {
     }
 
     const verificationToken = crypto.randomBytes(32).toString('hex');
-    User.setVerificationToken(user.id, verificationToken);
+    await User.setVerificationToken(user.id, verificationToken);
 
     try {
       await sendVerificationEmail(user.email, user.id, verificationToken);
@@ -142,7 +142,7 @@ async function userRoutes(fastify) {
 
   // GET / — listar usuarios
   fastify.get('/', async (_request, reply) => {
-    return reply.send(User.findAll());
+    return reply.send(await User.findAll());
   });
 
   // POST /login
@@ -154,7 +154,7 @@ async function userRoutes(fastify) {
 
     const { email, password } = result.data;
 
-    const user = User.findByEmail(email);
+    const user = await User.findByEmail(email);
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return reply.status(401).send({ message: 'Credenciales incorrectas.' });
     }
@@ -203,19 +203,19 @@ async function userRoutes(fastify) {
       return reply.status(400).send({ message: 'No puedes enviarte una solicitud a ti mismo.' });
     }
 
-    if (!User.findById(receiverId)) {
+    if (!(await User.findById(receiverId))) {
       return reply.status(404).send({ message: 'Usuario no encontrado.' });
     }
 
-    if (Friend.exists(senderId, receiverId)) {
+    if (await Friend.exists(senderId, receiverId)) {
       return reply.status(400).send({ message: 'Ya son amigos.' });
     }
 
-    if (FriendRequest.hasPending(senderId, receiverId)) {
+    if (await FriendRequest.hasPending(senderId, receiverId)) {
       return reply.status(400).send({ message: 'Ya hay una solicitud pendiente.' });
     }
 
-    FriendRequest.create(senderId, receiverId);
+    await FriendRequest.create(senderId, receiverId);
 
     return reply.send({ message: 'Solicitud de amistad enviada.' });
   });
@@ -228,7 +228,7 @@ async function userRoutes(fastify) {
       return reply.status(403).send({ message: 'No tienes permiso.' });
     }
 
-    const requests = FriendRequest.findPendingForReceiver(targetId);
+    const requests = await FriendRequest.findPendingForReceiver(targetId);
 
     const result = requests.map((fr) => ({
       requestId: fr.id,
@@ -248,7 +248,7 @@ async function userRoutes(fastify) {
     const requestId = parseInt(request.params.requestId, 10);
     const currentUserId = request.user.id;
 
-    const fr = FriendRequest.findById(requestId);
+    const fr = await FriendRequest.findById(requestId);
     if (!fr) return reply.status(404).send({ message: 'Solicitud no encontrada.' });
 
     if (fr.receiver_id !== currentUserId) {
@@ -259,13 +259,22 @@ async function userRoutes(fastify) {
       return reply.status(400).send({ message: 'Esta solicitud ya fue procesada.' });
     }
 
-    FriendRequest.updateStatus(requestId, FRIEND_REQUEST_STATUS.Aceptada);
-    Friend.createPair(fr.sender_id, fr.receiver_id);
+    await FriendRequest.updateStatus(requestId, FRIEND_REQUEST_STATUS.Aceptada);
+    await Friend.createPair(fr.sender_id, fr.receiver_id);
 
     return reply.send({ message: 'Solicitud aceptada. Ahora son amigos.' });
   });
 
   // ---- INVENTORY ENDPOINTS ----
+
+  // GET /user/inventory
+  fastify.get('/user/inventory', { preHandler: authenticate }, async (request, reply) => {
+    let inventory = await Inventory.findByOwner(request.user.id);
+    if (!inventory) {
+      inventory = await Inventory.create(request.user.id);
+    }
+    return reply.send(inventory);
+  });
 
   // POST /user/inventory/chips
   fastify.post('/user/inventory/chips', { preHandler: authenticate }, async (request, reply) => {
@@ -274,13 +283,13 @@ async function userRoutes(fastify) {
       return reply.status(400).send({ message: result.error.issues[0].message });
     }
 
-    let inventory = Inventory.findByOwner(request.user.id);
+    let inventory = await Inventory.findByOwner(request.user.id);
     if (!inventory) {
-      inventory = Inventory.create(request.user.id);
+      inventory = await Inventory.create(request.user.id);
     }
 
     const { name, rarity, level, image, stats } = result.data;
-    const chip = Chip.create({
+    const chip = await Chip.create({
       inventoryId: inventory.id,
       name,
       rarity,

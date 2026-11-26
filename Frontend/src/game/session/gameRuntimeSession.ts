@@ -2,9 +2,10 @@ import { GameEngine } from '../engine/GameEngine';
 import { GameWSClient, type GameSnapshot, type ServerPlayer } from '../network/wsClient';
 import { GameWorkerBridge } from './GameWorkerBridge';
 import { normalizeRole } from './squadState';
+import { getCachedLutProfile } from '../engine/SpriteLutCache';
 
 export type PlayerRole = 'Tank' | 'Support' | 'DPS' | 'Special_Attack';
-export type Difficulty = 'normal' | 'difficult' | 'no_mercy';
+export type Difficulty = 'normal' | 'difficult' | 'no_mercy' | string;
 export type WorkerRuntimeMode = 'connecting' | 'backend-worker' | 'local-worker';
 
 export type SessionQuery = {
@@ -51,6 +52,8 @@ export type RuntimeSessionOptions = {
 const UUID_REGEX = /^[0-9a-f-]{36}$/i;
 
 export function toDifficulty(value: string | null | undefined, fallback: Difficulty = 'normal'): Difficulty {
+  const cal = getCachedLutProfile();
+  if (typeof value === 'string' && cal?.id && value === cal.id) return value;
   if (value === 'difficult' || value === 'no_mercy' || value === 'normal') return value;
   return fallback;
 }
@@ -72,7 +75,7 @@ export function readSessionQuery(search: string, defaultDifficulty: Difficulty =
       : '';
   return {
     roomId: searchParams.get('roomId') || searchParams.get('room') || '',
-    classId: searchParams.get('class') || searchParams.get('character') || 'DPS',
+    classId: searchParams.get('class') || searchParams.get('character') || searchParams.get('role') || 'Special_Attack',
     token: searchParams.get('token') || storedToken,
     difficulty: toDifficulty(searchParams.get('difficulty'), defaultDifficulty),
     world: clampLevelPart(searchParams.get('world'), 1),
@@ -87,12 +90,16 @@ export class GameRuntimeSession {
   private workerBridge: GameWorkerBridge | null = null;
   private snapshotWorker: Worker | null = null;
   private readonly keys: Record<string, boolean> = {};
+  private readonly effectiveKeys: Record<string, boolean> = {};
+  private readonly moveVec = { dx: 0, dy: 0 };
   private readonly options: RuntimeSessionOptions;
   private runtimeMode: WorkerRuntimeMode = 'connecting';
   private myPlayerId = '';
   private animFrameId = 0;
   private lastTime = performance.now();
   private stopped = false;
+  private numpad6Streak = 0;
+  private lastNumpad6At = 0;
 
   private readonly onFirstTouch = () => {
     this.options.onTouchDeviceChange(true);
@@ -114,11 +121,48 @@ export class GameRuntimeSession {
       this.pushStruggle();
     }
 
+    if (!e.repeat) {
+      const isNumpad6 = e.code === 'Numpad6' || (e.location === 3 && e.key === '6');
+      if (isNumpad6) {
+        const nowMs = performance.now();
+        this.numpad6Streak = nowMs - this.lastNumpad6At <= 1500 ? this.numpad6Streak + 1 : 1;
+        this.lastNumpad6At = nowMs;
+        if (this.numpad6Streak >= 3) {
+          this.numpad6Streak = 0;
+          this.lastNumpad6At = 0;
+          this.spawnBossNow();
+          return;
+        }
+      } else if (/^(?:Digit|Numpad)[0-9]$/.test(e.code)) {
+        this.numpad6Streak = 0;
+        this.lastNumpad6At = 0;
+      }
+    }
+
+    if (!e.repeat && this.engine.hasStagePreviewVariants()) {
+      const codeDigit = /^(?:Digit|Numpad)([0-9])$/.exec(e.code)?.[1];
+      const keyDigit = /^[0-9]$/.test(e.key) ? e.key : undefined;
+      const digit = codeDigit ?? keyDigit;
+      if (digit === '0') {
+        if (this.engine.selectStagePreviewVariant(-1)) {
+          return;
+        }
+      } else if (digit && digit >= '5' && digit <= '9') {
+        const variants = this.engine.getStagePreviewVariants();
+        const variantIdx = variants.findIndex((v) => v.key === digit);
+        if (variantIdx >= 0 && this.engine.selectStagePreviewVariant(variantIdx)) {
+          return;
+        }
+      }
+    }
+
     if (this.runtimeMode === 'local-worker') {
       if (e.code === 'Digit1') this.selectRole('DPS');
       if (e.code === 'Digit2') this.selectRole('Tank');
       if (e.code === 'Digit3') this.selectRole('Support');
       if (e.code === 'Digit4') this.selectRole('Special_Attack');
+      if (e.code === 'KeyR' && !e.repeat) this.restartStage();
+      if (e.code === 'KeyN' && !e.repeat) this.goToNextStage();
     }
 
     if (e.code === 'KeyT' && !e.repeat) this.startBeamStruggleTest();
@@ -144,7 +188,11 @@ export class GameRuntimeSession {
     }
     const canvas = document.createElement('canvas');
     options.mountContainer.appendChild(canvas);
-    this.engine = new GameEngine(canvas, 1024, 576, { difficulty: options.difficulty });
+    this.engine = new GameEngine(canvas, 1024, 576, {
+      difficulty: options.difficulty,
+      world: options.world,
+      stage: options.stage,
+    });
     this.engine.setCharacterClass(normalizeRole(options.classId));
   }
 
@@ -162,26 +210,30 @@ export class GameRuntimeSession {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
 
-    // 1. Dedicated Web Worker for 60 FPS Snapshot Buffering & Entity Interpolation
-    try {
-      this.snapshotWorker = new Worker(
-        new URL('../workers/snapshot.worker.ts', import.meta.url),
-        { type: 'module' }
-      );
-      this.snapshotWorker.onmessage = (e: MessageEvent) => {
-        const { type, payload } = e.data || {};
-        if (type === 'RENDER_FRAME' && payload) {
-          this.applySnapshot(payload as GameSnapshot);
-        }
-      };
-    } catch {
-      this.snapshotWorker = null;
-    }
-
-    // 2. Connect to Authoritative Backend WS if valid room UUID + token, with automatic Local Physics Worker fallback
-    const canUseBackendWs = Boolean(this.options.token && this.options.roomId && UUID_REGEX.test(this.options.roomId));
+    // 1. Connect to Authoritative Backend WS if valid room UUID + token, with automatic Local Physics Worker fallback
+    const calProfile = getCachedLutProfile();
+    const isCustomCalStage = Boolean(calProfile?.id && this.options.difficulty === calProfile.id);
+    const canUseBackendWs = Boolean(
+      !isCustomCalStage && this.options.token && this.options.roomId && UUID_REGEX.test(this.options.roomId)
+    );
 
     if (canUseBackendWs) {
+      // Only allocate Snapshot Interpolation Worker when running online multiplayer WS!
+      try {
+        this.snapshotWorker = new Worker(
+          new URL('../workers/snapshot.worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+        this.snapshotWorker.onmessage = (e: MessageEvent) => {
+          const { type, payload } = e.data || {};
+          if (type === 'RENDER_FRAME' && payload) {
+            this.applySnapshot(payload as GameSnapshot);
+          }
+        };
+      } catch {
+        this.snapshotWorker = null;
+      }
+
       this.setMode('connecting', 'Sincronizando sala multijugador...');
       this.gameClient = new GameWSClient(this.options.token);
       this.gameClient
@@ -213,6 +265,10 @@ export class GameRuntimeSession {
           if (this.stopped) return;
           this.gameClient?.disconnect();
           this.gameClient = null;
+          if (this.snapshotWorker) {
+            this.snapshotWorker.terminate();
+            this.snapshotWorker = null;
+          }
           this.startLocalSimulationWorker();
         });
     } else {
@@ -293,6 +349,10 @@ export class GameRuntimeSession {
     this.options.setSelectedRole(role);
     this.engine.setCharacterClass(role);
     this.workerBridge?.setRole(role);
+  }
+
+  public selectStagePreviewVariant(index: number): boolean {
+    return this.engine.selectStagePreviewVariant(index);
   }
 
   public triggerSkill(): void {
@@ -389,35 +449,47 @@ export class GameRuntimeSession {
       frameInput.touchFocus
     );
 
-    const effectiveKeys: Record<string, boolean> = {
-      ...this.keys,
-      KeyZ: isShooting,
-      Space: isShooting,
-      ShiftLeft: isFocusing,
-      ShiftRight: isFocusing,
-      Shift: isFocusing,
-      focus: isFocusing,
-      isFocus: isFocusing,
-    };
+    const ek = this.effectiveKeys;
+    ek.ArrowLeft = !!this.keys.ArrowLeft;
+    ek.ArrowRight = !!this.keys.ArrowRight;
+    ek.ArrowUp = !!this.keys.ArrowUp;
+    ek.ArrowDown = !!this.keys.ArrowDown;
+    ek.KeyA = !!this.keys.KeyA;
+    ek.KeyD = !!this.keys.KeyD;
+    ek.KeyW = !!this.keys.KeyW;
+    ek.KeyS = !!this.keys.KeyS;
+    ek.KeyZ = isShooting;
+    ek.Space = isShooting;
+    ek.ShiftLeft = isFocusing;
+    ek.ShiftRight = isFocusing;
+    ek.Shift = isFocusing;
+    ek.focus = isFocusing;
+    ek.isFocus = isFocusing;
 
     const action = isShooting && !this.engine.isBeamStruggle ? 'shoot' : null;
 
     if (this.gameClient && this.runtimeMode === 'backend-worker') {
       this.gameClient.sendInput(dx, dy, action, isFocusing);
+      if (this.snapshotWorker) {
+        this.snapshotWorker.postMessage({ type: 'GET_INTERPOLATED_STATE' });
+      }
     } else if (this.workerBridge?.isActive()) {
       this.workerBridge.sendInput(dx, dy, action, isFocusing);
     }
 
-    if (this.snapshotWorker) {
-      this.snapshotWorker.postMessage({ type: 'GET_INTERPOLATED_STATE' });
-    }
-
-    this.engine.update(dt, effectiveKeys, { dx, dy });
+    this.moveVec.dx = dx;
+    this.moveVec.dy = dy;
+    this.engine.update(dt, ek, this.moveVec);
     this.options.onEngineFrame(this.engine);
     this.animFrameId = requestAnimationFrame(this.loop);
   };
 
   private handleIncomingSnapshot(snapshot: GameSnapshot): void {
+    if (this.runtimeMode === 'local-worker') {
+      // En modo local (Web Worker), aplicar directo sin el buffer artificial de delay de red (0ms lag)
+      this.applySnapshot(snapshot);
+      return;
+    }
     if (this.snapshotWorker) {
       this.snapshotWorker.postMessage({ type: 'ADD_SNAPSHOT', payload: snapshot });
     } else {
@@ -438,6 +510,7 @@ export class GameRuntimeSession {
     if (snapshot.struggle) this.engine.applyBackendStruggle(snapshot.struggle);
     if (snapshot.enemies) this.engine.applyBackendEnemies(snapshot.enemies);
     if (snapshot.items) this.engine.applyBackendItems(snapshot.items);
+    if (snapshot.stageTime !== undefined) this.engine.setSyncedStageTime(snapshot.stageTime);
     if (snapshot.campaign) this.engine.applyBackendCampaign(snapshot.campaign);
   }
 }

@@ -33,7 +33,7 @@ async function validateToken(token) {
   if (token.startsWith('mock_token_') || token.startsWith('guest_') || token.startsWith('dev_') || token.startsWith('test-')) {
     return token;
   }
-  const result = verifyToken(token);
+  const result = await verifyToken(token);
   return result ? result.user.id : null;
 }
 

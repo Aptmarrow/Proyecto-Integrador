@@ -18,7 +18,7 @@ async function authenticate(request, reply) {
     return;
   }
 
-  const result = verifyToken(token);
+  const result = await verifyToken(token);
   if (!result) {
     return reply.status(401).send({ message: 'Token inválido o expirado.' });
   }

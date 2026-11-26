@@ -24,6 +24,8 @@ export interface ServerBullet {
   vx?: number;
   vy?: number;
   color?: string | number;
+  spriteType?: string;
+  angle?: number;
 }
 
 export interface ServerWall {
@@ -55,6 +57,17 @@ export interface ServerLaser {
   isMegaBeam?: boolean;
 }
 
+export interface ServerBossDashLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  progress: number;
+  active: boolean;
+  completed?: boolean;
+  isReturn?: boolean;
+}
+
 export interface ServerBoss {
   x: number;
   y: number;
@@ -69,6 +82,16 @@ export interface ServerBoss {
   isDefeated?: boolean;
   isRefilling?: boolean;
   isLockedForBeam?: boolean;
+  bossId?: string;
+  fullBossName?: string;
+  sprite?: string;
+  angle?: number;
+  renderHudOnly?: boolean;
+  isMiniboss?: boolean;
+  moIntroActive?: boolean;
+  moIntroProgress?: number;
+  moDashState?: string;
+  moDashLines?: ServerBossDashLine[];
 }
 
 export interface ServerEnemy {
@@ -79,6 +102,11 @@ export interface ServerEnemy {
   hp: number;
   maxHp: number;
   radius: number;
+  angle?: number;
+  isMiniboss?: boolean;
+  sprite?: string;
+  minibossName?: string;
+  fuseProgress?: number;
 }
 
 export interface ServerItem {
@@ -87,6 +115,8 @@ export interface ServerItem {
   y: number;
   type: 'power' | 'point' | 'bomb_frag' | 'life_frag' | string;
 }
+
+import type { SpaceThemeSpec } from '../campaign/spaceCampaignCatalog';
 
 export interface ServerCampaign {
   difficulty: string;
@@ -101,6 +131,13 @@ export interface ServerCampaign {
   clearSubtext: string;
   worldName?: string;
   stageTitle?: string;
+  hasBoss?: boolean;
+  minibossName?: string | null;
+  bossSpawnAt?: number;
+  bossWarningAt?: number;
+  spaceTheme?: SpaceThemeSpec;
+  autoAdvancing?: boolean;
+  transitionBlackAlpha?: number;
 }
 
 export interface ServerBeamStruggle {
@@ -198,9 +235,12 @@ export class GameWSClient {
       if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL) {
         url = `${import.meta.env.VITE_WS_URL}/game?token=${encodeURIComponent(this.token)}`;
       } else if (typeof window !== 'undefined') {
-        const hostname = window.location.hostname || 'localhost';
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        url = `${protocol}//${hostname}:${this.defaultPort}/game?token=${encodeURIComponent(this.token)}`;
+        if (window.location.protocol === 'https:') {
+          url = `wss://${window.location.host}/game?token=${encodeURIComponent(this.token)}`;
+        } else {
+          const hostname = window.location.hostname || 'localhost';
+          url = `ws://${hostname}:${this.defaultPort}/game?token=${encodeURIComponent(this.token)}`;
+        }
       } else {
         url = `ws://localhost:${this.defaultPort}/game?token=${encodeURIComponent(this.token)}`;
       }

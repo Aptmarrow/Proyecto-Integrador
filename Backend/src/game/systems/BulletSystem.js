@@ -6,9 +6,9 @@ const { WORLD_WIDTH, WORLD_HEIGHT, PLAYER_RADIUS } = require('../physics');
 
 const BULLET_RADIUS = 4;
 const BULLET_SPEED  = 400;  // px / s
-const BULLET_TTL    = 3;    // seconds
+const BULLET_TTL    = 3.8;  // seconds
 // Largest radius we ever query from a player position
-const MAX_QUERY_R   = PLAYER_RADIUS + BULLET_RADIUS;
+const MAX_QUERY_R   = PLAYER_RADIUS + 16;
 
 class BulletSystem {
   constructor() {
@@ -21,12 +21,11 @@ class BulletSystem {
 
   /**
    * Spawn a new bullet from (x, y) in direction `angle` (radians).
-   * Called by GameRoom when a player or boss shoots.
    */
-  spawn(ownerId, x, y, angle, speed = BULLET_SPEED, radius = BULLET_RADIUS, ttl = BULLET_TTL, type = 'normal', damage = 5) {
+  spawn(ownerId, x, y, angle, speed = BULLET_SPEED, radius = BULLET_RADIUS, ttl = BULLET_TTL, type = 'normal', damage = 5, color = null, opts = null) {
     const vx     = Math.cos(angle) * speed;
     const vy     = Math.sin(angle) * speed;
-    const bullet = acquireBullet(ownerId, x, y, vx, vy, radius, ttl, type, damage);
+    const bullet = acquireBullet(ownerId, x, y, vx, vy, radius, ttl, type, damage, color, opts);
     this.active.push(bullet);
     this.hash.insert(bullet);
     return bullet;
@@ -35,39 +34,85 @@ class BulletSystem {
   /**
    * Spawn a bullet directly with velocity components vx, vy.
    */
-  spawnBullet(ownerId, x, y, vx, vy, radius = BULLET_RADIUS, ttl = BULLET_TTL, type = 'normal', damage = 5) {
-    const bullet = acquireBullet(ownerId, x, y, vx, vy, radius, ttl, type, damage);
+  spawnBullet(ownerId, x, y, vx, vy, radius = BULLET_RADIUS, ttl = BULLET_TTL, type = 'normal', damage = 5, color = null, opts = null) {
+    const bullet = acquireBullet(ownerId, x, y, vx, vy, radius, ttl, type, damage, color, opts);
     this.active.push(bullet);
     this.hash.insert(bullet);
     return bullet;
   }
 
+  _findNearestPlayerPos(x, y, players) {
+    if (!players) return null;
+    let best = null;
+    let bestD2 = Infinity;
+    for (const [, p] of players) {
+      if (!p.active || p.hp <= 0) continue;
+      const pos = p.body.getPosition();
+      const d2 = (pos.x - x) * (pos.x - x) + (pos.y - y) * (pos.y - y);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = pos;
+      }
+    }
+    return best;
+  }
+
+  _splitBoulder(b) {
+    const count = b.splitCount || 6;
+    const sx = Math.max(12, Math.min(WORLD_WIDTH - 12, b.x));
+    const sy = Math.max(12, Math.min(WORLD_HEIGHT - 12, b.y));
+    const baseRot = Math.atan2(b.vy, b.vx);
+    for (let k = 0; k < count; k++) {
+      const a = baseRot + (Math.PI * 2 * k) / count;
+      this.spawn(
+        'boss',
+        sx,
+        sy,
+        a,
+        165,
+        4.5,
+        3.4,
+        'normal',
+        4,
+        b.color || 0x9ca3af,
+        { spriteType: b.spriteType || 'MObullet4png' }
+      );
+    }
+  }
+
   /**
    * Advance the simulation one tick.
-   *
-   * Phases:
-   *   1. Move every bullet and re-register it in the spatial hash.
-   *      Remove bullets that expired or left the field.
-   *   2. For each active player, query nearby bullets via the spatial hash
-   *      and perform circle-circle collision checks (boss bullets vs players).
-   *   3. Remove bullets that hit a player.
-   *
-   * @param {number} deltaTime  — fixed tick delta (1/60 s)
-   * @param {Map<string, {body, active}>} players — from GameRoom
-   * @returns {{ playerId: string, bulletId: string, ownerId: string }[]} hit events
    */
   update(deltaTime, players) {
+    const toSplit = [];
+
     // ── Phase 1: move & expire ────────────────────────────────────────────────
     for (let i = this.active.length - 1; i >= 0; i--) {
       const b = this.active[i];
 
       this.hash.remove(b);
-      b.update(deltaTime);
+      const targetPos = b.homeRate > 0 && b.homeTime > 0 ? this._findNearestPlayerPos(b.x, b.y, players) : null;
+      b.update(deltaTime, targetPos);
+
+      const hitMapEdge =
+        b.splitOnImpact &&
+        b.age > 0.14 &&
+        (b.x <= 6 ||
+          b.y <= 6 ||
+          b.y >= WORLD_HEIGHT - 6 ||
+          (b.x >= WORLD_WIDTH - 6 && b.vx > 0));
+
+      if (hitMapEdge) {
+        toSplit.push(b);
+        releaseBullet(b);
+        this.active.splice(i, 1);
+        continue;
+      }
 
       if (
         b.ttl <= 0 ||
-        b.x < 0 || b.x > WORLD_WIDTH ||
-        b.y < 0 || b.y > WORLD_HEIGHT
+        b.x < -24 || b.x > WORLD_WIDTH + 24 ||
+        b.y < -24 || b.y > WORLD_HEIGHT + 24
       ) {
         releaseBullet(b);
         this.active.splice(i, 1);
@@ -79,17 +124,16 @@ class BulletSystem {
 
     // ── Phase 2 & 3: collision detection ─────────────────────────────────────
     const hits    = [];
-    const toKill  = new Set(); // bullets to remove after the loop
+    const toKill  = new Set();
 
     for (const [playerId, player] of players) {
-      if (!player.active) continue;
+      if (!player.active || player.hp <= 0) continue;
       const pos = player.body.getPosition();
 
       const candidates = this.hash.query(pos.x, pos.y, MAX_QUERY_R);
       for (const b of candidates) {
-        if (toKill.has(b)) continue; // already hit something this tick
-        if (b.ownerId === playerId) continue; // no self-hit
-        // In PvE, only boss bullets damage players
+        if (toKill.has(b)) continue;
+        if (b.ownerId === playerId) continue;
         if (b.ownerId !== 'boss') continue;
 
         const dx = b.x - pos.x;
@@ -98,12 +142,12 @@ class BulletSystem {
         const minDist = hitboxRadius + b.radius;
         if (dx * dx + dy * dy <= minDist * minDist) {
           hits.push({ playerId, bulletId: b.id, ownerId: b.ownerId, damage: b.damage || 5 });
+          if (b.splitOnImpact) toSplit.push(b);
           toKill.add(b);
         }
       }
     }
 
-    // Remove hit bullets (in reverse to keep indices stable)
     for (const b of toKill) {
       this.hash.remove(b);
       releaseBullet(b);
@@ -111,12 +155,13 @@ class BulletSystem {
       if (idx !== -1) this.active.splice(idx, 1);
     }
 
+    for (const b of toSplit) {
+      this._splitBoulder(b);
+    }
+
     return hits;
   }
 
-  /**
-   * Remove and release all active bullets owned by `ownerId`.
-   */
   clearByOwner(ownerId) {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const b = this.active[i];
@@ -128,9 +173,6 @@ class BulletSystem {
     }
   }
 
-  /**
-   * Remove and release all active bullets.
-   */
   clear() {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const b = this.active[i];
@@ -140,19 +182,25 @@ class BulletSystem {
     this.active.length = 0;
   }
 
-  /**
-   * Serialise active bullets for the snapshot.
-   * Sends id, position, radius, ownerId and type.
-   */
   getState() {
-    return this.active.map((b) => ({
-      id:      b.id,
-      x:       b.x,
-      y:       b.y,
-      radius:  b.radius,
-      ownerId: b.ownerId,
-      type:    b.type || 'normal',
-    }));
+    return this.active.map((b) => {
+      const item = {
+        id:      b.id,
+        x:       b.x,
+        y:       b.y,
+        radius:  b.radius,
+        ownerId: b.ownerId,
+        type:    b.type || 'normal',
+      };
+      if (typeof b.color === 'number') {
+        item.color = b.color;
+      }
+      if (b.spriteType) {
+        item.spriteType = b.spriteType;
+        item.angle = Number(Math.atan2(b.vy, b.vx).toFixed(2));
+      }
+      return item;
+    });
   }
 }
 

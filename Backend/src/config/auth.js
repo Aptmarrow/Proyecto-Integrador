@@ -21,11 +21,11 @@ function signToken(user) {
   );
 }
 
-function verifyToken(token) {
+async function verifyToken(token) {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const user = User.findById(payload.sub);
+    const user = await User.findById(payload.sub);
     if (!user) return null;
     return { user, payload };
   } catch {

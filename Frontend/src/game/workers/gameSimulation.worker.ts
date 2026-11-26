@@ -12,6 +12,14 @@ import type {
   ServerCampaign,
   ServerBeamStruggle,
 } from '../network/wsClient';
+import {
+  getSpaceStageConfig,
+  computeBossMovement,
+  fireBossPattern,
+  type SpaceStageConfig,
+  type BossPhaseProfile,
+} from '../campaign/spaceCampaignCatalog';
+import type { BulletSpawnOpts } from '../campaign/normalCampaignOverhaul';
 
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
@@ -99,6 +107,15 @@ interface SimBullet {
   type: 'normal' | 'autoaim' | 'laser';
   damage: number;
   color: number;
+  spriteType?: string;
+  accel?: number;
+  expAccel?: number;
+  maxSpeed?: number;
+  homeRate?: number;
+  homeTime?: number;
+  splitOnImpact?: boolean;
+  splitCount?: number;
+  age?: number;
 }
 
 interface SimWall {
@@ -151,11 +168,13 @@ interface SimEnemy {
   shootInterval: number;
   shootTimer: number;
   spawnTime: number;
-  freq: number;
-  amp: number;
-  phase: number;
-  hoverX: number;
-  hoverTime: number;
+  bulletColor: number;
+  isMiniboss?: boolean;
+  minibossName?: string;
+  sprite?: string;
+  angle?: number;
+  fuseProgress?: number;
+  customParams: Record<string, any>;
 }
 
 interface SimItem {
@@ -168,53 +187,7 @@ interface SimItem {
   magnetizedTo: string | null;
 }
 
-const BOSS_SPELLS = [
-  { phase: 1, name: 'Twilight Non-Spell "Evening Flutter"', isSpellCard: false },
-  { phase: 2, name: 'Night Sign "Night Bird"', isSpellCard: true },
-  { phase: 3, name: 'Darkness Non-Spell "Blind Night"', isSpellCard: false },
-  { phase: 4, name: 'Darkness Sign "Demarcation"', isSpellCard: true },
-  { phase: 5, name: 'Final Eclipse "Moonlight Ray"', isSpellCard: true },
-];
-
-const WORLD_NAMES_BY_DIFFICULTY: Record<'normal' | 'difficult' | 'no_mercy', [string, string, string]> = {
-  normal: ['Moonlit Forest', 'Scarlet Riverside', 'Celestial Observatory'],
-  difficult: ['Infernal Peaks', 'Abyssal Depths', 'Storm Citadel'],
-  no_mercy: ['Void Sanctum', 'Shattered Realm', 'Oblivion Edge'],
-};
-
-const STAGE_TITLES: [string, string, string] = [
-  'Danmaku Vanguard',
-  'Crimson Crossfire',
-  'Final Spell Duel',
-];
-
 const TOTAL_STAGES_PER_DIFFICULTY = 9; // 3 worlds × 3 stages
-
-function getStageMeta(difficulty: 'normal' | 'difficult' | 'no_mercy', stageIndex: number) {
-  const clamped = Math.max(0, Math.min(TOTAL_STAGES_PER_DIFFICULTY - 1, stageIndex));
-  const worldIdx = Math.floor(clamped / 3);
-  const stageIdx = clamped % 3;
-  const world = worldIdx + 1;
-  const stage = stageIdx + 1;
-  const worldName = WORLD_NAMES_BY_DIFFICULTY[difficulty][worldIdx];
-  const stageTitle = STAGE_TITLES[stageIdx];
-  const diffLabel = difficulty === 'no_mercy' ? 'NO MERCY' : difficulty === 'difficult' ? 'DIFFICULT' : 'NORMAL';
-  const isFinal = clamped >= TOTAL_STAGES_PER_DIFFICULTY - 1;
-
-  return {
-    world,
-    stage,
-    worldName,
-    stageTitle,
-    bannerText: `WORLD ${world}-${stage} · ${worldName.toUpperCase()}`,
-    bannerSubtext: `${diffLabel} — ${stageTitle}`,
-    clearTitle: isFinal ? `${diffLabel} CAMPAIGN COMPLETE!` : `WORLD ${world} - STAGE ${stage} CLEARED!`,
-    clearSubtext: isFinal
-      ? '¡El escuadrón Danmakrew conquistó todos los mundos!'
-      : `${worldName} · Preparando siguiente sector...`,
-    bossBaseHp: 110 + worldIdx * 30 + stageIdx * 18,
-  };
-}
 
 const SPAWN_POSITIONS = [
   { x: 110, y: 240 },
@@ -237,29 +210,58 @@ class DanmakrewSimulationWorker {
   private tick = 0;
   private stageTime = 0;
   private stageIndex = 0;
-  private difficulty: 'normal' | 'difficult' | 'no_mercy' = 'normal';
+  private difficulty: string = 'normal';
+  private customStageProfile: any = null;
   private stageState: 'intro' | 'waves' | 'boss_warning' | 'boss_battle' | 'stage_clear' = 'intro';
+  private autoAdvanceTimer = 0;
+  private readonly autoAdvanceDuration = 2.0;
   private triggeredEvents = new Set<string>();
   private myPlayerId = 'player-local-host';
   private loopTimer: ReturnType<typeof setInterval> | null = null;
+  private activeEnemyStatScale = 1.0;
 
   private boss = {
-    x: 650,
+    x: 685,
     y: 300,
-    hp: 110,
-    maxHp: 110,
+    targetX: 685,
+    targetY: 300,
+    hp: 112,
+    maxHp: 112,
     phase: 1,
     remainingStocks: 4,
-    spellcardName: BOSS_SPELLS[0].name,
+    spellcardName: 'Fase 1 "Patrulla Lagrange"',
     isSpellCard: false,
     isActive: false,
     isDefeated: false,
     isRefilling: false,
     refillTimer: 0,
     isLockedForBeam: false,
-    attackTimer: 0,
-    laserTimer: 2.5,
-    moveTimer: 0,
+    shootTimer: 0,
+    shotIndex: 0,
+    laserTimer: 0,
+    megaLaserTimer: 0,
+    animTimer: 0,
+    bossId: 'first_boss',
+    sprite: '/assets/sprites/FirstBoss.png',
+    fullBossName: 'FirstBoss',
+    statScale: 1.0,
+    angle: Math.PI,
+    isInvulnerable: false,
+    moIntroActive: false,
+    moIntroProgress: 0,
+    moDashState: 'idle',
+    moDashLines: [] as Array<{ x1: number; y1: number; x2: number; y2: number; progress: number; active: boolean; completed?: boolean; isReturn?: boolean }>,
+    moMode: 'idle' as 'idle' | 'intro' | 'telegraph' | 'dashing' | 'resting',
+    moTimer: 0,
+    moLineIndex: 0,
+    moSegIndex: 0,
+    moDashSpeedScale: 1.0,
+    moDashChain: [] as Array<{ x1: number; y1: number; x2: number; y2: number; isReturn?: boolean }>,
+    moRestDuration: 3.0,
+    moDashHitPlayers: new Set<string>(),
+    moSparkAccum: 0,
+    moRestShotAccum: 0,
+    moSummonTimer: 2.0,
   };
 
   private struggle: ServerBeamStruggle = {
@@ -267,7 +269,7 @@ class DanmakrewSimulationWorker {
     isAligning: false,
     winner: null,
     timer: 0,
-    maxTimer: 5.0,
+    maxTimer: 4.5,
     balance: 50,
     resolutionTimer: 0,
     clashX: 400,
@@ -276,19 +278,100 @@ class DanmakrewSimulationWorker {
 
   private alignTimer = 0;
 
+  private getCurrentSpaceConfig(): SpaceStageConfig {
+    const clamped = Math.max(0, Math.min(TOTAL_STAGES_PER_DIFFICULTY - 1, this.stageIndex));
+    const w = Math.floor(clamped / 3) + 1;
+    const s = (clamped % 3) + 1;
+    return getSpaceStageConfig(this.difficulty, w, s);
+  }
+
+  private getSquadHpScale(): number {
+    let activeCount = 0;
+    for (const [, p] of this.players) {
+      if (p.hp > 0) activeCount++;
+    }
+    const n = Math.max(1, activeCount);
+    return 1 + (n - 1) * 0.42;
+  }
+
+  private getStageMeta() {
+    if (this.customStageProfile) {
+      return {
+        world: this.customStageProfile.world || 1,
+        stage: this.customStageProfile.stage || 1,
+        worldName: this.customStageProfile.worldName || 'Stage 1',
+        stageTitle: this.customStageProfile.stageTitle || 'Stage 1',
+        bannerText: this.customStageProfile.bannerText || 'STAGE 1-1',
+        bannerSubtext: this.customStageProfile.bannerSubtext || '',
+        clearTitle: this.customStageProfile.clearTitle || 'STAGE CLEARED!',
+        clearSubtext: this.customStageProfile.clearSubtext || '',
+        bossSpawnAt: this.customStageProfile.bossSpawnAt ?? 34.5,
+        bossWarningAt: this.customStageProfile.bossWarningAt ?? 31.5,
+        spaceTheme: undefined,
+      };
+    }
+
+    const cfg = this.getCurrentSpaceConfig();
+    const diffLabel =
+      this.difficulty === 'no_mercy' ? 'NoMercy' : this.difficulty === 'difficult' ? 'Dificil' : 'Normal';
+    const isFinal = this.stageIndex >= TOTAL_STAGES_PER_DIFFICULTY - 1;
+
+    return {
+      world: cfg.world,
+      stage: cfg.stage,
+      worldName: cfg.worldName,
+      stageTitle: cfg.stageTitle,
+      bannerText: `MUNDO ${cfg.world}-${cfg.stage} · ${cfg.worldName.toUpperCase()}`,
+      bannerSubtext: `${diffLabel} — ${cfg.stageTitle}`,
+      clearTitle: isFinal
+        ? `¡EXPEDICIÓN ${diffLabel.toUpperCase()} COMPLETADA!`
+        : `¡SECTOR ${cfg.world}-${cfg.stage} DESPEJADO!`,
+      clearSubtext: isFinal
+        ? '¡El escuadrón Danmakrew conquistó los 9 sectores espaciales!'
+        : `${cfg.bossProfile.bossName} derrotado · Preparando siguiente sector...`,
+      bossSpawnAt: cfg.bossSpawnAt,
+      bossWarningAt: cfg.bossWarningAt,
+      spaceTheme: cfg.spaceTheme,
+    };
+  }
+
+  private getActiveBossPhases(): BossPhaseProfile[] {
+    if (Array.isArray(this.customStageProfile?.bossPhases)) {
+      const baseHp = (this.customStageProfile.bossBaseHp || 180) * (this.customStageProfile.difficultyMult || 1);
+      return this.customStageProfile.bossPhases.map((p: any, idx: number) => ({
+        phase: idx + 1,
+        name: p.name,
+        isSpellCard: Boolean(p.isSpellCard),
+        maxHp: Math.round(baseHp),
+        pattern: idx === 0 ? 'crescent_fan' : idx === 1 ? 'star_mandala' : idx === 2 ? 'binary_helix' : idx === 3 ? 'counter_lotus' : 'supernova_symphony',
+        shootInterval: 0.42,
+        laserMode: idx >= 3 ? 'both' : 'targeted',
+        laserInterval: 4.2,
+        megaLaserInterval: idx >= 1 ? 6.5 : 0,
+      }));
+    }
+    return this.getCurrentSpaceConfig().bossProfile.phases;
+  }
+
   public init(
     roomId: string,
     playerId: string,
     classId: string,
     difficulty: string,
     world: number = 1,
-    stage: number = 1
+    stage: number = 1,
+    stageProfile: any = null
   ): void {
     this.stop();
     this.myPlayerId = playerId || 'player-local-host';
-    this.difficulty = difficulty === 'difficult' || difficulty === 'no_mercy' ? difficulty : 'normal';
-    const w = Math.max(1, Math.min(3, Math.floor(Number(world) || 1)));
-    const s = Math.max(1, Math.min(3, Math.floor(Number(stage) || 1)));
+    this.customStageProfile = stageProfile || null;
+    this.difficulty = stageProfile
+      ? String(difficulty || 'normal')
+      : difficulty === 'difficult' || difficulty === 'no_mercy'
+        ? difficulty
+        : 'normal';
+    const w = stageProfile ? 1 : Math.max(1, Math.min(3, Math.floor(Number(world) || 1)));
+    const s = stageProfile ? 1 : Math.max(1, Math.min(3, Math.floor(Number(stage) || 1)));
     this.stageIndex = (w - 1) * 3 + (s - 1);
     this.createPhysicsWorld();
     this.players.clear();
@@ -399,23 +482,28 @@ class DanmakrewSimulationWorker {
 
   public pushStruggle(): void {
     if (this.struggle.active) {
-      this.struggle.balance = Math.min(100, this.struggle.balance + 4.2);
+      this.struggle.balance = Math.min(100, this.struggle.balance + 4.4);
     }
   }
 
   public spawnBossNow(): void {
+    if (this.customStageProfile?.disableBoss) return;
     this.enemies = [];
-    this.triggeredEvents.add('w1');
-    this.triggeredEvents.add('w2');
-    this.triggeredEvents.add('w3');
-    this.triggeredEvents.add('w4');
-    this.triggeredEvents.add('w5');
+    const cfg = this.getCurrentSpaceConfig();
+    for (const w of cfg.waves) {
+      this.triggeredEvents.add(w.key);
+    }
     this.triggeredEvents.add('warn');
     this.triggeredEvents.add('boss');
-    this.activateBoss();
+    if (cfg.hasBoss === false && cfg.miniboss) {
+      this.spawnEndMiniboss(cfg.miniboss);
+    } else {
+      this.activateBoss();
+    }
   }
 
   public startBeamStruggleTest(): void {
+    if (this.customStageProfile?.disableBoss) return;
     const me = this.players.get(this.myPlayerId);
     if (!me) return;
     this.setPlayerRole(this.myPlayerId, 'Special_Attack');
@@ -425,22 +513,31 @@ class DanmakrewSimulationWorker {
     this.bullets = [];
     this.lasers = [];
     me.body.setPosition(planck.Vec2(140, 300));
-    this.boss.x = 660;
+    this.boss.x = 670;
     this.boss.y = 300;
+    this.boss.targetX = 670;
+    this.boss.targetY = 300;
     this.boss.isLockedForBeam = true;
 
-    this.spawnLaser(me.id, 'right', 156, 300, 300, 0.25, 4.5, 0.25, 32, 0x00f0ff, false);
-    this.spawnLaser('boss', 'left', 625, 300, 300, 0.25, 4.5, 0.25, 76, 0xffdd00, true);
+    this.spawnLaser(me.id, 'right', 156, 300, 300, 0.25, 4.8, 0.25, 34, 0x00f0ff, false);
+    this.spawnLaser('boss', 'left', 645, 300, 300, 0.25, 4.8, 0.25, 76, 0xffdd00, true);
   }
 
   public advanceStage(): boolean {
+    if (this.customStageProfile) return false;
     if (this.stageIndex >= TOTAL_STAGES_PER_DIFFICULTY - 1) return false;
     this.stageIndex++;
+    this.autoAdvanceTimer = 0;
     this.resetStageRuntime();
+    for (const [, p] of this.players) {
+      p.hp = p.hp > 0 ? Math.min(p.stats.hpMax, p.hp + Math.round(p.stats.hpMax * 0.35)) : Math.round(p.stats.hpMax * 0.5);
+      p.sp = p.stats.spMax;
+    }
     return true;
   }
 
   public restartStage(): void {
+    this.autoAdvanceTimer = 0;
     this.resetStageRuntime();
     let idx = 0;
     for (const [, p] of this.players) {
@@ -455,12 +552,6 @@ class DanmakrewSimulationWorker {
     }
   }
 
-  private getDifficultyMult(): number {
-    if (this.difficulty === 'no_mercy') return 1.5;
-    if (this.difficulty === 'difficult') return 1.25;
-    return 1.0;
-  }
-
   private resetStageRuntime(): void {
     this.bullets = [];
     this.walls = [];
@@ -470,43 +561,114 @@ class DanmakrewSimulationWorker {
     this.triggeredEvents.clear();
     this.stageTime = 0;
     this.stageState = 'intro';
+    this.autoAdvanceTimer = 0;
     this.struggle = {
       active: false,
       isAligning: false,
       winner: null,
       timer: 0,
-      maxTimer: 5.0,
+      maxTimer: 4.5,
       balance: 50,
       resolutionTimer: 0,
       clashX: 400,
       clashY: 300,
     };
 
-    const cfg = getStageMeta(this.difficulty, this.stageIndex);
-    const hp = Math.round(cfg.bossBaseHp * this.getDifficultyMult());
+    const cfg = this.getCurrentSpaceConfig();
+    const profile = cfg.bossProfile;
+    const phases = this.getActiveBossPhases();
+    const hp = Math.round(phases[0].maxHp * this.getSquadHpScale());
     this.boss = {
-      x: 650,
+      x: 685,
       y: 300,
+      targetX: 685,
+      targetY: 300,
       hp,
       maxHp: hp,
       phase: 1,
       remainingStocks: 4,
-      spellcardName: BOSS_SPELLS[0].name,
+      spellcardName: phases[0].name,
       isSpellCard: false,
       isActive: false,
       isDefeated: false,
       isRefilling: false,
       refillTimer: 0,
       isLockedForBeam: false,
-      attackTimer: 0,
-      laserTimer: 3.0,
-      moveTimer: 0,
+      shootTimer: 0,
+      shotIndex: 0,
+      laserTimer: 0,
+      megaLaserTimer: 0,
+      animTimer: 0,
+      bossId: profile.bossId || 'first_boss',
+      sprite: profile.sprite || '/assets/sprites/FirstBoss.png',
+      fullBossName: profile.fullBossName || profile.bossName,
+      statScale: profile.statScale || 1.0,
+      angle: Math.PI,
+      isInvulnerable: false,
+      moIntroActive: false,
+      moIntroProgress: 0,
+      moDashState: 'idle',
+      moDashLines: [],
+      moMode: 'idle',
+      moTimer: 0,
+      moLineIndex: 0,
+      moSegIndex: 0,
+      moDashSpeedScale: 1.0,
+      moDashChain: [],
+      moRestDuration: 3.0,
+      moDashHitPlayers: new Set<string>(),
+      moSparkAccum: 0,
+      moRestShotAccum: 0,
+      moSummonTimer: 2.0,
     };
   }
 
+  private spawnEndMiniboss(mb: NonNullable<SpaceStageConfig['miniboss']>): void {
+    if (this.enemies.some((e) => e.isMiniboss)) return;
+    const scaledHp = Math.max(20, Math.round(mb.hp * this.getSquadHpScale()));
+    this.stageState = 'boss_battle';
+    this.enemies.push({
+      id: `mb_${this.nextEntityId++}`,
+      type: mb.type,
+      x: mb.startX,
+      y: mb.startY,
+      startX: mb.startX,
+      startY: mb.startY,
+      speed: mb.speed,
+      hp: scaledHp,
+      maxHp: scaledHp,
+      radius: mb.radius,
+      itemDrop: mb.itemDrop,
+      trajectory: mb.trajectory,
+      attackPattern: mb.attackPattern,
+      shootInterval: mb.shootInterval,
+      shootTimer: -(mb.shootDelay ?? 0.35),
+      spawnTime: 0,
+      bulletColor: mb.bulletColor,
+      isMiniboss: true,
+      minibossName: mb.minibossName,
+      sprite: mb.sprite,
+      angle: Math.PI,
+      customParams: { ...(mb.customParams || {}) },
+    });
+  }
+
+  private handleMinibossDefeated(x: number, y: number): void {
+    if (this.stageState === 'stage_clear') return;
+    this.stageState = 'stage_clear';
+    this.bullets = this.bullets.filter((b) => b.ownerId !== 'boss');
+    this.lasers = [];
+    this.spawnItemFountain(x, y, 16);
+    if (!this.customStageProfile && this.stageIndex < TOTAL_STAGES_PER_DIFFICULTY - 1) {
+      this.autoAdvanceTimer = this.autoAdvanceDuration;
+    }
+  }
+
   private activateBoss(): void {
-    const cfg = getStageMeta(this.difficulty, this.stageIndex);
-    const hp = Math.round(cfg.bossBaseHp * this.getDifficultyMult());
+    const cfg = this.getCurrentSpaceConfig();
+    const profile = cfg.bossProfile;
+    const phases = this.getActiveBossPhases();
+    const hp = Math.round(phases[0].maxHp * this.getSquadHpScale());
     this.stageState = 'boss_battle';
     this.boss.isActive = true;
     this.boss.isDefeated = false;
@@ -514,8 +676,37 @@ class DanmakrewSimulationWorker {
     this.boss.remainingStocks = 4;
     this.boss.hp = hp;
     this.boss.maxHp = hp;
-    this.boss.spellcardName = BOSS_SPELLS[0].name;
-    this.boss.isSpellCard = BOSS_SPELLS[0].isSpellCard;
+    this.boss.spellcardName = phases[0].name;
+    this.boss.isSpellCard = phases[0].isSpellCard;
+    this.boss.shootTimer = 0;
+    this.boss.shotIndex = 0;
+    this.boss.laserTimer = 1.2;
+    this.boss.megaLaserTimer = 0;
+    this.boss.bossId = profile.bossId || 'first_boss';
+    this.boss.sprite = profile.sprite || '/assets/sprites/FirstBoss.png';
+    this.boss.fullBossName = profile.fullBossName || profile.bossName;
+    this.boss.statScale = profile.statScale || 1.0;
+    this.boss.moDashLines = [];
+    this.boss.moDashState = 'idle';
+    this.boss.angle = Math.PI;
+    if (this.boss.bossId === 'mo') {
+      this.boss.x = 670;
+      this.boss.y = 300;
+      this.boss.isInvulnerable = true;
+      this.boss.moIntroActive = true;
+      this.boss.moIntroProgress = 0;
+      this.boss.moMode = 'intro';
+      this.boss.moTimer = 0;
+      this.boss.moSegIndex = 0;
+      this.boss.moDashSpeedScale = 1.0;
+      this.boss.moSummonTimer = 2.0;
+      this.boss.moDashChain = [];
+    } else {
+      this.boss.isInvulnerable = false;
+      this.boss.moIntroActive = false;
+      this.boss.moIntroProgress = 0;
+      this.boss.moMode = 'idle';
+    }
   }
 
   private step(dt: number): void {
@@ -532,6 +723,13 @@ class DanmakrewSimulationWorker {
     this.updateLasers(dt);
     this.updateBeamStruggle(dt);
     this.updateWalls(dt);
+
+    if (this.autoAdvanceTimer > 0 && this.stageState === 'stage_clear') {
+      this.autoAdvanceTimer = Math.max(0, this.autoAdvanceTimer - dt);
+      if (this.autoAdvanceTimer <= 0) {
+        this.advanceStage();
+      }
+    }
   }
 
   private updateTimeline(): void {
@@ -542,21 +740,98 @@ class DanmakrewSimulationWorker {
       }
     };
 
+    if (this.customStageProfile && Array.isArray(this.customStageProfile.waves)) {
+      fireOnce('banner', 0.1, () => {
+        this.stageState = 'waves';
+      });
+      for (const w of this.customStageProfile.waves) {
+        fireOnce(w.key, w.at, () => {
+          for (const spec of w.enemies || []) {
+            this.enemies.push({
+              id: `en_${this.nextEntityId++}`,
+              type: spec.type || 'green_fairy',
+              x: spec.startX ?? WORLD_WIDTH + 45,
+              y: spec.startY ?? 300,
+              startX: spec.startX ?? WORLD_WIDTH + 45,
+              startY: spec.startY ?? 300,
+              speed: spec.speed ?? 140,
+              hp: spec.hp ?? 20,
+              maxHp: spec.hp ?? 20,
+              radius: spec.radius ?? 16,
+              itemDrop: spec.itemDrop || 'power',
+              trajectory: spec.trajectory || 'sine',
+              attackPattern: spec.attackPattern || 'aimed_single',
+              shootInterval: spec.shootInterval ?? 1.5,
+              shootTimer: -(spec.shootDelay ?? 0.2),
+              spawnTime: 0,
+              bulletColor: spec.bulletColor ?? 0xff2b5b,
+              angle: Math.PI,
+              customParams: spec.customParams ? { ...spec.customParams } : { freq: spec.freq, amp: spec.amp, phase: spec.phase, hoverX: spec.hoverX, hoverTime: spec.hoverTime },
+            });
+          }
+        });
+      }
+      if (!this.customStageProfile.disableBoss) {
+        fireOnce('warn', this.customStageProfile.bossWarningAt ?? 31.5, () => {
+          if (!this.boss.isActive && !this.boss.isDefeated) {
+            this.stageState = 'boss_warning';
+          }
+        });
+        fireOnce('boss', this.customStageProfile.bossSpawnAt ?? 34.5, () => {
+          if (!this.boss.isActive && !this.boss.isDefeated) {
+            this.activateBoss();
+          }
+        });
+      }
+      return;
+    }
+
+    const cfg = this.getCurrentSpaceConfig();
+    const squadScale = this.getSquadHpScale();
+
     fireOnce('banner', 0.1, () => {
       this.stageState = 'waves';
     });
-    fireOnce('w1', 0.4, () => this.spawnWave(1));
-    fireOnce('w2', 6.5, () => this.spawnWave(2));
-    fireOnce('w3', 13.0, () => this.spawnWave(3));
-    fireOnce('w4', 20.0, () => this.spawnWave(4));
-    fireOnce('w5', 27.0, () => this.spawnWave(5));
-    fireOnce('warn', 33.5, () => {
+
+    for (const w of cfg.waves) {
+      fireOnce(w.key, w.at, () => {
+        for (const spec of w.enemies) {
+          const scaledHp = Math.max(8, Math.round(spec.hp * squadScale));
+          this.enemies.push({
+            id: `en_${this.nextEntityId++}`,
+            type: spec.type,
+            x: spec.startX,
+            y: spec.startY,
+            startX: spec.startX,
+            startY: spec.startY,
+            speed: spec.speed,
+            hp: scaledHp,
+            maxHp: scaledHp,
+            radius: spec.radius,
+            itemDrop: spec.itemDrop,
+            trajectory: spec.trajectory,
+            attackPattern: spec.attackPattern,
+            shootInterval: spec.shootInterval,
+            shootTimer: -(spec.shootDelay ?? 0.25),
+            spawnTime: 0,
+            bulletColor: spec.bulletColor,
+            angle: Math.PI,
+            customParams: spec.customParams ? { ...spec.customParams } : {},
+          });
+        }
+      });
+    }
+
+    fireOnce('warn', cfg.bossWarningAt, () => {
       if (!this.boss.isActive && !this.boss.isDefeated) {
         this.stageState = 'boss_warning';
       }
     });
-    fireOnce('boss', 36.5, () => {
-      if (!this.boss.isActive && !this.boss.isDefeated) {
+
+    fireOnce('boss', cfg.bossSpawnAt, () => {
+      if (cfg.hasBoss === false && cfg.miniboss) {
+        this.spawnEndMiniboss(cfg.miniboss);
+      } else if (!this.boss.isActive && !this.boss.isDefeated) {
         this.activateBoss();
       }
     });
@@ -637,7 +912,7 @@ class DanmakrewSimulationWorker {
   }
 
   private executePlayerSkill(p: SimPlayer, action: string): void {
-    if (p.skillCooldown > 0 || p.hp <= 0) return;
+    if (this.customStageProfile?.disableWeapons || p.skillCooldown > 0 || p.hp <= 0) return;
     const pos = p.body.getPosition();
     const roleKey = normalizeRoleKey(p.character);
 
@@ -645,15 +920,15 @@ class DanmakrewSimulationWorker {
       this.walls.push({
         id: `wall_${this.nextEntityId++}`,
         ownerId: p.id,
-        x: pos.x + 24,
+        x: pos.x + 26,
         y: pos.y,
-        vx: 40,
+        vx: 38,
         vy: 0,
-        width: 14,
-        height: 48,
+        width: 16,
+        height: 68,
         hp: 25,
         maxHp: 25,
-        ttl: 1.0,
+        ttl: 1.75,
       });
       p.skillCooldown = SKILL_COOLDOWN;
       p.sp = Math.max(0, p.sp - 250);
@@ -661,7 +936,7 @@ class DanmakrewSimulationWorker {
     }
 
     if ((action === 'laser' || (roleKey === 'special_attack' && action === 'special')) && p.sp >= 500) {
-      this.spawnLaser(p.id, 'right', pos.x + 16, pos.y, pos.y, 0.3, 1.1, 0.2, 30, 0x00f0ff, false);
+      this.spawnLaser(p.id, 'right', pos.x + 16, pos.y, pos.y, 0.28, 1.15, 0.22, 34, 0x00f0ff, false);
       p.skillCooldown = SKILL_COOLDOWN * 2;
       p.sp = Math.max(0, p.sp - 500);
       return;
@@ -669,11 +944,11 @@ class DanmakrewSimulationWorker {
 
     if (roleKey === 'support' && action === 'special' && p.sp >= 400) {
       for (const offsetY of [-18, -10, -4, 4, 10, 18]) {
-        this.spawnAutoAimShot(p.id, pos.x + 16, pos.y + offsetY, 700, p.stats.bulletDamage * 1.5);
+        this.spawnAutoAimShot(p.id, pos.x + 16, pos.y + offsetY, 710, p.stats.bulletDamage * 1.6);
       }
       for (const [, ally] of this.players) {
         if (ally.hp > 0) {
-          ally.hp = Math.min(ally.stats.hpMax, ally.hp + 25);
+          ally.hp = Math.min(ally.stats.hpMax, ally.hp + 28);
         }
       }
       p.skillCooldown = SKILL_COOLDOWN * 1.5;
@@ -693,7 +968,7 @@ class DanmakrewSimulationWorker {
           radius: 5,
           ttl: 2.5,
           type: 'normal',
-          damage: p.stats.bulletDamage * 2,
+          damage: p.stats.bulletDamage * 2.2,
           color: 0x00f2fe,
         });
       }
@@ -712,17 +987,25 @@ class DanmakrewSimulationWorker {
       }
 
       if (p.isBot) {
-        // Escort AI for local demo companions
         const pos = p.body.getPosition();
-        const desiredY = 300 + Math.sin(this.stageTime * 1.8 + pos.x * 0.02) * 140;
-        p.input.dx = Math.cos(this.stageTime * 1.1) * 0.25;
+        const desiredY = 300 + Math.sin(this.stageTime * 1.7 + pos.x * 0.02) * 145;
+        p.input.dx = Math.cos(this.stageTime * 1.05) * 0.25;
         p.input.dy = Math.max(-1, Math.min(1, (desiredY - pos.y) / 80));
-        p.input.action = 'shoot';
+        if (this.customStageProfile?.disableWeapons) {
+          p.input.action = null;
+        } else if (this.struggle.active) {
+          p.input.action = 'struggle_push';
+        } else if (p.skillCooldown <= 0 && p.sp >= 520 && (this.enemies.length >= 4 || this.boss.isActive)) {
+          const rk = normalizeRoleKey(p.character);
+          p.input.action = rk === 'tank' ? 'wall' : rk === 'special_attack' ? 'laser' : 'special';
+        } else {
+          p.input.action = 'shoot';
+        }
       }
 
       p.shootCooldown = Math.max(0, p.shootCooldown - dt);
       p.skillCooldown = Math.max(0, p.skillCooldown - dt);
-      p.sp = Math.min(p.stats.spMax, p.sp + dt * 45);
+      p.sp = Math.min(p.stats.spMax, p.sp + dt * 50);
 
       const { dx, dy, action, focus } = p.input;
       if (!locked) {
@@ -737,21 +1020,21 @@ class DanmakrewSimulationWorker {
       }
 
       if (action === 'struggle_push') {
-        this.pushStruggle();
+        if (!p.isBot) this.pushStruggle();
       } else if (action === 'wall' || action === 'laser' || action === 'special') {
         this.executePlayerSkill(p, action);
-      } else if (action === 'shoot' && p.shootCooldown <= 0 && !locked) {
+      } else if (!this.customStageProfile?.disableWeapons && action === 'shoot' && p.shootCooldown <= 0 && !locked) {
         const pos = p.body.getPosition();
         const roleKey = normalizeRoleKey(p.character);
         if (roleKey === 'support') {
-          this.spawnAutoAimShot(p.id, pos.x + 16, pos.y, 650, p.stats.bulletDamage);
+          this.spawnAutoAimShot(p.id, pos.x + 16, pos.y, 660, p.stats.bulletDamage);
         } else if (roleKey === 'tank') {
           this.bullets.push({
             id: this.nextBulletId++,
             ownerId: p.id,
             x: pos.x + 16,
             y: pos.y,
-            vx: 600,
+            vx: 620,
             vy: 0,
             radius: 5,
             ttl: 2.5,
@@ -766,7 +1049,7 @@ class DanmakrewSimulationWorker {
               ownerId: p.id,
               x: pos.x + 16,
               y: pos.y + offsetY,
-              vx: 750,
+              vx: 760,
               vy: 0,
               radius: 4,
               ttl: 2.5,
@@ -795,256 +1078,464 @@ class DanmakrewSimulationWorker {
     return c > 0 ? { x: sx / c, y: sy / c } : { x: 120, y: 300 };
   }
 
-  private spawnWave(waveId: number): void {
-    const mult = this.getDifficultyMult();
-    if (waveId === 1) {
-      for (let i = 0; i < 6; i++) {
-        this.enemies.push({
-          id: `en_${this.nextEntityId++}`,
-          type: 'green_fairy',
-          x: WORLD_WIDTH + 45 + i * 58,
-          y: 170,
-          startX: WORLD_WIDTH + 45 + i * 58,
-          startY: 170,
-          speed: 130,
-          hp: Math.round(14 * mult),
-          maxHp: Math.round(14 * mult),
-          radius: 16,
-          itemDrop: i % 2 === 0 ? 'power' : 'point',
-          trajectory: 'double_helix',
-          attackPattern: 'aimed_single',
-          shootInterval: 1.8,
-          shootTimer: 0.4 * i,
-          spawnTime: 0,
-          freq: 3.2,
-          amp: 70,
-          phase: i * 0.4,
-          hoverX: 550,
-          hoverTime: 3.5,
-        });
-        this.enemies.push({
-          id: `en_${this.nextEntityId++}`,
-          type: 'yellow_fairy',
-          x: WORLD_WIDTH + 45 + i * 58,
-          y: 430,
-          startX: WORLD_WIDTH + 45 + i * 58,
-          startY: 430,
-          speed: 130,
-          hp: Math.round(16 * mult),
-          maxHp: Math.round(16 * mult),
-          radius: 16,
-          itemDrop: 'power',
-          trajectory: 'double_helix',
-          attackPattern: 'helix_stream',
-          shootInterval: 1.9,
-          shootTimer: 0.3 * i,
-          spawnTime: 0,
-          freq: 3.2,
-          amp: 70,
-          phase: i * 0.4 + Math.PI,
-          hoverX: 550,
-          hoverTime: 3.5,
-        });
-      }
-    } else if (waveId === 2) {
-      for (let i = 0; i < 3; i++) {
-        for (const top of [true, false]) {
-          const sy = top ? 110 + i * 24 : 490 - i * 24;
-          this.enemies.push({
-            id: `en_${this.nextEntityId++}`,
-            type: 'red_fairy',
-            x: WORLD_WIDTH + 50 + i * 68,
-            y: sy,
-            startX: WORLD_WIDTH + 50 + i * 68,
-            startY: sy,
-            speed: 150,
-            hp: Math.round(26 * mult),
-            maxHp: Math.round(26 * mult),
-            radius: 17,
-            itemDrop: top ? 'power' : 'point',
-            trajectory: 'hover_retreat',
-            attackPattern: 'flower_burst',
-            shootInterval: 1.25,
-            shootTimer: 0.2,
-            spawnTime: 0,
-            freq: 2.5,
-            amp: 16,
-            phase: 0,
-            hoverX: 575 - i * 32,
-            hoverTime: 3.8,
-          });
-        }
-      }
-    } else if (waveId === 3) {
-      this.enemies.push({
-        id: `en_${this.nextEntityId++}`,
-        type: 'big_fairy',
-        x: WORLD_WIDTH + 50,
-        y: 300,
-        startX: WORLD_WIDTH + 50,
-        startY: 300,
-        speed: 75,
-        hp: Math.round(125 * mult),
-        maxHp: Math.round(125 * mult),
-        radius: 30,
-        itemDrop: 'life_frag',
-        trajectory: 'hover_retreat',
-        attackPattern: 'star_rings',
-        shootInterval: 0.9,
-        shootTimer: 0,
-        spawnTime: 0,
-        freq: 2.0,
-        amp: 20,
-        phase: 0,
-        hoverX: 535,
-        hoverTime: 7.0,
-      });
-    } else if (waveId === 4) {
-      for (const [idx, sy] of [120, 210, 390, 480].entries()) {
-        this.enemies.push({
-          id: `en_${this.nextEntityId++}`,
-          type: 'purple_fairy',
-          x: WORLD_WIDTH + 45 + idx * 42,
-          y: sy,
-          startX: WORLD_WIDTH + 45 + idx * 42,
-          startY: sy,
-          speed: 125,
-          hp: Math.round(34 * mult),
-          maxHp: Math.round(34 * mult),
-          radius: 17,
-          itemDrop: idx % 2 === 0 ? 'bomb_frag' : 'power',
-          trajectory: 'hover_retreat',
-          attackPattern: 'ring_burst',
-          shootInterval: 1.1,
-          shootTimer: 0.25 * idx,
-          spawnTime: 0,
-          freq: 2.4,
-          amp: 15,
-          phase: idx,
-          hoverX: 555 - (idx % 2) * 40,
-          hoverTime: 4.2,
-        });
-      }
-    } else if (waveId === 5) {
-      for (let i = 0; i < 8; i++) {
-        const isTop = i % 2 === 0;
-        const sy = isTop ? 40 : WORLD_HEIGHT - 40;
-        this.enemies.push({
-          id: `en_${this.nextEntityId++}`,
-          type: 'green_fairy',
-          x: WORLD_WIDTH + 40 + i * 48,
-          y: sy,
-          startX: WORLD_WIDTH + 40 + i * 48,
-          startY: sy,
-          speed: 175,
-          hp: Math.round(18 * mult),
-          maxHp: Math.round(18 * mult),
-          radius: 16,
-          itemDrop: i % 3 === 0 ? 'power' : 'point',
-          trajectory: isTop ? 'cross_top' : 'cross_bottom',
-          attackPattern: 'aimed_single',
-          shootInterval: 0.95,
-          shootTimer: 0.15 * i,
-          spawnTime: 0,
-          freq: 1.8,
-          amp: 140,
-          phase: 0,
-          hoverX: 500,
-          hoverTime: 3.0,
-        });
+  private getNearestPlayerPos(ex: number, ey: number): { x: number; y: number } {
+    let best = { x: 120, y: 300 };
+    let bestD2 = Infinity;
+    for (const [, p] of this.players) {
+      if (p.hp <= 0) continue;
+      const pos = p.body.getPosition();
+      const d2 = (pos.x - ex) * (pos.x - ex) + (pos.y - ey) * (pos.y - ey);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = pos;
       }
     }
+    return bestD2 < Infinity ? best : this.getAveragePlayerPos();
   }
 
   private updateEnemies(dt: number): void {
-    const target = this.getAveragePlayerPos();
-
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
       e.spawnTime += dt;
       const t = e.spawnTime;
+      const p = e.customParams || {};
+      const target = this.getNearestPlayerPos(e.x, e.y);
 
-      if (e.trajectory === 'double_helix') {
-        e.x -= e.speed * dt;
-        e.y = e.startY + e.amp * Math.sin(e.freq * t + e.phase);
-      } else if (e.trajectory === 'hover_retreat') {
-        if (e.x > e.hoverX) e.x -= e.speed * dt;
-        else if (t > e.hoverTime) e.x -= e.speed * 0.55 * dt;
-        e.y = e.startY + Math.sin(t * 2.5) * 15;
-      } else if (e.trajectory === 'cross_top') {
-        e.x -= e.speed * dt;
-        e.y = e.startY + Math.abs(Math.sin(t * 1.8)) * 150;
-      } else if (e.trajectory === 'cross_bottom') {
-        e.x -= e.speed * dt;
-        e.y = e.startY - Math.abs(Math.sin(t * 1.8)) * 150;
-      } else {
-        e.x -= e.speed * dt;
+      switch (e.trajectory) {
+        case 'miniboss_hover': {
+          const hoverX = p.hoverX ?? 590;
+          const ampY = p.ampY ?? 120;
+          const freqY = p.freqY ?? 1.25;
+          const style = p.moveStyle || 'vertical_sine';
+          if (e.x > hoverX + 35 && t < 2.2) {
+            e.x = Math.max(hoverX, e.x - e.speed * 1.45 * dt);
+            e.y = 300 + Math.sin(t * freqY) * (ampY * 0.35);
+          } else if (style === 'figure8') {
+            e.x = hoverX + Math.sin(t * freqY) * 48;
+            e.y = 300 + Math.sin(t * freqY * 2) * (ampY * 0.78);
+          } else if (style === 'diamond_drift') {
+            const ang = t * freqY;
+            const sx = Math.cos(ang);
+            const sy = Math.sin(ang);
+            e.x = hoverX + Math.sign(sx) * Math.pow(Math.abs(sx), 0.75) * 56;
+            e.y = 300 + Math.sign(sy) * Math.pow(Math.abs(sy), 0.75) * ampY;
+          } else if (style === 'arc_sway') {
+            e.x = hoverX - Math.abs(Math.cos(t * freqY)) * 62;
+            e.y = 300 + Math.sin(t * freqY) * ampY;
+          } else if (style === 'pendulum_guard') {
+            e.x = hoverX + Math.sin(t * 0.75) * 52;
+            e.y = 300 + Math.cos(t * freqY) * ampY;
+          } else if (style === 'orbital_patrol') {
+            e.x = hoverX + Math.cos(t * freqY) * 62;
+            e.y = 300 + Math.sin(t * freqY + 0.65) * ampY;
+          } else {
+            e.x = hoverX + Math.cos(t * 0.9) * 24;
+            e.y = 300 + Math.sin(t * freqY) * ampY;
+          }
+          e.x = Math.max(470, Math.min(720, e.x));
+          e.y = Math.max(68, Math.min(WORLD_HEIGHT - 68, e.y));
+          break;
+        }
+        case 'kamikaze_homing': {
+          const triggerDist = p.triggerDist ?? 135;
+          const fuseTime = p.fuseTime ?? 1.75;
+          const dx = target.x - e.x;
+          const dy = target.y - e.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          e.angle = Math.atan2(dy, dx);
+
+          if (!p._fuseActive && dist <= triggerDist) {
+            p._fuseActive = true;
+            p._fuseElapsed = 0;
+          }
+
+          let curSpeed = e.speed;
+          let ratio = 0;
+          if (p._fuseActive) {
+            p._fuseElapsed = (p._fuseElapsed || 0) + dt;
+            ratio = Math.min(1, p._fuseElapsed / fuseTime);
+            curSpeed = Math.max(12, e.speed * (1 - Math.pow(ratio, 1.25) * 0.92));
+          }
+
+          e.x = Math.max(-75, Math.min(WORLD_WIDTH + 90, e.x + (dx / dist) * curSpeed * dt));
+          e.y = Math.max(-75, Math.min(WORLD_HEIGHT + 75, e.y + (dy / dist) * curSpeed * dt));
+          e.fuseProgress = Number(ratio.toFixed(2));
+          break;
+        }
+        case 'v_formation':
+          e.x -= e.speed * dt;
+          e.y = e.startY + Math.sin(t * 1.8) * (p.driftY ?? 16);
+          break;
+        case 'perimeter_skimmer':
+          e.x -= e.speed * dt;
+          e.y = e.startY + Math.sin(t * 3.2) * (p.bobAmp ?? 12);
+          break;
+        case 'orbit_anchor': {
+          const ax = p.anchorX ?? 545;
+          const ay = p.anchorY ?? 300;
+          const r = p.orbitR ?? 80;
+          const ang = t * 2.1 + (p.phase ?? 0);
+          if (t < 1.8) {
+            const k = t / 1.8;
+            const tx = ax + Math.cos(ang) * r * 0.65;
+            const ty = ay + Math.sin(ang) * r;
+            e.x = e.startX + (tx - e.startX) * k;
+            e.y = e.startY + (ty - e.startY) * k;
+          } else if (t < 7.4) {
+            e.x = ax + Math.cos(ang) * r * 0.65;
+            e.y = ay + Math.sin(ang) * r;
+          } else {
+            e.x -= e.speed * 1.15 * dt;
+          }
+          break;
+        }
+        case 'pendulum':
+          e.x -= e.speed * 0.78 * dt;
+          e.y = e.startY + Math.sin(t * (p.freq ?? 2.1) + (p.phase ?? 0)) * (p.ampY ?? 140);
+          break;
+        case 'swoop_arc': {
+          const apexX = p.apexX ?? 510;
+          const targetY = p.targetY ?? 300;
+          if (t < 1.9) {
+            const ease = 1 - Math.pow(1 - t / 1.9, 2);
+            e.x = e.startX + (apexX - e.startX) * ease;
+            e.y = e.startY + (targetY - e.startY) * ease;
+          } else {
+            e.x -= e.speed * 1.15 * dt;
+            e.y += (e.startY < 300 ? 1 : -1) * e.speed * 0.35 * dt;
+          }
+          break;
+        }
+        case 'sine':
+        case 'double_helix':
+          e.x -= e.speed * dt;
+          e.y = e.startY + (p.amp ?? 70) * Math.sin((p.freq ?? 3.0) * t + (p.phase ?? 0));
+          break;
+        case 'hover_retreat': {
+          const hoverX = p.hoverX ?? 560;
+          const hoverTime = p.hoverTime ?? 4.2;
+          if (e.x > hoverX && t <= hoverTime) e.x -= e.speed * 1.25 * dt;
+          else if (t > hoverTime) e.x -= e.speed * 0.7 * dt;
+          e.y = e.startY + Math.sin(t * 2.4) * 16;
+          break;
+        }
+        case 'spiral':
+          e.x -= e.speed * 0.68 * dt;
+          e.y = e.startY + Math.sin(t * 2.9 + (p.phase ?? 0)) * 68;
+          break;
+        case 'cross_top':
+          e.x -= e.speed * dt;
+          e.y = e.startY + Math.abs(Math.sin(t * 1.7)) * 165;
+          break;
+        case 'cross_bottom':
+          e.x -= e.speed * dt;
+          e.y = e.startY - Math.abs(Math.sin(t * 1.7)) * 165;
+          break;
+        case 'zigzag':
+          e.x -= e.speed * dt;
+          e.y = Math.max(36, Math.min(WORLD_HEIGHT - 36, e.y + (Math.floor(t * 1.8) % 2 === 0 ? 1 : -1) * e.speed * 0.55 * dt));
+          break;
+        default:
+          e.x -= e.speed * dt;
+          break;
       }
 
-      if (e.x < -60 || e.y < -70 || e.y > WORLD_HEIGHT + 70) {
+      if (e.type !== 'mo_enemy2') {
+        e.angle = Math.atan2(target.y - e.y, target.x - e.x);
+      }
+
+      if (e.type === 'mo_enemy2') {
+        const fuseTime = p.fuseTime ?? 1.75;
+        const armed = Boolean(p._fuseActive);
+        const fuseElapsed = p._fuseElapsed || 0;
+        let touched = false;
+        for (const [, pl] of this.players) {
+          if (pl.hp <= 0) continue;
+          const pos = pl.body.getPosition();
+          if (Math.hypot(pos.x - e.x, pos.y - e.y) <= e.radius + PLAYER_RADIUS + 6) {
+            touched = true;
+            break;
+          }
+        }
+        if (touched || (armed && fuseElapsed >= fuseTime)) {
+          for (let k = 0; k < 8; k++) {
+            this.spawnEnemyBullet(e.x, e.y, (Math.PI * 2 * k) / 8, 145, 4.5, 0xfef08a, 4, { spriteType: 'MObullet3png', ttl: 0.36 });
+          }
+          for (const [, pl] of this.players) {
+            if (pl.hp <= 0) continue;
+            const pos = pl.body.getPosition();
+            if (Math.hypot(pos.x - e.x, pos.y - e.y) <= 58) {
+              this.applyDamageToPlayer(pl, 16);
+            }
+          }
+          this.enemies.splice(i, 1);
+          continue;
+        }
+      }
+
+      if (!e.isMiniboss && e.type !== 'mo_enemy2' && (e.x < -70 || (e.spawnTime > 6.0 && e.x > WORLD_WIDTH + 220) || e.y < -90 || e.y > WORLD_HEIGHT + 90)) {
         this.enemies.splice(i, 1);
         continue;
       }
 
       e.shootTimer += dt;
-      if (e.shootTimer >= e.shootInterval) {
+      if (e.x < WORLD_WIDTH - 8 && e.x > 40 && e.shootTimer >= e.shootInterval && e.attackPattern !== 'none') {
         e.shootTimer = 0;
-        const aim = Math.atan2(target.y - e.y, target.x - e.x);
-        if (e.attackPattern === 'aimed_single') {
-          this.spawnEnemyBullet(e.x, e.y, aim, 210, 4, 0xff2b5b);
-        } else if (e.attackPattern === 'helix_stream') {
-          this.spawnEnemyBullet(e.x, e.y, aim + 0.18, 220, 4, 0xffae00);
-          this.spawnEnemyBullet(e.x, e.y, aim - 0.18, 220, 4, 0xffae00);
-        } else if (e.attackPattern === 'flower_burst') {
-          for (let k = 0; k < 5; k++) {
-            this.spawnEnemyBullet(e.x, e.y, aim + (Math.PI * 2 * k) / 5, 180, 4, 0xff2b5b);
-          }
-        } else if (e.attackPattern === 'ring_burst') {
-          for (let k = 0; k < 10; k++) {
-            this.spawnEnemyBullet(e.x, e.y, (Math.PI * 2 * k) / 10, 165, 4, 0xa855f7);
-          }
-        } else if (e.attackPattern === 'star_rings') {
-          for (let k = 0; k < 14; k++) {
-            this.spawnEnemyBullet(e.x, e.y, t * 2 + (Math.PI * 2 * k) / 14, 150, 5, 0x3b82f6);
-          }
+        const scale = Number(e.customParams?.statScale) > 0 ? Number(e.customParams.statScale) : 1.0;
+        this.activeEnemyStatScale = scale;
+        try {
+          this.fireEnemyPattern(e, target, dt);
+        } finally {
+          this.activeEnemyStatScale = 1.0;
         }
       }
     }
   }
 
-  private spawnEnemyBullet(x: number, y: number, angle: number, speed: number, radius: number, color: number): void {
+  private fireEnemyPattern(e: SimEnemy, target: { x: number; y: number }, dt: number = DT): void {
+    const aim = Math.atan2(target.y - e.y, target.x - e.x);
+    e.angle = aim;
+    const mx = e.x + Math.cos(aim) * 16;
+    const my = e.y + Math.sin(aim) * 16;
+    const col = e.bulletColor || 0xff2b5b;
+    const t = e.spawnTime;
+    const cp = e.customParams || {};
+
+    switch (e.attackPattern) {
+      case 'w1_first_normal':
+        this.spawnEnemyBullet(mx, my, aim, 200, 5, 0xef4444, 5, { spriteType: '1EnemyBulletpng' });
+        break;
+      case 'w1_second_homing':
+        this.spawnEnemyBullet(mx, my, aim, 185, 5, 0xfacc15, 5, { spriteType: '2EnemyBulletpng', homeRate: 0.72, homeTime: 1.35 });
+        break;
+      case 'w1_third_slow':
+        for (const off of [-0.22, 0, 0.22]) this.spawnEnemyBullet(mx, my, aim + off, 122, 6, 0x3b82f6, 6, { spriteType: '3EnemyBulletpng' });
+        break;
+      case 'fb_mini2_combo':
+        cp._shotIdx = (cp._shotIdx || 0) + 1;
+        if (cp._shotIdx % 2 === 0) {
+          for (const off of [-0.42, -0.21, 0, 0.21, 0.42]) this.spawnEnemyBullet(e.x + Math.cos(aim) * 20, e.y + Math.sin(aim) * 20, aim + off, 132, 6, 0x3b82f6, 5, { spriteType: '3EnemyBulletpng' });
+        } else {
+          for (let k = 0; k < 10; k++) this.spawnEnemyBullet(e.x, e.y, t * 0.9 + (Math.PI * 2 * k) / 10, 142, 5, 0xef4444, 5, { spriteType: '1EnemyBulletpng' });
+        }
+        break;
+      case 'fb_mini1_combo':
+        cp._shotIdx = (cp._shotIdx || 0) + 1;
+        if (cp._shotIdx % 3 === 0) {
+          for (let k = 0; k < 16; k++) this.spawnEnemyBullet(e.x, e.y, (Math.PI * 2 * k) / 16, 162, 5, 0xfacc15, 5, { spriteType: '2EnemyBulletpng', homeRate: 2.15, homeTime: 1.45 });
+        } else {
+          for (const off of [-0.28, -0.1, 0.1, 0.28]) {
+            const hm = Math.abs(off) > 0.2;
+            this.spawnEnemyBullet(e.x + Math.cos(aim) * 20, e.y + Math.sin(aim) * 20, aim + off, 235, 5, hm ? 0xfacc15 : 0xef4444, 5, { spriteType: hm ? '2EnemyBulletpng' : '1EnemyBulletpng', homeRate: hm ? 1.15 : 0, homeTime: hm ? 1.2 : 0 });
+          }
+        }
+        break;
+      case 'w2_gfg1_fast':
+        this.spawnEnemyBullet(mx, my, aim, 285, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
+        break;
+      case 'w2_gfg2_sniper022':
+        if (!cp.burstLeft || cp.burstLeft <= 0) {
+          if ((cp.burstCooldown || 0) > 0) { cp.burstCooldown -= Math.max(dt, e.shootInterval); break; }
+          cp.burstLeft = 8;
+          cp.burstAim = aim;
+        }
+        {
+          const bAim = cp.burstAim ?? aim;
+          e.angle = bAim;
+          this.spawnEnemyBullet(e.x + Math.cos(bAim) * 20, e.y + Math.sin(bAim) * 20, bAim, 405, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet2png' });
+        }
+        cp.burstLeft -= 1;
+        if (cp.burstLeft <= 0) cp.burstCooldown = 1.45;
+        break;
+      case 'w2_gfg3_linear_accel':
+        this.spawnEnemyBullet(mx, my, aim, 55, 5.5, 0xf97316, 5, {
+          spriteType: 'GFGbullet3png',
+          expAccel: 1.35,
+          maxSpeed: 420,
+          homeRate: 0.72,
+          homeTime: 1.35,
+          ttl: 4.8,
+        });
+        break;
+      case 'gfg_mini1_shotgun':
+        for (let k = 0; k < 10; k++) {
+          this.spawnEnemyBullet(e.x + Math.cos(aim) * 24, e.y + Math.sin(aim) * 24, aim + ((k / 9) - 0.5) * 0.62 + (Math.random() - 0.5) * 0.08, 265 + Math.random() * 110, 5.5, 0xef4444, 5, { spriteType: 'GFGbullet4png' });
+        }
+        break;
+      case 'gfg_mini2_burst':
+        cp.cycleT = (cp.cycleT || 0) + Math.max(dt, e.shootInterval);
+        if (cp.cycleT % 2.65 > 1.5) break;
+        this.spawnEnemyBullet(e.x + Math.cos(aim) * 24, e.y + Math.sin(aim) * 24, aim + Math.sin(t * 7.5) * 0.22, 330, 5.5, 0xf87171, 5, { spriteType: 'GFGbullet5png' });
+        break;
+      case 'w3_mo1_laser':
+        if (!cp.laserBurstLeft || cp.laserBurstLeft <= 0) {
+          if ((cp.laserCooldown || 0) > 0) { cp.laserCooldown -= Math.max(dt, e.shootInterval); break; }
+          cp.laserBurstLeft = 3;
+          cp.laserAim = aim;
+        }
+        {
+          const lAim = cp.laserAim ?? aim;
+          e.angle = lAim;
+          this.spawnEnemyBullet(e.x + Math.cos(lAim) * 18, e.y + Math.sin(lAim) * 18, lAim, 345, 5, 0xef4444, 5, { spriteType: 'MObullet1png' });
+        }
+        cp.laserBurstLeft -= 1;
+        if (cp.laserBurstLeft <= 0) cp.laserCooldown = 1.35;
+        break;
+      case 'w3_mo3_sparks':
+        for (let k = 0; k < 2; k++) {
+          this.spawnEnemyBullet(mx, my, aim + (Math.random() - 0.5) * 2.1, 135 + Math.random() * 105, 5, 0xfef08a, 4, { spriteType: 'MObullet3png', ttl: 0.92 });
+        }
+        break;
+      case 'mo_mini1_rocks': {
+        cp._shotIdx = (cp._shotIdx || 0) + 1;
+        const offsets = cp._shotIdx % 2 === 0 ? [-46, 46] : [0];
+        for (const oy of offsets) {
+          const sx = e.x - 42;
+          const sy = Math.max(40, Math.min(WORLD_HEIGHT - 40, e.y + oy));
+          const a = Math.atan2(target.y - sy, target.x - sx);
+          this.spawnEnemyBullet(sx, sy, a, 32, 12.5, 0x9ca3af, 7, { spriteType: 'MObullet4png', accel: 290, maxSpeed: 295, splitOnImpact: true, splitCount: 6, ttl: 6.0 });
+        }
+        break;
+      }
+      case 'mo_mini2_rocks':
+        for (let k = 0; k < 2; k++) {
+          const sx = e.x - 36 - Math.random() * 32;
+          const sy = Math.max(40, Math.min(WORLD_HEIGHT - 40, e.y + (Math.random() - 0.5) * 150));
+          this.spawnEnemyBullet(sx, sy, Math.PI + (Math.random() - 0.5) * 1.45, 45, 12.5, 0x9ca3af, 7, { spriteType: 'MObullet4png', accel: 240, maxSpeed: 280, splitOnImpact: true, splitCount: 6, ttl: 6.0 });
+        }
+        break;
+      case 'aimed_single':
+        this.spawnEnemyBullet(e.x, e.y, aim, 188, 4, col);
+        break;
+      case 'aimed_spread':
+        for (const off of [-0.26, 0, 0.26]) {
+          this.spawnEnemyBullet(e.x, e.y, aim + off, 185, 4, col);
+        }
+        break;
+      case 'crescent_arc':
+        [-0.36, -0.18, 0, 0.18, 0.36].forEach((off, idx) => {
+          this.spawnEnemyBullet(e.x, e.y, aim + off, 195 - Math.abs(idx - 2) * 14, 4.5, col);
+        });
+        break;
+      case 'prism_fan':
+        this.spawnEnemyBullet(e.x, e.y, aim - 0.22, 198, 4, col);
+        this.spawnEnemyBullet(e.x, e.y, aim + 0.22, 198, 4, col);
+        this.spawnEnemyBullet(e.x, e.y, aim, 152, 5, 0xffffff);
+        break;
+      case 'siege_curtain':
+        this.spawnEnemyBullet(e.x - 10, e.y - 10, Math.PI, 192, 4.5, col);
+        this.spawnEnemyBullet(e.x - 10, e.y + 10, Math.PI, 192, 4.5, col);
+        break;
+      case 'nova_mandala': {
+        const petals = e.customParams?.petals || 5;
+        const total = petals * 3;
+        const rot = t * 1.1;
+        for (let k = 0; k < total; k++) {
+          const theta = (Math.PI * 2 * k) / total;
+          const factor = 1 - 0.22 * Math.abs(Math.sin(petals * theta * 0.5));
+          this.spawnEnemyBullet(e.x, e.y, rot + theta, 175 * factor, k % 3 === 0 ? 5 : 4, k % 3 === 0 ? 0xffffff : col);
+        }
+        break;
+      }
+      case 'pulsar_sweep': {
+        const dir = e.customParams?.spinDir || 1;
+        const base = t * 2.1 * dir;
+        for (let b = 0; b < 3; b++) {
+          this.spawnEnemyBullet(e.x, e.y, base + (Math.PI * 2 * b) / 3, 182, 4.5, col);
+        }
+        break;
+      }
+      case 'helix_stream':
+        this.spawnEnemyBullet(e.x, e.y, aim + 0.19, 196, 4, col);
+        this.spawnEnemyBullet(e.x, e.y, aim - 0.19, 196, 4, 0x00f2fe);
+        break;
+      case 'flower_burst':
+        for (let k = 0; k < 6; k++) {
+          this.spawnEnemyBullet(e.x, e.y, t * 1.4 + (Math.PI * 2 * k) / 6, 172, 4.5, col);
+        }
+        break;
+      case 'ring_burst':
+        for (let k = 0; k < 10; k++) {
+          this.spawnEnemyBullet(e.x, e.y, t * 0.8 + (Math.PI * 2 * k) / 10, 158, 4, col);
+        }
+        break;
+      case 'star_rings':
+        for (let k = 0; k < 12; k++) {
+          this.spawnEnemyBullet(e.x, e.y, t * 1.7 + (Math.PI * 2 * k) / 12, 154, 5, col);
+        }
+        break;
+      case 'cross_spread':
+        for (const off of [-0.32, 0, 0.32]) {
+          this.spawnEnemyBullet(e.x, e.y, aim + off, 200, 4, col);
+        }
+        break;
+      case 'needle_stream':
+        this.spawnEnemyBullet(e.x, e.y, aim, 228, 3.5, col);
+        break;
+      case 'spiral_barrage':
+        for (let k = 0; k < 4; k++) {
+          this.spawnEnemyBullet(e.x, e.y, t * 3.4 + (Math.PI / 2) * k, 168, 4, col);
+        }
+        break;
+    }
+  }
+
+  private spawnEnemyBullet(
+    x: number,
+    y: number,
+    angle: number,
+    speed: number,
+    radius: number,
+    color: number,
+    damage: number = 5,
+    opts?: BulletSpawnOpts & { ttl?: number }
+  ): void {
+    const scale = this.activeEnemyStatScale || 1.0;
+    const finalSpeed = speed * scale;
+    const finalDamage = Math.max(1, Math.round(damage * scale));
     this.bullets.push({
       id: this.nextBulletId++,
       ownerId: 'boss',
       x,
       y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
+      vx: Math.cos(angle) * finalSpeed,
+      vy: Math.sin(angle) * finalSpeed,
       radius,
-      ttl: 4.0,
+      ttl: opts?.ttl ?? 4.4,
       type: 'normal',
-      damage: 5,
+      damage: finalDamage,
       color,
+      spriteType: opts?.spriteType,
+      accel: opts?.accel ? opts.accel * scale : opts?.accel,
+      expAccel: opts?.expAccel,
+      maxSpeed: opts?.maxSpeed ? opts.maxSpeed * scale : opts?.maxSpeed,
+      homeRate: opts?.homeRate,
+      homeTime: opts?.homeTime,
+      splitOnImpact: opts?.splitOnImpact,
+      splitCount: opts?.splitCount,
+      age: 0,
     });
   }
 
   private updateBoss(dt: number): void {
     if (!this.boss.isActive || this.boss.isDefeated) return;
 
+    this.boss.animTimer += dt;
+
     if (this.boss.isRefilling) {
       this.boss.refillTimer -= dt;
       this.boss.hp = Math.min(this.boss.maxHp, this.boss.hp + this.boss.maxHp * dt * 1.4);
+      if (this.boss.bossId === 'mo') {
+        this.boss.x += (400 - this.boss.x) * Math.min(1, dt * 6);
+        this.boss.y += (300 - this.boss.y) * Math.min(1, dt * 6);
+        this.boss.angle = Math.PI;
+      }
       if (this.boss.refillTimer <= 0) {
         this.boss.isRefilling = false;
+        this.boss.isInvulnerable = false;
         this.boss.hp = this.boss.maxHp;
       }
       return;
-    }
-
-    if (!this.boss.isLockedForBeam && !this.struggle.active && !this.struggle.isAligning) {
-      this.boss.moveTimer += dt;
-      this.boss.x = 640 + Math.cos(this.boss.moveTimer * 0.9) * 35;
-      this.boss.y = 300 + Math.sin(this.boss.moveTimer * 1.25) * 120;
     }
 
     const hasMega = this.lasers.some((l) => l.ownerId === 'boss' && l.isMegaBeam);
@@ -1055,41 +1546,456 @@ class DanmakrewSimulationWorker {
     if (this.struggle.active || this.struggle.isAligning) return;
 
     const target = this.getAveragePlayerPos();
-    this.boss.attackTimer += dt;
-    this.boss.laserTimer -= dt;
 
-    const interval = this.boss.phase >= 4 ? 0.55 : 0.75;
-    if (this.boss.attackTimer >= interval) {
-      this.boss.attackTimer = 0;
-      const baseAngle = Math.atan2(target.y - this.boss.y, target.x - this.boss.x);
-      const count = 5 + this.boss.phase * 2;
-      for (let i = 0; i < count; i++) {
-        const spread = ((i - (count - 1) / 2) / count) * 1.3;
-        this.spawnEnemyBullet(
-          this.boss.x - 24,
-          this.boss.y,
-          baseAngle + spread,
-          210 + this.boss.phase * 18,
-          5,
-          this.boss.isSpellCard ? 0xa855f7 : 0xff2b5b
-        );
+    // Custom Mecanical Ophanim (M.O) state machine
+    if (this.boss.bossId === 'mo' && !this.boss.isLockedForBeam) {
+      this.updateWorkerMoBoss(dt, target);
+      return;
+    }
+
+    const cfg = this.getCurrentSpaceConfig();
+    const profile = cfg.bossProfile;
+    const phases = this.getActiveBossPhases();
+    const phaseDef = phases[this.boss.phase - 1] || phases[0];
+
+    if (!this.boss.isLockedForBeam) {
+      const nextPos = computeBossMovement(
+        profile.moveArchetype,
+        this.boss.targetX,
+        this.boss.targetY,
+        this.boss.animTimer,
+        this.boss.phase
+      );
+      this.boss.x = Math.max(540, Math.min(755, nextPos.x));
+      this.boss.y = Math.max(85, Math.min(515, nextPos.y));
+      this.boss.angle = Math.atan2(target.y - this.boss.y, target.x - this.boss.x);
+    } else {
+      return;
+    }
+
+    this.boss.shootTimer += dt;
+    this.boss.laserTimer += dt;
+
+    if (this.boss.shootTimer >= (phaseDef.shootInterval || 0.38)) {
+      this.boss.shootTimer = 0;
+      fireBossPattern(
+        phaseDef.pattern || 'crescent_fan',
+        {
+          bossX: this.boss.x,
+          bossY: this.boss.y,
+          playerX: target.x,
+          playerY: target.y,
+          animTimer: this.boss.animTimer,
+          shotIndex: this.boss.shotIndex++,
+          palette: profile.palette,
+          speedScale: profile.speedScale,
+          statScale: this.boss.statScale || 1.0,
+          phase: this.boss.phase,
+        },
+        (bx, by, angle, speed, radius, color, damage, opts) => {
+          this.spawnEnemyBullet(bx, by, angle, speed, radius, color, damage, opts);
+        }
+      );
+    }
+
+    if (phaseDef.laserMode !== 'none' && this.boss.laserTimer >= (phaseDef.laserInterval || 4.2)) {
+      this.boss.laserTimer = 0;
+      const topY = Math.max(90, this.boss.y - 54);
+      const botY = Math.min(510, this.boss.y + 54);
+      if (phaseDef.laserMode === 'both') {
+        this.spawnLaser('boss', 'left', this.boss.x - 22, topY, topY, 0.72, 1.0, 0.3, 28, profile.palette[1], false);
+        this.spawnLaser('boss', 'left', this.boss.x - 22, botY, botY, 0.72, 1.0, 0.3, 28, profile.palette[1], false);
+      } else {
+        const py = target.y < this.boss.y ? topY : botY;
+        this.spawnLaser('boss', 'left', this.boss.x - 22, py, py, 0.65, 1.0, 0.3, 32, profile.palette[0], false);
       }
     }
 
-    if (this.boss.laserTimer <= 0) {
-      this.boss.laserTimer = this.boss.phase >= 3 ? 5.2 : 6.2;
-      if (this.boss.phase >= 3) {
+    if (phaseDef.megaLaserInterval > 0) {
+      this.boss.megaLaserTimer += dt;
+      if (this.boss.megaLaserTimer >= phaseDef.megaLaserInterval) {
+        this.boss.megaLaserTimer = 0;
         this.boss.isLockedForBeam = true;
-        this.spawnLaser('boss', 'left', this.boss.x - 28, this.boss.y, this.boss.y, 0.75, 1.8, 0.3, 72, 0xffdd00, true);
-      } else {
-        this.spawnLaser('boss', 'left', this.boss.x - 24, this.boss.y - 48, this.boss.y - 48, 0.65, 1.1, 0.25, 32, 0xff2b5b, false);
-        this.spawnLaser('boss', 'left', this.boss.x - 24, this.boss.y + 48, this.boss.y + 48, 0.65, 1.1, 0.25, 32, 0xff2b5b, false);
+        this.boss.x = 730;
+        this.boss.targetX = 730;
+        this.boss.y = Math.max(150, Math.min(450, this.boss.y));
+        this.spawnLaser('boss', 'left', this.boss.x - 20, this.boss.y, this.boss.y, 1.25, 1.85, 0.35, 76, profile.palette[2], true);
       }
     }
   }
 
+  private clipWorkerRayToOuterBounds(x0: number, y0: number, tx: number, ty: number): { x: number; y: number } {
+    const pad = 125;
+    const minX = -pad;
+    const maxX = WORLD_WIDTH + pad;
+    const minY = -pad;
+    const maxY = WORLD_HEIGHT + pad;
+    let dx = tx - x0;
+    let dy = ty - y0;
+    if (Math.hypot(dx, dy) < 35) {
+      dx = 180 - x0;
+      dy = 300 - y0;
+    }
+
+    let bestS = Infinity;
+    let exitX = maxX;
+    let exitY = WORLD_HEIGHT / 2;
+
+    const tryEdge = (s: number) => {
+      if (!(s > 0.05) || s >= bestS) return;
+      const hx = x0 + s * dx;
+      const hy = y0 + s * dy;
+      if (hx >= minX - 2 && hx <= maxX + 2 && hy >= minY - 2 && hy <= maxY + 2) {
+        bestS = s;
+        exitX = Math.max(minX, Math.min(maxX, hx));
+        exitY = Math.max(minY, Math.min(maxY, hy));
+      }
+    };
+
+    if (Math.abs(dx) > 1e-5) {
+      tryEdge((minX - x0) / dx);
+      tryEdge((maxX - x0) / dx);
+    }
+    if (Math.abs(dy) > 1e-5) {
+      tryEdge((minY - y0) / dy);
+      tryEdge((maxY - y0) / dy);
+    }
+    return { x: Math.round(exitX), y: Math.round(exitY) };
+  }
+
+  private pickRandomWorkerOuterPoint(): { x: number; y: number } {
+    const pad = 125;
+    const edge = Math.floor(Math.random() * 4);
+    if (edge === 0) return { x: -pad, y: Math.round(70 + Math.random() * (WORLD_HEIGHT - 140)) };
+    if (edge === 1) return { x: WORLD_WIDTH + pad, y: Math.round(70 + Math.random() * (WORLD_HEIGHT - 140)) };
+    if (edge === 2) return { x: Math.round(90 + Math.random() * (WORLD_WIDTH - 180)), y: -pad };
+    return { x: Math.round(90 + Math.random() * (WORLD_WIDTH - 180)), y: WORLD_HEIGHT + pad };
+  }
+
+  private buildWorkerMoDashChain(startX: number, startY: number, phase: number, target: { x: number; y: number }, _seed: number) {
+    const centerX = WORLD_WIDTH / 2;
+    const centerY = WORLD_HEIGHT / 2;
+    const dashes = 4 + Math.max(1, phase || 1);
+    const px = Math.max(90, Math.min(WORLD_WIDTH - 90, target.x || 200));
+    const py = Math.max(70, Math.min(WORLD_HEIGHT - 70, target.y || centerY));
+
+    const chain: Array<{ x1: number; y1: number; x2: number; y2: number; isReturn?: boolean }> = [];
+    let lastEndX = startX;
+    let lastEndY = startY;
+
+    for (let k = 0; k < dashes; k++) {
+      let sx: number;
+      let sy: number;
+      let tx: number;
+      let ty: number;
+
+      if (k === 0) {
+        sx = startX;
+        sy = startY;
+        tx = px;
+        ty = py;
+        if (Math.hypot(tx - sx, ty - sy) < 60) {
+          tx = 180;
+          ty = py > centerY ? 190 : 410;
+        }
+      } else {
+        const entry = this.pickRandomWorkerOuterPoint();
+        sx = entry.x;
+        sy = entry.y;
+        tx = Math.round(130 + Math.random() * (WORLD_WIDTH - 260));
+        ty = Math.round(95 + Math.random() * (WORLD_HEIGHT - 190));
+      }
+
+      const exitPt = this.clipWorkerRayToOuterBounds(sx, sy, tx, ty);
+      chain.push({ x1: sx, y1: sy, x2: exitPt.x, y2: exitPt.y, isReturn: false });
+      lastEndX = exitPt.x;
+      lastEndY = exitPt.y;
+    }
+
+    chain.push({ x1: lastEndX, y1: lastEndY, x2: centerX, y2: centerY, isReturn: true });
+    return chain;
+  }
+
+  private spawnWorkerMoKamikaze(phase: number, maxActive: number, statScale: number = 1.0, target?: { x: number; y: number }): void {
+    const activeCount = this.enemies.filter((e) => e.type === 'mo_enemy2').length;
+    if (activeCount >= maxActive) return;
+
+    // Never spawn behind the player (no left edge, and top/bottom spawns stay strictly ahead of player X)
+    const edge = Math.floor(Math.random() * 3); // 0: right, 1: top, 2: bottom
+    const pad = 42;
+    const minFrontX = Math.min(WORLD_WIDTH - 40, Math.max(120, Math.round((target?.x ?? 120) + 70)));
+    let startX: number;
+    let startY: number;
+    if (edge === 0) {
+      startX = WORLD_WIDTH + pad;
+      startY = Math.round(45 + Math.random() * (WORLD_HEIGHT - 90));
+    } else if (edge === 1) {
+      startX = Math.round(minFrontX + Math.random() * Math.max(20, WORLD_WIDTH - 20 - minFrontX));
+      startY = -pad;
+    } else {
+      startX = Math.round(minFrontX + Math.random() * Math.max(20, WORLD_WIDTH - 20 - minFrontX));
+      startY = WORLD_HEIGHT + pad;
+    }
+
+    const hp = Math.max(10, Math.round(20 * statScale * this.getSquadHpScale()));
+    this.enemies.push({
+      id: `en_${this.nextEntityId++}`,
+      type: 'mo_enemy2',
+      x: startX,
+      y: startY,
+      startX,
+      startY,
+      speed: Math.round((184 + phase * 9) * statScale),
+      hp,
+      maxHp: hp,
+      radius: 18,
+      itemDrop: 'point',
+      trajectory: 'kamikaze_homing',
+      attackPattern: 'none',
+      shootInterval: 99,
+      shootTimer: 0,
+      spawnTime: 0,
+      bulletColor: 0xfef08a,
+      sprite: '/assets/sprites/MOenemy2png.png',
+      angle: Math.PI,
+      customParams: { fuseTime: 1.75, triggerDist: 135, statScale },
+    });
+  }
+
+  private updateWorkerMoBoss(dt: number, target: { x: number; y: number }): void {
+    const b = this.boss;
+    const centerX = WORLD_WIDTH / 2;
+    const centerY = WORLD_HEIGHT / 2;
+    const statScale = b.statScale || 1.0;
+
+    if (b.moMode === 'intro') {
+      b.moTimer += dt;
+      b.isInvulnerable = true;
+      const progress = Math.min(1, b.moTimer / 3.8);
+      b.x = 670 + (centerX - 670) * (1 - Math.pow(1 - progress, 2));
+      b.y = centerY;
+      b.angle = Math.PI;
+      b.moIntroActive = true;
+      b.moIntroProgress = progress;
+      if (b.moTimer >= 3.8) {
+        b.isInvulnerable = false;
+        b.moIntroActive = false;
+        b.moIntroProgress = 1;
+        b.x = centerX;
+        b.y = centerY;
+        b.moMode = 'telegraph';
+        b.moTimer = 0;
+        b.moSegIndex = 0;
+        b.moDashSpeedScale = 1.0;
+        b.moSummonTimer = 2.6;
+        b.moDashChain = this.buildWorkerMoDashChain(b.x, b.y, b.phase, target, b.moLineIndex++);
+      }
+      return;
+    }
+
+    b.isInvulnerable = false;
+    b.moIntroActive = false;
+
+    // Offscreen MOenemy2 summons:
+    // Normal: P1=0, P2-3=1, P4-5=2 | Difficult: P1=1, P2-3=2, P4-5=3 | No Mercy: P1=2, P2-3=3, P4-5=4
+    const diffBonus = statScale >= 1.2 ? 2 : statScale >= 1.08 ? 1 : 0;
+    const phaseStep = b.phase >= 4 ? 2 : b.phase >= 2 ? 1 : 0;
+    const summonCount = phaseStep + diffBonus;
+    if (summonCount > 0) {
+      b.moSummonTimer += dt;
+      const summonInterval = Math.max(3.8, 6.0 - b.phase * 0.45);
+      if (b.moSummonTimer >= summonInterval) {
+        b.moSummonTimer = 0;
+        const maxActive = Math.min(5 + diffBonus * 2, b.phase + diffBonus);
+        for (let k = 0; k < summonCount; k++) {
+          this.spawnWorkerMoKamikaze(b.phase, maxActive, statScale, target);
+        }
+      }
+    }
+
+    if (b.moMode === 'telegraph') {
+      b.moTimer += dt;
+      const dur = Math.max(0.85, 1.25 - b.phase * 0.05);
+      if (!b.moDashChain.length) {
+        b.moDashChain = this.buildWorkerMoDashChain(b.x, b.y, b.phase, target, b.moLineIndex++);
+      }
+      const first = b.moDashChain[0];
+      b.x += (first.x1 - b.x) * Math.min(1, dt * 14);
+      b.y += (first.y1 - b.y) * Math.min(1, dt * 14);
+      b.angle = Math.atan2(first.y2 - first.y1, first.x2 - first.x1);
+      b.moDashState = 'telegraph';
+      const prog = Number(Math.min(1, b.moTimer / dur).toFixed(2));
+      b.moDashLines = b.moDashChain.map((seg, idx) => ({
+        x1: seg.x1,
+        y1: seg.y1,
+        x2: seg.x2,
+        y2: seg.y2,
+        progress: prog,
+        active: idx === 0,
+        completed: false,
+        isReturn: Boolean(seg.isReturn),
+      }));
+
+      if (b.moTimer >= dur) {
+        b.moMode = 'dashing';
+        b.moSegIndex = 0;
+        b.moDashSpeedScale = 1.0;
+        b.moTimer = 0;
+        b.moDashHitPlayers = new Set();
+        b.moSparkAccum = 0;
+      }
+      return;
+    }
+
+    if (b.moMode === 'dashing') {
+      const seg = b.moDashChain[b.moSegIndex];
+      if (!seg) {
+        b.moMode = 'resting';
+        b.moDashSpeedScale = 1.0;
+        b.moTimer = 0;
+        b.moDashLines = [];
+        return;
+      }
+
+      const segLen = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1) || 1;
+      const baseDashSpeed = (1350 + b.phase * 120) * statScale;
+      const speedScale = b.moDashSpeedScale || 1.0;
+      const segDur = seg.isReturn
+        ? Math.max(0.32, Math.min(0.55, segLen / (1650 * statScale)))
+        : Math.max(0.14, Math.min(0.65, segLen / (baseDashSpeed * speedScale)));
+
+      const prevX = b.x;
+      const prevY = b.y;
+      b.moTimer += dt;
+      const rawT = Math.min(1, b.moTimer / segDur);
+      const p = seg.isReturn
+        ? 1 - Math.pow(1 - rawT, 3)
+        : rawT < 0.5 ? 2 * rawT * rawT : 1 - Math.pow(-2 * rawT + 2, 2) / 2;
+
+      b.x = seg.x1 + (seg.x2 - seg.x1) * p;
+      b.y = seg.y1 + (seg.y2 - seg.y1) * p;
+      b.angle = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
+      b.moDashState = 'dashing';
+      b.moDashLines = b.moDashChain
+        .filter((_s, idx) => idx >= b.moSegIndex)
+        .map((s, relIdx) => ({
+          x1: s.x1,
+          y1: s.y1,
+          x2: s.x2,
+          y2: s.y2,
+          progress: relIdx === 0 ? Number(rawT.toFixed(2)) : 0,
+          active: relIdx === 0,
+          completed: false,
+          isReturn: Boolean(s.isReturn),
+        }));
+
+      b.moSparkAccum += dt;
+      const wakeInterval = Math.max(0.032, 0.068 - b.phase * 0.007);
+      if (!seg.isReturn && b.moSparkAccum >= wakeInterval && b.x > -20 && b.x < WORLD_WIDTH + 20 && b.y > -20 && b.y < WORLD_HEIGHT + 20) {
+        b.moSparkAccum = 0;
+        const pairsPerSide = Math.ceil(b.phase / 2);
+        for (const sgn of [-1, 1]) {
+          const perp = b.angle + sgn * (Math.PI / 2);
+          for (let sp = 0; sp < pairsPerSide; sp++) {
+            const fanOffset = (sp - (pairsPerSide - 1) / 2) * 0.06;
+            const spd = (118 + sp * 32) * statScale;
+            this.spawnEnemyBullet(b.x, b.y, perp + fanOffset, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
+          }
+        }
+      }
+
+      if (!seg.isReturn || rawT < 0.72) {
+        for (const [pid, pl] of this.players) {
+          if (pl.hp <= 0 || b.moDashHitPlayers.has(pid)) continue;
+          const pos = pl.body.getPosition();
+          for (let s = 1; s <= 4; s++) {
+            const st = s / 4;
+            const sx = prevX + (b.x - prevX) * st;
+            const sy = prevY + (b.y - prevY) * st;
+            if (Math.hypot(pos.x - sx, pos.y - sy) <= 42) {
+              b.moDashHitPlayers.add(pid);
+              this.applyDamageToPlayer(pl, 14);
+              break;
+            }
+          }
+        }
+      }
+
+      if (rawT >= 1) {
+        b.x = seg.x2;
+        b.y = seg.y2;
+        if (!seg.isReturn) {
+          const lineNodes = 2 + Math.max(1, b.phase);
+          const sparksPerSide = Math.ceil(b.phase / 2);
+          const lineAngle = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
+          for (let n = 1; n <= lineNodes; n++) {
+            const u = n / (lineNodes + 1);
+            const nx = seg.x1 + (seg.x2 - seg.x1) * u;
+            const ny = seg.y1 + (seg.y2 - seg.y1) * u;
+            if (nx < 10 || nx > WORLD_WIDTH - 10 || ny < 10 || ny > WORLD_HEIGHT - 10) continue;
+            for (const sgn of [-1, 1]) {
+              const perp = lineAngle + sgn * (Math.PI / 2);
+              for (let sp = 0; sp < sparksPerSide; sp++) {
+                const fanOffset = (sp - (sparksPerSide - 1) / 2) * 0.05;
+                const spd = (108 + sp * 32) * statScale;
+                this.spawnEnemyBullet(nx, ny, perp + fanOffset, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
+              }
+            }
+          }
+          b.moDashSpeedScale = (b.moDashSpeedScale || 1.0) + 0.28;
+        }
+        b.moSegIndex += 1;
+        if (b.moSegIndex < b.moDashChain.length) {
+          const nextSeg = b.moDashChain[b.moSegIndex];
+          b.x = nextSeg.x1;
+          b.y = nextSeg.y1;
+          b.angle = Math.atan2(nextSeg.y2 - nextSeg.y1, nextSeg.x2 - nextSeg.x1);
+          b.moTimer = 0;
+          b.moDashHitPlayers = new Set();
+          b.moSparkAccum = 0;
+        } else {
+          b.x = centerX;
+          b.y = centerY;
+          b.moMode = 'resting';
+          b.moDashSpeedScale = 1.0;
+          b.moTimer = 0;
+          b.moRestDuration = Math.max(2.3, 3.2 - b.phase * 0.15);
+          b.moRestShotAccum = 0;
+          b.moDashLines = [];
+        }
+      }
+      return;
+    }
+
+    b.moTimer += dt;
+    b.moDashSpeedScale = 1.0;
+    b.moDashState = 'resting';
+    b.moDashLines = [];
+    const restHoverX = centerX + Math.cos(b.moTimer * 1.45) * 52;
+    const restHoverY = centerY + Math.sin(b.moTimer * 2.2) * 62;
+    b.x += (restHoverX - b.x) * Math.min(1, dt * 4.5);
+    b.y += (restHoverY - b.y) * Math.min(1, dt * 4.5);
+    b.angle = Math.atan2(target.y - b.y, target.x - b.x);
+    b.moRestShotAccum += dt;
+    const restShotInterval = Math.max(0.54, (1.05 - b.phase * 0.06) / statScale);
+    if (b.moRestShotAccum >= restShotInterval) {
+      b.moRestShotAccum = 0;
+      const count = 8 + b.phase * 2;
+      for (let k = 0; k < count; k++) {
+        this.spawnEnemyBullet(b.x, b.y, b.animTimer * 0.75 + (Math.PI * 2 * k) / count, 175 * statScale, 5, 0xef4444, Math.max(1, Math.round(5 * statScale)), { spriteType: 'MObullet1png', ttl: 3.4 });
+      }
+    }
+    if (b.moTimer >= b.moRestDuration) {
+      b.moMode = 'telegraph';
+      b.moTimer = 0;
+      b.moSegIndex = 0;
+      b.moDashSpeedScale = 1.0;
+      b.moDashChain = this.buildWorkerMoDashChain(b.x, b.y, b.phase, target, b.moLineIndex++);
+    }
+  }
+
   private damageBoss(amount: number): void {
-    if (!this.boss.isActive || this.boss.isDefeated || this.boss.isRefilling) return;
+    if (!this.boss.isActive || this.boss.isDefeated || this.boss.isRefilling || this.boss.isInvulnerable) return;
     this.boss.hp = Math.max(0, this.boss.hp - amount);
     if (this.boss.hp <= 0) {
       this.advanceBossPhaseOrDefeat();
@@ -1097,23 +2003,38 @@ class DanmakrewSimulationWorker {
   }
 
   private advanceBossPhaseOrDefeat(): void {
-    // Clear enemy bullets on phase break
     this.bullets = this.bullets.filter((b) => b.ownerId !== 'boss');
     if (this.boss.remainingStocks > 0) {
       this.boss.remainingStocks--;
       this.boss.phase = Math.min(5, this.boss.phase + 1);
-      const spell = BOSS_SPELLS[this.boss.phase - 1] || BOSS_SPELLS[BOSS_SPELLS.length - 1];
+      const phases = this.getActiveBossPhases();
+      const spell = phases[this.boss.phase - 1] || phases[phases.length - 1];
+      const nextHp = Math.round(spell.maxHp * this.getSquadHpScale());
+      this.boss.maxHp = nextHp;
+      this.boss.hp = 1;
       this.boss.spellcardName = spell.name;
       this.boss.isSpellCard = spell.isSpellCard;
       this.boss.isRefilling = true;
-      this.boss.refillTimer = 0.85;
+      this.boss.refillTimer = 0.9;
+      this.boss.shootTimer = 0;
+      this.boss.laserTimer = 0;
+      this.boss.megaLaserTimer = 0;
+      if (this.boss.bossId === 'mo' && this.boss.moMode !== 'intro') {
+        this.boss.moMode = 'resting';
+        this.boss.moTimer = 1.4;
+        this.boss.moDashLines = [];
+      }
       this.spawnItemFountain(this.boss.x, this.boss.y, 8);
     } else {
       this.boss.isDefeated = true;
       this.boss.isActive = false;
       this.stageState = 'stage_clear';
       this.lasers = [];
+      this.enemies = [];
       this.spawnItemFountain(this.boss.x, this.boss.y, 18);
+      if (!this.customStageProfile && this.stageIndex < TOTAL_STAGES_PER_DIFFICULTY - 1) {
+        this.autoAdvanceTimer = this.autoAdvanceDuration;
+      }
     }
   }
 
@@ -1147,8 +2068,7 @@ class DanmakrewSimulationWorker {
           closestDist = dist;
           closestPlayer = p;
         }
-        // Upper-right / collection line auto-magnetize or proximity magnetize
-        if (dist < 110 || pos.x > 520) {
+        if (dist < 115 || pos.x > 520) {
           item.magnetizedTo = p.id;
         }
       }
@@ -1172,8 +2092,8 @@ class DanmakrewSimulationWorker {
       if (closestPlayer && closestDist < 24) {
         if (item.type === 'power') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 50);
         else if (item.type === 'point') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 30);
-        else if (item.type === 'bomb_frag') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 160);
-        else if (item.type === 'life_frag') closestPlayer.hp = Math.min(closestPlayer.stats.hpMax, closestPlayer.hp + 25);
+        else if (item.type === 'bomb_frag') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 165);
+        else if (item.type === 'life_frag') closestPlayer.hp = Math.min(closestPlayer.stats.hpMax, closestPlayer.hp + 28);
         this.items.splice(i, 1);
         continue;
       }
@@ -1185,11 +2105,60 @@ class DanmakrewSimulationWorker {
   }
 
   private updateBullets(dt: number): void {
+    const targetPos = this.getAveragePlayerPos();
+    const toSplit: SimBullet[] = [];
+
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
+      b.age = (b.age || 0) + dt;
+
+      if (b.expAccel && b.expAccel !== 0) {
+        const spd = Math.hypot(b.vx, b.vy);
+        if (spd > 0.001) {
+          const nextSpd = b.maxSpeed
+            ? Math.min(b.maxSpeed, spd * Math.exp(b.expAccel * dt))
+            : spd * Math.exp(b.expAccel * dt);
+          const factor = nextSpd / spd;
+          b.vx *= factor;
+          b.vy *= factor;
+        }
+      } else if (b.accel && b.accel !== 0) {
+        const spd = Math.hypot(b.vx, b.vy);
+        if (spd > 0.001) {
+          const nextSpd = b.maxSpeed ? Math.min(b.maxSpeed, spd + b.accel * dt) : spd + b.accel * dt;
+          const factor = nextSpd / spd;
+          b.vx *= factor;
+          b.vy *= factor;
+        }
+      }
+
+      if (b.homeRate && b.homeTime && b.homeTime > 0) {
+        b.homeTime -= dt;
+        const spd = Math.hypot(b.vx, b.vy);
+        if (spd > 0.001) {
+          const curA = Math.atan2(b.vy, b.vx);
+          const aimA = Math.atan2(targetPos.y - b.y, targetPos.x - b.x);
+          const diff = Math.atan2(Math.sin(aimA - curA), Math.cos(aimA - curA));
+          const step = Math.max(-b.homeRate * dt, Math.min(b.homeRate * dt, diff));
+          b.vx = Math.cos(curA + step) * spd;
+          b.vy = Math.sin(curA + step) * spd;
+        }
+      }
+
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.ttl -= dt;
+
+      const hitEdge =
+        b.splitOnImpact &&
+        (b.age || 0) > 0.14 &&
+        (b.x <= 6 || b.y <= 6 || b.y >= WORLD_HEIGHT - 6 || (b.x >= WORLD_WIDTH - 6 && b.vx > 0));
+
+      if (hitEdge) {
+        toSplit.push(b);
+        this.bullets.splice(i, 1);
+        continue;
+      }
 
       if (b.ttl <= 0 || b.x < -30 || b.x > WORLD_WIDTH + 30 || b.y < -30 || b.y > WORLD_HEIGHT + 30) {
         this.bullets.splice(i, 1);
@@ -1197,7 +2166,6 @@ class DanmakrewSimulationWorker {
       }
 
       if (b.ownerId === 'boss') {
-        // Enemy bullet vs players
         let hitPlayer = false;
         for (const [, p] of this.players) {
           if (p.hp <= 0) continue;
@@ -1207,6 +2175,7 @@ class DanmakrewSimulationWorker {
           const dy = b.y - pos.y;
           if (dx * dx + dy * dy <= (hitRadius + b.radius) * (hitRadius + b.radius)) {
             this.applyDamageToPlayer(p, b.damage);
+            if (b.splitOnImpact) toSplit.push(b);
             hitPlayer = true;
             break;
           }
@@ -1215,7 +2184,6 @@ class DanmakrewSimulationWorker {
           this.bullets.splice(i, 1);
         }
       } else {
-        // Player bullet vs enemies
         let consumed = false;
         for (let j = this.enemies.length - 1; j >= 0; j--) {
           const e = this.enemies[j];
@@ -1236,9 +2204,13 @@ class DanmakrewSimulationWorker {
                 magnetizedTo: null,
               });
               for (const [, p] of this.players) {
-                if (p.hp > 0) p.sp = Math.min(p.stats.spMax, p.sp + 60);
+                if (p.hp > 0) p.sp = Math.min(p.stats.spMax, p.sp + 65);
               }
+              const wasMiniboss = Boolean(e.isMiniboss);
+              const ex = e.x;
+              const ey = e.y;
               this.enemies.splice(j, 1);
+              if (wasMiniboss) this.handleMinibossDefeated(ex, ey);
             }
             consumed = true;
             break;
@@ -1249,17 +2221,26 @@ class DanmakrewSimulationWorker {
           continue;
         }
 
-        // Player bullet vs boss
         if (this.boss.isActive && !this.boss.isDefeated) {
           const dx = b.x - this.boss.x;
           const dy = b.y - this.boss.y;
-          if (dx * dx + dy * dy <= (40 + b.radius) * (40 + b.radius)) {
+          if (dx * dx + dy * dy <= (42 + b.radius) * (42 + b.radius)) {
             const owner = this.players.get(b.ownerId);
             if (owner) owner.sp = Math.min(owner.stats.spMax, owner.sp + owner.stats.spChargePerHit);
-            this.damageBoss(b.damage * 0.45);
+            this.damageBoss(b.damage * 0.35);
             this.bullets.splice(i, 1);
           }
         }
+      }
+    }
+
+    for (const b of toSplit) {
+      const count = b.splitCount || 6;
+      const sx = Math.max(12, Math.min(WORLD_WIDTH - 12, b.x));
+      const sy = Math.max(12, Math.min(WORLD_HEIGHT - 12, b.y));
+      const baseRot = Math.atan2(b.vy, b.vx);
+      for (let k = 0; k < count; k++) {
+        this.spawnEnemyBullet(sx, sy, baseRot + (Math.PI * 2 * k) / count, 165, 4.5, 0x9ca3af, 4, { spriteType: b.spriteType || 'MObullet4png', ttl: 3.4 });
       }
     }
   }
@@ -1288,7 +2269,6 @@ class DanmakrewSimulationWorker {
 
       const halfW = l.currentWidth * 0.5;
 
-      // Lasers erase normal bullets in their beam path
       for (let bIdx = this.bullets.length - 1; bIdx >= 0; bIdx--) {
         const b = this.bullets[bIdx];
         if (b.type === 'laser') continue;
@@ -1298,11 +2278,9 @@ class DanmakrewSimulationWorker {
         }
       }
 
-      // Boss lasers damage Tank walls at 50 DPS (destroys two 25 HP walls in 1s)
       if (l.ownerId === 'boss') {
         for (const w of this.walls) {
-          const inX = w.x <= l.sourceX;
-          if (inX && Math.abs(w.y - l.sourceY) <= halfW + w.height * 0.5) {
+          if (w.x <= l.sourceX && Math.abs(w.y - l.sourceY) <= halfW + w.height * 0.5) {
             w.hp = Math.max(0, w.hp - l.dps * dt);
           }
         }
@@ -1319,11 +2297,10 @@ class DanmakrewSimulationWorker {
           }
         }
       } else {
-        // Player Master Spark damages fairies & boss
         for (let eIdx = this.enemies.length - 1; eIdx >= 0; eIdx--) {
           const e = this.enemies[eIdx];
           if (e.x >= l.sourceX && Math.abs(e.y - l.sourceY) <= halfW + e.radius) {
-            e.hp -= 90 * dt;
+            e.hp -= 95 * dt;
             if (e.hp <= 0) {
               this.items.push({
                 id: `item_${this.nextEntityId++}`,
@@ -1334,13 +2311,17 @@ class DanmakrewSimulationWorker {
                 type: e.itemDrop,
                 magnetizedTo: null,
               });
+              const wasMb = Boolean(e.isMiniboss);
+              const ex = e.x;
+              const ey = e.y;
               this.enemies.splice(eIdx, 1);
+              if (wasMb) this.handleMinibossDefeated(ex, ey);
             }
           }
         }
         if (this.boss.isActive && !this.boss.isDefeated) {
-          if (this.boss.x >= l.sourceX && Math.abs(this.boss.y - l.sourceY) <= halfW + 40) {
-            this.damageBoss(55 * dt);
+          if (this.boss.x >= l.sourceX && Math.abs(this.boss.y - l.sourceY) <= halfW + 42) {
+            this.damageBoss(65 * dt);
           }
         }
       }
@@ -1356,12 +2337,14 @@ class DanmakrewSimulationWorker {
     }
 
     const playerLaser = this.lasers.find((l) => l.ownerId !== 'boss' && (l.state === 'charging' || l.state === 'firing'));
-    const bossMega = this.lasers.find((l) => l.ownerId === 'boss' && (l.isMegaBeam || l.maxWidth >= 60) && (l.state === 'charging' || l.state === 'firing'));
+    const bossMega = this.lasers.find(
+      (l) => l.ownerId === 'boss' && (l.isMegaBeam || l.maxWidth >= 60) && (l.state === 'charging' || l.state === 'firing')
+    );
 
     if (!this.struggle.active && !this.struggle.isAligning) {
       if (playerLaser && bossMega && Math.abs(playerLaser.sourceY - bossMega.sourceY) <= 95) {
         this.struggle.isAligning = true;
-        this.alignTimer = 0.55;
+        this.alignTimer = 0.5;
         const midY = (playerLaser.sourceY + bossMega.sourceY) * 0.5;
         playerLaser.sourceY = midY;
         playerLaser.targetY = midY;
@@ -1379,8 +2362,8 @@ class DanmakrewSimulationWorker {
         this.struggle.isAligning = false;
         this.struggle.active = true;
         this.struggle.balance = 50;
-        this.struggle.timer = 5.0;
-        this.struggle.maxTimer = 5.0;
+        this.struggle.timer = 4.5;
+        this.struggle.maxTimer = 4.5;
         if (playerLaser) {
           playerLaser.state = 'firing';
           playerLaser.fireDuration = 8.0;
@@ -1402,9 +2385,12 @@ class DanmakrewSimulationWorker {
       }
 
       this.struggle.timer = Math.max(0, this.struggle.timer - dt);
-      // Boss pushes back steadily
-      const bossPush = 14 * this.getDifficultyMult();
-      this.struggle.balance = Math.max(0, Math.min(100, this.struggle.balance - bossPush * dt));
+      const bossPush = this.difficulty === 'no_mercy' ? 19 : this.difficulty === 'difficult' ? 16.5 : 14;
+      let allyAssist = 0;
+      for (const [, p] of this.players) {
+        if (p.isBot && p.hp > 0) allyAssist += 4.5;
+      }
+      this.struggle.balance = Math.max(0, Math.min(100, this.struggle.balance + (allyAssist - bossPush) * dt));
 
       const minX = playerLaser.sourceX + 40;
       const maxX = bossMega.sourceX - 40;
@@ -1446,7 +2432,6 @@ class DanmakrewSimulationWorker {
         continue;
       }
 
-      // Tank wall absorbs enemy bullets
       for (let bIdx = this.bullets.length - 1; bIdx >= 0; bIdx--) {
         const b = this.bullets[bIdx];
         if (b.ownerId !== 'boss') continue;
@@ -1466,7 +2451,7 @@ class DanmakrewSimulationWorker {
   }
 
   private buildSnapshot(): GameSnapshot {
-    const cfg = getStageMeta(this.difficulty, this.stageIndex);
+    const meta = this.getStageMeta();
     const players = [...this.players.values()].map((p) => {
       const pos = p.body.getPosition();
       return {
@@ -1493,6 +2478,8 @@ class DanmakrewSimulationWorker {
       ownerId: b.ownerId,
       type: b.type,
       color: b.color,
+      spriteType: b.spriteType,
+      angle: b.spriteType ? Number(Math.atan2(b.vy, b.vx).toFixed(2)) : undefined,
     }));
 
     const walls: ServerWall[] = this.walls.map((w) => ({
@@ -1532,6 +2519,11 @@ class DanmakrewSimulationWorker {
       hp: e.hp,
       maxHp: e.maxHp,
       radius: e.radius,
+      angle: Number((e.angle ?? Math.PI).toFixed(3)),
+      isMiniboss: e.isMiniboss,
+      sprite: e.sprite,
+      minibossName: e.minibossName,
+      fuseProgress: e.fuseProgress,
     }));
 
     const items: ServerItem[] = this.items.map((item) => ({
@@ -1541,37 +2533,84 @@ class DanmakrewSimulationWorker {
       type: item.type,
     }));
 
-    const boss: ServerBoss = {
-      x: this.boss.x,
-      y: this.boss.y,
-      hp: this.boss.hp,
-      maxHp: this.boss.maxHp,
-      phase: this.boss.phase,
-      remainingStocks: this.boss.remainingStocks,
-      spellcardName: this.boss.spellcardName,
-      isSpellCard: this.boss.isSpellCard,
-      isActive: this.boss.isActive,
-      isDefeated: this.boss.isDefeated,
-      isRefilling: this.boss.isRefilling,
-      isLockedForBeam: this.boss.isLockedForBeam,
-    };
+    const activeMb = !this.boss.isActive && !this.boss.isDefeated ? this.enemies.find((e) => e.isMiniboss) : undefined;
+    const boss: ServerBoss = activeMb
+      ? {
+          x: activeMb.x,
+          y: activeMb.y,
+          hp: activeMb.hp,
+          maxHp: activeMb.maxHp,
+          phase: 1,
+          remainingStocks: 0,
+          spellcardName: activeMb.minibossName || 'MINIBOSS',
+          isSpellCard: false,
+          isActive: false,
+          renderHudOnly: true,
+          isMiniboss: true,
+          bossId: activeMb.type,
+          sprite: activeMb.sprite,
+          angle: Number((activeMb.angle ?? Math.PI).toFixed(3)),
+          isDefeated: false,
+          isRefilling: false,
+          isLockedForBeam: false,
+        }
+      : {
+          x: this.boss.x,
+          y: this.boss.y,
+          hp: this.boss.hp,
+          maxHp: this.boss.maxHp,
+          phase: this.boss.phase,
+          remainingStocks: this.boss.remainingStocks,
+          spellcardName: this.boss.spellcardName,
+          isSpellCard: this.boss.isSpellCard,
+          isActive: this.boss.isActive,
+          isDefeated: this.boss.isDefeated,
+          isRefilling: this.boss.isRefilling,
+          isLockedForBeam: this.boss.isLockedForBeam,
+          bossId: this.boss.bossId,
+          fullBossName: this.boss.fullBossName,
+          sprite: this.boss.sprite,
+          angle: Number((this.boss.angle ?? Math.PI).toFixed(3)),
+          moIntroActive: this.boss.moIntroActive,
+          moIntroProgress: Number((this.boss.moIntroProgress || 0).toFixed(3)),
+          moDashState: this.boss.moDashState,
+          moDashLines: this.boss.moDashLines,
+        };
 
     const difficultyLabel =
-      this.difficulty === 'no_mercy' ? 'No Mercy' : this.difficulty === 'difficult' ? 'Difficult' : 'Normal';
+      this.customStageProfile?.difficultyLabel ||
+      (this.difficulty === 'no_mercy'
+        ? 'No Mercy'
+        : this.difficulty === 'difficult'
+          ? 'Difficult'
+          : 'Normal');
+
+    const autoAdvancing = this.stageState === 'stage_clear' && this.autoAdvanceTimer > 0;
+    const transitionElapsed = this.autoAdvanceDuration - this.autoAdvanceTimer;
+    const transitionBlackAlpha = autoAdvancing
+      ? Math.max(0, Math.min(1, (transitionElapsed - 0.7) / 0.95))
+      : 0;
 
     const campaign: ServerCampaign = {
       difficulty: this.difficulty,
       difficultyLabel,
-      world: cfg.world,
-      stage: cfg.stage,
-      worldName: cfg.worldName,
-      stageTitle: cfg.stageTitle,
+      world: meta.world,
+      stage: meta.stage,
+      worldName: meta.worldName,
+      stageTitle: meta.stageTitle,
+      bossSpawnAt: meta.bossSpawnAt,
+      bossWarningAt: meta.bossWarningAt,
+      spaceTheme: meta.spaceTheme,
+      autoAdvancing,
+      transitionBlackAlpha: Number(transitionBlackAlpha.toFixed(3)),
       stageState: this.stageState,
-      campaignComplete: this.stageState === 'stage_clear' && this.stageIndex >= TOTAL_STAGES_PER_DIFFICULTY - 1,
-      bannerText: cfg.bannerText,
-      bannerSubtext: cfg.bannerSubtext,
-      clearTitle: cfg.clearTitle,
-      clearSubtext: cfg.clearSubtext,
+      campaignComplete:
+        this.stageState === 'stage_clear' &&
+        (Boolean(this.customStageProfile) || this.stageIndex >= TOTAL_STAGES_PER_DIFFICULTY - 1),
+      bannerText: meta.bannerText,
+      bannerSubtext: meta.bannerSubtext,
+      clearTitle: meta.clearTitle,
+      clearSubtext: meta.clearSubtext,
     };
 
     return {
@@ -1604,7 +2643,8 @@ self.onmessage = (e: MessageEvent) => {
         payload?.classId || 'DPS',
         payload?.difficulty || 'normal',
         payload?.world ?? 1,
-        payload?.stage ?? 1
+        payload?.stage ?? 1,
+        payload?.stageProfile || null
       );
       break;
     case 'PLAYER_INPUT':
@@ -1649,4 +2689,3 @@ self.onmessage = (e: MessageEvent) => {
       break;
   }
 };
-

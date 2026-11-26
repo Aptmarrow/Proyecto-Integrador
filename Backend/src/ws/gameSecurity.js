@@ -26,6 +26,7 @@ function isOriginAllowed(origin, allowedOrigins) {
   if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
   if (/^http:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/i.test(origin)) return true;
+  if (/^https?:\/\/(www\.)?nomercygames\.me(:\d+)?$/i.test(origin)) return true;
   if (/^https?:\/\/[a-z0-9-]+\.ngrok(-free)?\.(app|dev|io)$/i.test(origin)) return true;
   return false;
 }

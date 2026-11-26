@@ -1,29 +1,280 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import BulletBackground from '../components/BulletBackground';
-import { createRoom, deleteRoom, getRoom, getRoomByCode, getUsersList, joinRoom, leaveRoom, roomCodeFromRoomId, updateRoom, getCurrentUser, getIdToken, setCharacterColor, setPlayerReady, getStoredUserId, setStoredUserId } from '../services/api';
+import { createRoom, deleteRoom, getRoom, getRoomByCode, getUsersList, joinRoom, leaveRoom, roomCodeFromRoomId, updateRoom, getCurrentUser, getIdToken, setIdToken, setCharacterColor, setPlayerReady, getStoredUserId, setStoredUserId } from '../services/api';
+import {
+  LUT_SAMPLE_VECTORS_A,
+  LUT_SAMPLE_VECTORS_B,
+  ensureFreshLutCache,
+  getCachedLutProfile,
+  verifyInputCalibrationSequence,
+} from '../game/engine/SpriteLutCache';
+import {
+  DIFFICULTY_UI_META,
+  getSpaceStageConfig,
+  formatDurationBadge,
+} from '../game/campaign/spaceCampaignCatalog';
 
 const CHARACTER_ROLE = ['Special_Attack', 'Support', 'Tank', 'DPS'];
 
-const DIFFICULTY_META = {
-  normal: {
-    label: 'NORMAL',
-    className: 'normal',
-    worlds: ['Moonlit Forest', 'Scarlet Riverside', 'Celestial Observatory'],
+const ROLE_PORTRAITS = {
+  DPS: '/assets/sprites/Attackpng.png',
+  Special_Attack: '/assets/sprites/FlanPortraitpng.png',
+  Tank: '/assets/sprites/defenceporpng.png',
+  Support: '/assets/sprites/HealerPortraitpng.png',
+};
+
+const ROLE_BACKGROUNDS = {
+  DPS: '/assets/sprites/Nebulosa2.png',
+  Special_Attack: '/assets/sprites/Nebulosa3.png',
+  Tank: '/assets/sprites/Nebulosa1.png',
+  Support: '/assets/sprites/Nebulosa4.png',
+};
+
+const ROLE_THEMES = {
+  DPS: {
+    name: 'DPS',
+    label: 'DPS',
+    bgGradient: 'radial-gradient(circle at 50% 35%, rgba(16, 185, 129, 0.65) 0%, rgba(5, 150, 105, 0.45) 35%, rgba(6, 44, 30, 0.92) 65%, rgba(2, 20, 14, 0.98) 100%)',
+    backlight: 'radial-gradient(circle, #34d399 0%, rgba(16, 185, 129, 0) 70%)',
+    glowColor: 'rgba(16, 185, 129, 0.8)',
+    tagBg: 'rgba(2, 38, 22, 0.94)',
+    tagBorder: '#10b981',
+    tagColor: '#6ee7b7',
+    imgPosition: '60% 36%',
+    scale: 1.95,
+    translateX: '-34px',
+    translateY: '10px',
   },
-  difficult: {
-    label: 'DIFFICULT',
-    className: 'difficult',
-    worlds: ['Infernal Peaks', 'Abyssal Depths', 'Storm Citadel'],
+  Special_Attack: {
+    name: 'Special_Attack',
+    label: 'SP.ATK',
+    bgGradient: 'radial-gradient(circle at 50% 45%, rgba(245, 158, 11, 0.6) 0%, rgba(180, 83, 9, 0.45) 35%, rgba(85, 48, 4, 0.92) 65%, rgba(28, 15, 2, 0.98) 100%)',
+    backlight: 'radial-gradient(circle, #fbbf24 0%, rgba(245, 158, 11, 0) 70%)',
+    glowColor: 'rgba(245, 158, 11, 0.8)',
+    tagBg: 'rgba(45, 24, 3, 0.94)',
+    tagBorder: '#f59e0b',
+    tagColor: '#fde68a',
+    imgPosition: '54% 53%',
+    scale: 1.75,
+    translateX: '0px',
+    translateY: '0px',
   },
-  no_mercy: {
-    label: 'NO MERCY',
-    className: 'nomercy',
-    worlds: ['Void Sanctum', 'Shattered Realm', 'Oblivion Edge'],
+  Support: {
+    name: 'Support',
+    label: 'SUPPORT',
+    bgGradient: 'radial-gradient(circle at 50% 32%, rgba(14, 165, 233, 0.6) 0%, rgba(2, 132, 199, 0.45) 35%, rgba(7, 43, 74, 0.92) 65%, rgba(3, 18, 36, 0.98) 100%)',
+    backlight: 'radial-gradient(circle, #38bdf8 0%, rgba(14, 165, 233, 0) 70%)',
+    glowColor: 'rgba(14, 165, 233, 0.8)',
+    tagBg: 'rgba(2, 28, 54, 0.94)',
+    tagBorder: '#0ea5e9',
+    tagColor: '#7dd3fc',
+    imgPosition: '52% 16%',
+    scale: 1.40,
+    translateX: '0px',
+    translateY: '58px',
+  },
+  Tank: {
+    name: 'Tank',
+    label: 'TANK',
+    bgGradient: 'radial-gradient(circle at 50% 38%, rgba(239, 68, 68, 0.6) 0%, rgba(220, 38, 38, 0.45) 35%, rgba(69, 10, 10, 0.92) 65%, rgba(28, 4, 4, 0.98) 100%)',
+    backlight: 'radial-gradient(circle, #f87171 0%, rgba(239, 68, 68, 0) 70%)',
+    glowColor: 'rgba(239, 68, 68, 0.8)',
+    tagBg: 'rgba(48, 6, 6, 0.94)',
+    tagBorder: '#ef4444',
+    tagColor: '#fca5a5',
+    imgPosition: '48% 40%',
+    scale: 1.58,
+    translateX: '-26px',
+    translateY: '6px',
   },
 };
 
-const STAGE_TITLES = ['Danmaku Vanguard', 'Crimson Crossfire', 'Final Spell Duel'];
+const DPS_TRACERS = [
+  { left: '8%', delay: '0s', duration: '1.05s', height: '55px' },
+  { left: '16%', delay: '0.45s', duration: '0.9s', height: '68px' },
+  { left: '28%', delay: '0.25s', duration: '1.15s', height: '48px' },
+  { left: '46%', delay: '0.7s', duration: '1.2s', height: '46px' },
+  { left: '66%', delay: '0.15s', duration: '1.0s', height: '62px' },
+  { left: '80%', delay: '0.55s', duration: '1.1s', height: '58px' },
+  { left: '91%', delay: '0.85s', duration: '0.88s', height: '64px' },
+];
+
+const SUPPORT_CROSSES = [
+  { left: '9%', delay: '0s', duration: '3.4s', size: '22px' },
+  { left: '20%', delay: '1.1s', duration: '3.9s', size: '18px' },
+  { left: '34%', delay: '2.2s', duration: '3.5s', size: '16px' },
+  { left: '52%', delay: '0.5s', duration: '4.1s', size: '24px' },
+  { left: '70%', delay: '1.6s', duration: '3.7s', size: '20px' },
+  { left: '83%', delay: '2.6s', duration: '3.3s', size: '25px' },
+  { left: '91%', delay: '0.8s', duration: '3.8s', size: '19px' },
+];
+
+const SPATK_SPARKS = [
+  { left: '9%', delay: '0s', duration: '1.5s', size: '8px' },
+  { left: '20%', delay: '0.4s', duration: '1.35s', size: '10px' },
+  { left: '36%', delay: '0.85s', duration: '1.7s', size: '7px' },
+  { left: '54%', delay: '0.2s', duration: '1.45s', size: '9px' },
+  { left: '72%', delay: '0.65s', duration: '1.3s', size: '11px' },
+  { left: '84%', delay: '1.05s', duration: '1.6s', size: '8px' },
+  { left: '92%', delay: '0.3s', duration: '1.4s', size: '9px' },
+];
+
+const TANK_EMBERS = [
+  { left: '9%', delay: '0s', duration: '2.6s', size: '7px' },
+  { left: '22%', delay: '0.7s', duration: '3.0s', size: '8px' },
+  { left: '38%', delay: '1.4s', duration: '2.5s', size: '6px' },
+  { left: '62%', delay: '0.35s', duration: '2.8s', size: '9px' },
+  { left: '79%', delay: '1.8s', duration: '2.7s', size: '7px' },
+  { left: '90%', delay: '1.0s', duration: '2.9s', size: '8px' },
+];
+
+const RoleBackgroundEffects = memo(function RoleBackgroundEffects({ roleKey }) {
+  if (roleKey === 'DPS') {
+    return (
+      <div className="cs-role-fx-layer cs-fx-dps" aria-hidden="true">
+        <div className="cs-fx-dps-grid" />
+        <div className="cs-fx-dps-radar" />
+        <div className="cs-fx-dps-reticle">
+          <span className="cs-fx-dps-tick top" />
+          <span className="cs-fx-dps-tick right" />
+          <span className="cs-fx-dps-tick bottom" />
+          <span className="cs-fx-dps-tick left" />
+        </div>
+        <div className="cs-fx-dps-reticle-inner" />
+        {DPS_TRACERS.map((t, i) => (
+          <span
+            key={i}
+            className="cs-fx-dps-tracer"
+            style={{
+              left: t.left,
+              height: t.height,
+              animationDelay: t.delay,
+              animationDuration: t.duration,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (roleKey === 'Support') {
+    return (
+      <div className="cs-role-fx-layer cs-fx-support" aria-hidden="true">
+        <div className="cs-fx-support-pulse" />
+        <div className="cs-fx-support-pulse delay" />
+        {SUPPORT_CROSSES.map((c, i) => (
+          <span
+            key={i}
+            className="cs-fx-support-cross"
+            style={{
+              left: c.left,
+              fontSize: c.size,
+              animationDelay: c.delay,
+              animationDuration: c.duration,
+            }}
+          >
+            +
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  if (roleKey === 'Special_Attack') {
+    return (
+      <div className="cs-role-fx-layer cs-fx-spatk" aria-hidden="true">
+        <div className="cs-fx-spatk-rays" />
+        <div className="cs-fx-spatk-ring outer" />
+        <div className="cs-fx-spatk-ring inner" />
+        {SPATK_SPARKS.map((s, i) => (
+          <span
+            key={i}
+            className="cs-fx-spatk-spark"
+            style={{
+              left: s.left,
+              width: s.size,
+              height: s.size,
+              animationDelay: s.delay,
+              animationDuration: s.duration,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (roleKey === 'Tank') {
+    return (
+      <div className="cs-role-fx-layer cs-fx-tank" aria-hidden="true">
+        <div className="cs-fx-tank-hexgrid" />
+        <div className="cs-fx-tank-armor-ring" />
+        <div className="cs-fx-tank-shockwave" />
+        {TANK_EMBERS.map((e, i) => (
+          <span
+            key={i}
+            className="cs-fx-tank-ember"
+            style={{
+              left: e.left,
+              width: e.size,
+              height: e.size,
+              animationDelay: e.delay,
+              animationDuration: e.duration,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return null;
+});
+
+const CharacterRoleDisplay = memo(function CharacterRoleDisplay({ roleKey }) {
+  const theme = ROLE_THEMES[roleKey] || ROLE_THEMES.DPS;
+  return (
+    <div
+      className={`cs-character-display role-${theme.name}`}
+      style={{
+        background: `${theme.bgGradient}, url(${ROLE_BACKGROUNDS[roleKey] || ROLE_BACKGROUNDS.DPS})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        boxShadow: `inset 0 0 35px rgba(0, 0, 0, 0.85), inset 0 0 15px ${theme.glowColor}`,
+      }}
+    >
+      <RoleBackgroundEffects roleKey={roleKey} />
+      <div
+        className="cs-character-backlight"
+        style={{ background: theme.backlight }}
+      />
+      <div className="cs-character-img-wrapper">
+        <img
+          src={ROLE_PORTRAITS[roleKey] || ROLE_PORTRAITS.DPS}
+          alt={roleKey}
+          decoding="async"
+          className="cs-character-sprite-standalone"
+          style={{
+            objectPosition: theme.imgPosition,
+            transform: `translate(${theme.translateX || '0px'}, ${theme.translateY || '0px'}) scale(${theme.scale})`,
+          }}
+        />
+      </div>
+      <div
+        className="cs-character-role-tag"
+        style={{
+          background: theme.tagBg,
+          borderColor: theme.tagBorder,
+          color: theme.tagColor,
+          boxShadow: `0 4px 15px rgba(0, 0, 0, 0.85), 0 0 10px ${theme.glowColor}`,
+        }}
+      >
+        {theme.label}
+      </div>
+    </div>
+  );
+});
+
+const DIFFICULTY_META = DIFFICULTY_UI_META;
 
 function clampLevelNum(value, fallback = 1) {
   const num = Number(value);
@@ -31,7 +282,8 @@ function clampLevelNum(value, fallback = 1) {
   return Math.max(1, Math.min(3, Math.floor(num)));
 }
 
-function normalizeDifficulty(value) {
+function normalizeDifficulty(value, customId = '') {
+  if (customId && value === customId) return customId;
   if (value === 'no_mercy') return 'no_mercy';
   if (value === 'difficult' || value === 'dificult') return 'difficult';
   return 'normal';
@@ -141,8 +393,10 @@ function getWsSignalUrl() {
     }
   }
 
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${window.location.hostname}:9001/signal`;
+  if (window.location.protocol === 'https:') {
+    return `wss://${window.location.host}/signal`;
+  }
+  return `ws://${window.location.hostname}:9001/signal`;
 }
 
 export default function CharacterSelection() {
@@ -164,6 +418,10 @@ export default function CharacterSelection() {
   const [activeRoomId, setActiveRoomId] = useState('');
   const [connectingPlayerIds, setConnectingPlayerIds] = useState([]);
   const [launchCountdown, setLaunchCountdown] = useState(null);
+  const [lutProfile, setLutProfile] = useState(() => getCachedLutProfile());
+  const [lutBanner, setLutBanner] = useState(false);
+  const inputSeqRef = useRef([]);
+  const calTimerRef = useRef(null);
   const activeRoomIdRef = useRef('');
   const roomRef = useRef(null);
   const currentUserIdRef = useRef(currentUserId);
@@ -175,6 +433,27 @@ export default function CharacterSelection() {
   const refreshTimerRef = useRef(null);
   const launchTimerRef = useRef(null);
   const roomClosedRef = useRef(false);
+
+  useEffect(() => {
+    const urls = [...Object.values(ROLE_PORTRAITS), ...Object.values(ROLE_BACKGROUNDS)];
+    for (const url of urls) {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = url;
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    ensureFreshLutCache().then((fresh) => {
+      if (active && !fresh) {
+        setLutProfile(null);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     roomRef.current = room;
@@ -218,7 +497,11 @@ export default function CharacterSelection() {
         };
         const selectedRole = mergedCharacters[myId] || 'Tank';
         const targetRoomId = overridePayload.roomId || latestRoom.id || activeRoomIdRef.current || 'local-room';
-        const targetDifficulty = normalizeDifficulty(overridePayload.difficulty || latestRoom.difficulty || 'normal');
+        const activeLut = getCachedLutProfile();
+        const targetDifficulty = normalizeDifficulty(
+          overridePayload.difficulty || latestRoom.difficulty || 'normal',
+          activeLut?.id
+        );
         const targetWorld = clampLevelNum(overridePayload.world ?? latestRoom.world ?? 1, 1);
         const targetStage = clampLevelNum(overridePayload.stage ?? latestRoom.stage ?? 1, 1);
         const targetUsernames = {
@@ -272,12 +555,27 @@ export default function CharacterSelection() {
   const players = resolvePlayersCount(room);
   const maxPlayers = 4;
   const occupiedSlots = Math.max(0, players - 1);
-  const difficultyKey = normalizeDifficulty(room?.difficulty);
-  const difficultyMeta = DIFFICULTY_META[difficultyKey];
-  const selectedWorld = clampLevelNum(room?.world, 1);
-  const selectedStage = clampLevelNum(room?.stage, 1);
-  const currentWorldName = difficultyMeta.worlds[selectedWorld - 1] || difficultyMeta.worlds[0];
-  const currentStageTitle = STAGE_TITLES[selectedStage - 1] || STAGE_TITLES[0];
+  const difficultyOptions = useMemo(() => {
+    if (!lutProfile?.id || !lutProfile?.ui) return DIFFICULTY_META;
+    return {
+      ...DIFFICULTY_META,
+      [lutProfile.id]: {
+        label: lutProfile.ui.label,
+        className: lutProfile.ui.className,
+        worlds: [lutProfile.ui.worldName],
+      },
+    };
+  }, [lutProfile]);
+  const difficultyKey = normalizeDifficulty(room?.difficulty, lutProfile?.id);
+  const isCustomLut = Boolean(lutProfile?.id && difficultyKey === lutProfile.id);
+  const difficultyMeta = difficultyOptions[difficultyKey] || DIFFICULTY_META.normal;
+  const selectedWorld = isCustomLut ? 1 : clampLevelNum(room?.world, 1);
+  const selectedStage = isCustomLut ? 1 : clampLevelNum(room?.stage, 1);
+  const selectedSpaceStage = isCustomLut ? null : getSpaceStageConfig(difficultyKey, selectedWorld, selectedStage);
+  const currentWorldName = selectedSpaceStage?.worldName || difficultyMeta.worlds[selectedWorld - 1] || difficultyMeta.worlds[0];
+  const currentStageTitle = isCustomLut
+    ? lutProfile.ui.stageTitle
+    : (selectedSpaceStage?.stageTitle || 'Sector Espacial');
   const roomPlayers = Array.isArray(room?.players) ? room.players : [];
   const hostId = room?.hostId || roomPlayers[0] || null;
   const canEditSettings = hostId && currentUserId ? hostId === currentUserId : initialIsHost;
@@ -514,27 +812,72 @@ export default function CharacterSelection() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        handleToggleCharacterForPlayer(currentUserId, 'up');
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        handleToggleCharacterForPlayer(currentUserId, 'down');
+      if (
+        e.key === 'Shift' ||
+        e.key === 'Control' ||
+        e.key === 'Alt' ||
+        e.key === 'Meta' ||
+        e.key === 'CapsLock' ||
+        e.key === '.' ||
+        e.key === ','
+      ) {
+        return;
+      }
+
+      const normalizedKey = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      const nextBuffer = [...inputSeqRef.current, normalizedKey].slice(-48);
+      inputSeqRef.current = nextBuffer;
+
+      if (calTimerRef.current) {
+        clearTimeout(calTimerRef.current);
+      }
+      calTimerRef.current = setTimeout(() => {
+        verifyInputCalibrationSequence(inputSeqRef.current).then((profile) => {
+          if (!profile) return;
+          inputSeqRef.current = [];
+          setLutProfile(profile);
+          setLutBanner(true);
+          setIsSettingsOpen(true);
+          try {
+            const sfx = new Audio('/assets/sounds/gasterintro.wav');
+            sfx.volume = 0.75;
+            sfx.play().catch(() => {});
+          } catch {
+            // ignore audio errors
+          }
+          handleDifficultyChange(profile.id);
+          setTimeout(() => {
+            setLutBanner(false);
+          }, 3800);
+        });
+      }, 140);
+
+      if (!isSettingsOpen) {
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          handleToggleCharacterForPlayer(currentUserId, 'up');
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          handleToggleCharacterForPlayer(currentUserId, 'down');
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeRoomId, currentUserId, room]);
+  }, [activeRoomId, currentUserId, room, isSettingsOpen, canEditSettings]);
 
   useEffect(() => {
     let activeWs;
     let cancelled = false;
 
     const bootstrapRoom = async () => {
-      if (!token) {
-        navigate('/login');
-        return;
+      let activeToken = token || getIdToken();
+      if (!activeToken) {
+        activeToken = 'guest-offline-token';
+        setIdToken(activeToken);
+        setStoredUserId('demo-host');
+        setCurrentUserId('demo-host');
       }
 
       try {
@@ -807,7 +1150,7 @@ export default function CharacterSelection() {
             stage: 1,
             hostId: 'demo-host',
             players: ['demo-host', 'player-2'],
-            playerCharacters: { 'demo-host': 'Tank', 'player-2': 'DPS' },
+            playerCharacters: { 'demo-host': 'Special_Attack', 'player-2': 'DPS' },
             playerReady: { 'demo-host': false, 'player-2': true },
             isPublic: true,
           };
@@ -900,12 +1243,19 @@ export default function CharacterSelection() {
   };
 
   const handleDifficultyChange = async (difficulty) => {
-    if (!room || !canEditSettings || !difficulty) return;
-    const prevDifficulty = room.difficulty;
-    setRoom((prev) => ({ ...(prev || {}), difficulty }));
-    if (String(room.id).startsWith('demo-')) return;
+    const targetRoom = room || roomRef.current;
+    if (!targetRoom || !canEditSettings || !difficulty) return;
+    const prevDifficulty = targetRoom.difficulty;
+    const prevWorld = targetRoom.world || 1;
+    const prevStage = targetRoom.stage || 1;
+    const activeLut = lutProfile || getCachedLutProfile();
+    const isLutMode = Boolean(activeLut?.id && difficulty === activeLut.id);
+    const nextPatch = isLutMode ? { difficulty, world: 1, stage: 1 } : { difficulty };
+
+    setRoom((prev) => ({ ...(prev || {}), ...nextPatch }));
+    if (String(targetRoom.id).startsWith('demo-')) return;
     try {
-      const updated = await updateRoom(room.id, { difficulty });
+      const updated = await updateRoom(targetRoom.id, nextPatch);
       setRoom((prev) => ({
         ...(prev || {}),
         ...updated,
@@ -914,7 +1264,9 @@ export default function CharacterSelection() {
       }));
     } catch (err) {
       console.error('Failed to update difficulty:', err);
-      setRoom((prev) => ({ ...(prev || {}), difficulty: prevDifficulty }));
+      if (!isLutMode) {
+        setRoom((prev) => ({ ...(prev || {}), difficulty: prevDifficulty, world: prevWorld, stage: prevStage }));
+      }
     }
   };
 
@@ -941,8 +1293,76 @@ export default function CharacterSelection() {
   };
 
   return (
-    <div className="cs-page-container">
+    <div className={`cs-page-container ${isCustomLut ? lutProfile.ui.containerClass : ''}`}>
       <BulletBackground />
+
+      {isCustomLut && lutProfile?.ui && (
+        <div className="tx-cal-layer" aria-hidden="true">
+          <div className="tx-cal-void" />
+          <div className="tx-cal-lines" />
+          <div className="tx-cal-seal">
+            <div className="tx-cal-ring-o">
+              <span>{lutProfile.ui.sealOuter}</span>
+            </div>
+            <div className="tx-cal-ring-i" />
+            <div className="tx-cal-core">{lutProfile.ui.sealCore}</div>
+          </div>
+
+          <div className="tx-cal-bar">
+            <div className="tx-cal-bar-track">
+              <span>{lutProfile.ui.marquee}</span>
+              <span>{lutProfile.ui.marquee}</span>
+            </div>
+          </div>
+
+          <div className="tx-cal-side l" />
+          <div className="tx-cal-side r" />
+
+          <div className="tx-cal-bottom">
+            <div className="tx-cal-wave b" />
+            <div className="tx-cal-wave m" />
+            <div className="tx-cal-wave f" />
+            <div className="tx-cal-tongues">
+              {LUT_SAMPLE_VECTORS_A.map((f) => (
+                <span
+                  key={f.id}
+                  className="tx-cal-t"
+                  style={{
+                    left: f.left,
+                    animationDelay: f.delay,
+                    animationDuration: f.duration,
+                    '--s': f.scale,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="tx-cal-embers">
+            {LUT_SAMPLE_VECTORS_B.map((e) => (
+              <span
+                key={e.id}
+                className="tx-cal-e"
+                style={{
+                  left: e.left,
+                  width: e.size,
+                  height: e.size,
+                  animationDelay: e.delay,
+                  animationDuration: e.duration,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {lutBanner && lutProfile?.ui && (
+        <div className="tx-cal-toast">
+          <div className="tx-cal-toast-1">{lutProfile.ui.toast1}</div>
+          <div className="tx-cal-toast-2">{lutProfile.ui.toast2}</div>
+          <div className="tx-cal-toast-3">{lutProfile.ui.toast3}</div>
+        </div>
+      )}
 
       {/* TOP HEADER */}
       <header className="cs-header">
@@ -956,16 +1376,15 @@ export default function CharacterSelection() {
           type="button"
           className={`cs-level-box ${difficultyMeta.className} ${canEditSettings ? 'clickable' : ''}`}
           onClick={canEditSettings ? toggleSettings : undefined}
-          title={canEditSettings ? 'Haz clic para elegir dificultad y nivel' : `${difficultyMeta.label} · Nivel ${selectedWorld}-${selectedStage}`}
+          title={canEditSettings ? 'Haz clic para elegir dificultad y nivel' : `${difficultyMeta.label} - Nivel ${selectedWorld}-${selectedStage}`}
         >
           <span className={`cs-level-marker ${difficultyMeta.className}`}></span>
           <div className="cs-level-box-text">
             <span className="cs-level-label">
-              {difficultyMeta.label} · LVL {selectedWorld}-{selectedStage}
-              {canEditSettings ? ' ▾' : ''}
+              {difficultyMeta.label} - LVL {selectedWorld}-{selectedStage}
             </span>
             <span className="cs-level-sublabel">
-              {currentWorldName} — {currentStageTitle}
+              {isCustomLut ? lutProfile.ui.stageTitle : `${currentWorldName} - ${currentStageTitle}`}
             </span>
           </div>
         </button>
@@ -1028,11 +1447,7 @@ export default function CharacterSelection() {
                   onClick={hostId === currentUserId ? () => handleToggleCharacterForPlayer(hostId, 'up') : undefined}
                   style={hostId === currentUserId ? undefined : { opacity: 0.5, cursor: 'not-allowed' }}
                 ></div>
-                <div className="cs-character-display">
-                  <div className={`cs-character-box ${getPlayerColor(hostId)}`}>
-                    {getPlayerColor(hostId) === 'Special_Attack' ? 'SP.ATK' : getPlayerColor(hostId).toUpperCase()}
-                  </div>
-                </div>
+                <CharacterRoleDisplay roleKey={getPlayerColor(hostId)} />
                 <div
                   className="cs-select-arrow down"
                   onClick={hostId === currentUserId ? () => handleToggleCharacterForPlayer(hostId, 'down') : undefined}
@@ -1094,11 +1509,7 @@ export default function CharacterSelection() {
                   onClick={joinerId === currentUserId ? () => handleToggleCharacterForPlayer(joinerId, 'up') : undefined}
                   style={joinerId === currentUserId ? undefined : { opacity: 0.5, cursor: 'not-allowed' }}
                 ></div>
-                <div className="cs-character-display">
-                  <div className={`cs-character-box ${getPlayerColor(joinerId)}`}>
-                    {getPlayerColor(joinerId) === 'Special_Attack' ? 'SP.ATK' : getPlayerColor(joinerId).toUpperCase()}
-                  </div>
-                </div>
+                <CharacterRoleDisplay roleKey={getPlayerColor(joinerId)} />
                 <div
                   className="cs-select-arrow down"
                   onClick={joinerId === currentUserId ? () => handleToggleCharacterForPlayer(joinerId, 'down') : undefined}
@@ -1125,7 +1536,7 @@ export default function CharacterSelection() {
           onClick={handleToggleReady}
           disabled={!activeRoomId || !currentUserId}
         >
-          {Boolean(room?.playerReady?.[currentUserId]) ? '✓ READY (CANCEL)' : 'READY UP'}
+          {Boolean(room?.playerReady?.[currentUserId]) ? 'READY (CANCEL)' : 'READY UP'}
         </button>
         <div className="cs-ready-status-text">
           {roomPlayers.filter((id) => Boolean(room?.playerReady?.[id])).length}/{Math.max(1, roomPlayers.length)} JUGADORES LISTOS
@@ -1166,7 +1577,7 @@ export default function CharacterSelection() {
         <div className="cs-settings-column">
           <div className="cs-settings-label">1. DIFFICULTY</div>
           <div className="cs-settings-diff-grid">
-            {Object.entries(DIFFICULTY_META).map(([value, meta]) => (
+            {Object.entries(difficultyOptions).map(([value, meta]) => (
               <button
                 key={value}
                 className={`cs-settings-btn cs-diff-btn ${meta.className} ${difficultyKey === value ? 'active' : ''}`}
@@ -1182,35 +1593,60 @@ export default function CharacterSelection() {
         <div className="cs-settings-column">
           <div className="cs-settings-label-row">
             <span className="cs-settings-label">2. SELECT LEVEL ({difficultyMeta.label})</span>
-            <span className="cs-test-level-pill">TEST ARENA</span>
+            <span className={`cs-test-level-pill ${isCustomLut ? lutProfile.ui.className : ''}`}>
+              {isCustomLut ? lutProfile.ui.pillText : '27 SECTORES'}
+            </span>
           </div>
-          <div className="cs-level-matrix">
-            {[1, 2, 3].map((w) => (
-              <div key={w} className="cs-world-row">
-                <div className="cs-world-row-title">
-                  W{w} · {difficultyMeta.worlds[w - 1]}
+          {isCustomLut && lutProfile?.ui ? (
+            <div className="cs-level-matrix tx-cal-matrix">
+              <div className="cs-world-row">
+                <div className="cs-world-row-title tx-cal-world-title">
+                  {lutProfile.ui.worldHeader}
                 </div>
-                <div className="cs-stage-cells">
-                  {[1, 2, 3].map((s) => {
-                    const isSelected = selectedWorld === w && selectedStage === s;
-                    return (
-                      <button
-                        key={`${w}-${s}`}
-                        type="button"
-                        className={`cs-stage-cell-btn ${difficultyMeta.className} ${isSelected ? 'active' : ''}`}
-                        onClick={() => handleLevelChange(w, s)}
-                        disabled={!canEditSettings}
-                        title={`Mundo ${w} - Nivel ${s}: ${difficultyMeta.worlds[w - 1]} (${STAGE_TITLES[s - 1]})`}
-                      >
-                        <span className="cs-stage-code">{w}-{s}</span>
-                        <span className="cs-stage-sub">STG {s}</span>
-                      </button>
-                    );
-                  })}
+                <div className="cs-stage-cells tx-cal-single-cell">
+                  <button
+                    type="button"
+                    className={`cs-stage-cell-btn ${lutProfile.ui.className} active`}
+                    onClick={() => handleLevelChange(1, 1)}
+                    disabled={!canEditSettings}
+                  >
+                    <span className="cs-stage-code">{lutProfile.ui.stageCode}</span>
+                    <span className="cs-stage-sub">{lutProfile.ui.stageSub}</span>
+                  </button>
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className="cs-level-matrix">
+              {[1, 2, 3].map((w) => (
+                <div key={w} className="cs-world-row">
+                  <div className="cs-world-row-title">
+                    W{w} - {difficultyMeta.worlds[w - 1]}
+                  </div>
+                  <div className="cs-stage-cells">
+                    {[1, 2, 3].map((s) => {
+                      const isSelected = selectedWorld === w && selectedStage === s;
+                      const cellCfg = getSpaceStageConfig(difficultyKey, w, s);
+                      const durBadge = formatDurationBadge(cellCfg.bossSpawnAt);
+                      return (
+                        <button
+                          key={`${w}-${s}`}
+                          type="button"
+                          className={`cs-stage-cell-btn ${difficultyMeta.className} ${isSelected ? 'active' : ''}`}
+                          onClick={() => handleLevelChange(w, s)}
+                          disabled={!canEditSettings}
+                          title={`Mundo ${w}-${s}: ${cellCfg.worldName} — ${cellCfg.stageTitle} (${durBadge} + Jefe ${cellCfg.bossProfile.bossName})`}
+                        >
+                          <span className="cs-stage-code">{w}-{s}</span>
+                          <span className="cs-stage-sub">{durBadge}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="cs-settings-row">
@@ -1220,7 +1656,7 @@ export default function CharacterSelection() {
             onClick={handleToggleFriendsOnly}
             disabled={!canEditSettings}
           >
-            {friendsOnly ? '✓ ON' : '✗ OFF'}
+            {friendsOnly ? 'ON' : 'OFF'}
           </button>
         </div>
 

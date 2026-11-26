@@ -11,11 +11,11 @@ export interface BossPhaseDef {
 }
 
 export const BOSS_PHASES: BossPhaseDef[] = [
-  { phase: 1, name: 'Twilight Non-Spell "Evening Flutter"', isSpellCard: false, maxHp: 110 },
-  { phase: 2, name: 'Moon Sign "Moonlight Ray"', isSpellCard: true, maxHp: 140 },
-  { phase: 3, name: 'Night Non-Spell "Midnight Petal Barrage"', isSpellCard: false, maxHp: 130 },
-  { phase: 4, name: 'Night Sign "Midnight Gaster Cage"', isSpellCard: true, maxHp: 160 },
-  { phase: 5, name: 'Darkness Sign "Demarcation of the Dark Forest"', isSpellCard: true, maxHp: 200 },
+  { phase: 1, name: 'Phase 1 "Vanguard Barrage"', isSpellCard: false, maxHp: 110 },
+  { phase: 2, name: 'Core Surge "Crimson Vortex"', isSpellCard: true, maxHp: 140 },
+  { phase: 3, name: 'Phase 3 "Crossfire Storm"', isSpellCard: false, maxHp: 130 },
+  { phase: 4, name: 'Overload Protocol "Prism Cage"', isSpellCard: true, maxHp: 160 },
+  { phase: 5, name: 'Final Protocol "Eclipse Ray"', isSpellCard: true, maxHp: 200 },
 ];
 
 export class Boss {
@@ -36,6 +36,21 @@ export class Boss {
   public isLockedForBeam: boolean = false;
   public refillTimer: number = 0;
   public displayHpPercent: number = 100;
+
+  // Extensiones de Campaña Normal (Boss Dinámico, Minijefe HUD y M.O)
+  public bossId: string = 'first_boss';
+  public currentSpriteUrl: string = '/assets/sprites/FirstBoss.png';
+  public difficultyTint: number = 0xffffff;
+  private difficultyFilter: PIXI.Filter | null = null;
+  public angle: number = Math.PI;
+  private displayAngle: number = Math.PI;
+  public renderHudOnly: boolean = false;
+  public isMinibossHud: boolean = false;
+  public moIntroActive: boolean = false;
+  public moIntroProgress: number = 0;
+  public moDashState: string = 'idle';
+  public moDashLines: Array<{ x1: number; y1: number; x2: number; y2: number; progress: number; active: boolean; completed?: boolean; isReturn?: boolean }> = [];
+  public moLineGraphics = new PIXI.Graphics();
 
   public get x(): number {
     return this.pos.x;
@@ -71,6 +86,8 @@ export class Boss {
   private megaLaserTimer = 0;
   private animTimer = 0;
   private introProgress = 0;
+  private cachedCirclePhase: number = -1;
+  private hadMoLines: boolean = false;
 
   public onPhaseChange?: (newPhase: BossPhase, spellName: string, isSpellCard: boolean) => void;
   public onDefeated?: () => void;
@@ -82,11 +99,64 @@ export class Boss {
   ) {
     this.hp = initialHp;
     this.maxHp = initialHp;
+    this.currentSpriteUrl = spriteUrl;
+    parentContainer.addChild(this.moLineGraphics);
     parentContainer.addChild(this.container);
+    this.initStaticAura();
+    this.auraGraphics.visible = false;
+    this.magicCircleGraphics.visible = false;
     this.container.addChild(this.auraGraphics);
     this.container.addChild(this.magicCircleGraphics);
     this.initSprite(spriteUrl);
     this.container.visible = false;
+  }
+
+  public setDifficultyTint(tint: number): void {
+    this.difficultyTint = tint;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.tint = tint;
+    }
+  }
+
+  public setDifficultyFilter(filter: PIXI.Filter | null): void {
+    this.difficultyFilter = filter;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.filters = filter ? [filter] : null;
+    }
+  }
+
+  private initStaticAura(): void {
+    this.auraGraphics.clear();
+    this.auraGraphics.beginFill(0x00f2fe, 0.25);
+    this.auraGraphics.drawCircle(0, 0, 50);
+    this.auraGraphics.endFill();
+    this.auraGraphics.lineStyle(2, 0xffffff, 0.9);
+    this.auraGraphics.drawCircle(0, 0, 42.5);
+    this.auraGraphics.lineStyle(0);
+  }
+
+  public setSpriteUrl(spriteUrl: string): void {
+    if (!spriteUrl || spriteUrl === this.currentSpriteUrl) return;
+    this.currentSpriteUrl = spriteUrl;
+    const tex = PIXI.Texture.from(spriteUrl);
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.texture = tex;
+      this.sprite.scale.set(0.42);
+      this.sprite.tint = this.difficultyTint;
+      this.sprite.filters = this.difficultyFilter ? [this.difficultyFilter] : null;
+    } else {
+      if (this.sprite && this.sprite.parent) {
+        this.sprite.parent.removeChild(this.sprite);
+      }
+      const next = new PIXI.Sprite(tex);
+      next.anchor.set(0.5);
+      next.scale.set(0.42);
+      next.tint = this.difficultyTint;
+      next.filters = this.difficultyFilter ? [this.difficultyFilter] : null;
+      next.position.set(0, 0);
+      this.sprite = next;
+      this.container.addChild(next);
+    }
   }
 
   private initSprite(spriteUrl: string): void {
@@ -94,6 +164,8 @@ export class Boss {
       const sprite = new PIXI.Sprite(tex);
       sprite.anchor.set(0.5);
       sprite.scale.set(0.42);
+      sprite.tint = this.difficultyTint;
+      sprite.filters = this.difficultyFilter ? [this.difficultyFilter] : null;
       sprite.position.set(0, 0);
       this.sprite = sprite;
       this.container.addChild(sprite);
@@ -142,32 +214,134 @@ export class Boss {
     this.isDefeated = false;
     this.isInvulnerable = false;
     this.isRefilling = false;
+    this.renderHudOnly = false;
+    this.isMinibossHud = false;
+    this.moIntroActive = false;
+    this.moIntroProgress = 0;
+    this.moDashState = 'idle';
+    this.moDashLines = [];
+    this.angle = Math.PI;
+    this.displayAngle = Math.PI;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.rotation = 0;
+      this.sprite.scale.set(0.42, 0.42);
+    }
     this.container.visible = false;
     this.pos = { x: 1100, y: 288 };
-    this.magicCircleGraphics.clear();
-    this.auraGraphics.clear();
+    this.magicCircleGraphics.visible = false;
+    this.auraGraphics.visible = false;
+    if (this.hadMoLines) {
+      this.moLineGraphics.clear();
+      this.hadMoLines = false;
+    }
   }
 
-  public syncVisuals(dt: number, animTimer: number): void {
-    const visible = this.isActive && !this.isDefeated;
+  public syncVisuals(dt: number, animTimer: number, scaleX: number = 1.28, scaleY: number = 0.96): void {
+    if (this.hadMoLines) {
+      this.moLineGraphics.clear();
+      this.hadMoLines = false;
+    }
+    const visible = this.isActive && !this.isDefeated && !this.renderHudOnly;
     this.container.visible = visible;
+    this.displayHpPercent = this.maxHp > 0 ? Math.max(0, Math.min(100, (this.hp / this.maxHp) * 100)) : 0;
+
     if (!visible) {
-      this.magicCircleGraphics.clear();
-      this.auraGraphics.clear();
+      this.magicCircleGraphics.visible = false;
+      this.auraGraphics.visible = false;
       return;
     }
 
     this.container.position.set(this.pos.x, this.pos.y);
-    this.displayHpPercent = this.maxHp > 0 ? Math.max(0, Math.min(100, (this.hp / this.maxHp) * 100)) : 0;
+
+    // Smooth orientation tracking (M.O follows dash line angle; bosses otherwise track players)
+    const angleDiff = Math.atan2(Math.sin(this.angle - this.displayAngle), Math.cos(this.angle - this.displayAngle));
+    const turnSpeed = this.moDashState === 'dashing' ? 28 : 14;
+    this.displayAngle += angleDiff * Math.min(1, dt * turnSpeed);
+    if (this.sprite instanceof PIXI.Sprite) {
+      if (Math.cos(this.displayAngle) > 0) {
+        this.sprite.scale.set(-0.42, 0.42);
+        this.sprite.rotation = this.displayAngle;
+      } else {
+        this.sprite.scale.set(0.42, 0.42);
+        this.sprite.rotation = Math.atan2(
+          Math.sin(this.displayAngle - Math.PI),
+          Math.cos(this.displayAngle - Math.PI)
+        );
+      }
+    }
 
     if (this.isRefilling) {
       const progress = this.displayHpPercent / 100;
       this.renderRefillAura(animTimer, progress);
+      if (this.sprite instanceof PIXI.Sprite) this.sprite.tint = this.difficultyTint;
+    } else if (this.bossId === 'mo' && this.moIntroActive) {
+      this.renderMoIntroAura(animTimer, this.moIntroProgress);
+      if (this.sprite instanceof PIXI.Sprite) {
+        this.sprite.tint = this.moIntroProgress >= 0.7 && this.moIntroProgress <= 0.84 ? 0xfef08a : this.difficultyTint;
+      }
     } else {
-      this.auraGraphics.clear();
+      this.auraGraphics.visible = false;
+      if (this.sprite instanceof PIXI.Sprite) this.sprite.tint = this.difficultyTint;
+    }
+
+    if (this.bossId === 'mo' && this.moDashLines.length > 0) {
+      this.renderMoDashLines(animTimer, scaleX, scaleY);
+      this.hadMoLines = true;
     }
 
     this.renderMagicCircle(animTimer);
+  }
+
+  private renderMoDashLines(animTimer: number, scaleX: number, scaleY: number): void {
+    const g = this.moLineGraphics;
+    const isDash = this.moDashState === 'dashing';
+    const pulse = 0.65 + Math.sin(animTimer * 28) * 0.35;
+
+    for (let idx = 0; idx < this.moDashLines.length; idx++) {
+      const line = this.moDashLines[idx];
+      if (line.completed) continue;
+      const x1 = line.x1 * scaleX;
+      const y1 = line.y1 * scaleY;
+      const x2 = line.x2 * scaleX;
+      const y2 = line.y2 * scaleY;
+
+      const isActiveLine = isDash && line.active;
+      const isReturn = Boolean(line.isReturn);
+      const outerColor = isReturn ? 0x00f2fe : 0xff2b5b;
+      const outerAlpha = isActiveLine ? 0.5 : isReturn ? 0.16 * pulse : 0.24 * pulse;
+      const outerWidth = isActiveLine ? 22 : isReturn ? 7 : 11 + line.progress * 6;
+      const coreAlpha = isActiveLine ? 0.96 : isReturn ? 0.48 * pulse : 0.68 * pulse;
+      const coreWidth = isActiveLine ? 5 : isReturn ? 1.8 : 2.5;
+
+      g.lineStyle(outerWidth, outerColor, outerAlpha);
+      g.moveTo(x1, y1);
+      g.lineTo(x2, y2);
+
+      g.lineStyle(coreWidth, isReturn ? 0xfef08a : 0xffffff, coreAlpha);
+      g.moveTo(x1, y1);
+      g.lineTo(x2, y2);
+
+      if (isReturn) {
+        g.lineStyle(2, 0x00f2fe, 0.85);
+        g.drawCircle(x2, y2, 16 * (0.85 + Math.sin(animTimer * 8) * 0.15));
+      }
+    }
+    g.lineStyle(0);
+
+    // High-speed afterimage trail while M.O dashes along the active line
+    const activeLine = this.moDashLines.find((l) => l.active);
+    if (isDash && activeLine) {
+      const sx = activeLine.x1 * scaleX;
+      const sy = activeLine.y1 * scaleY;
+      for (let i = 1; i <= 4; i++) {
+        const t = i / 5;
+        const ax = sx + (this.pos.x - sx) * t;
+        const ay = sy + (this.pos.y - sy) * t;
+        g.beginFill(activeLine.isReturn ? 0x00f2fe : 0xff2b5b, 0.18 * t);
+        g.drawCircle(ax, ay, 24 * t);
+        g.endFill();
+      }
+    }
   }
 
   public update(
@@ -205,7 +379,7 @@ export class Boss {
         this.isRefilling = false;
         this.isInvulnerable = false;
         this.displayHpPercent = (this.hp / this.maxHp) * 100;
-        this.auraGraphics.clear();
+        this.auraGraphics.visible = false;
       }
       this.container.position.set(this.pos.x, this.pos.y);
       return;
@@ -494,48 +668,124 @@ export class Boss {
     this.takeDamage(this.hp + 999);
   }
 
-  private renderRefillAura(animTimer: number, progress: number): void {
-    this.auraGraphics.clear();
-    const rad = 45 + Math.sin(animTimer * 20) * 8 + progress * 25;
-    this.auraGraphics.beginFill(0x00f2fe, 0.25 * (1 - progress * 0.5));
-    this.auraGraphics.drawCircle(0, 0, rad);
-    this.auraGraphics.endFill();
+  private renderMoIntroAura(animTimer: number, progress: number): void {
+    const g = this.auraGraphics;
+    g.clear();
+    const p = Math.max(0, Math.min(1, progress));
+    const fade = p < 0.12 ? p / 0.12 : p > 0.9 ? Math.max(0, (1 - p) / 0.1) : 1;
 
-    this.auraGraphics.lineStyle(2, 0xffffff, 0.9);
-    this.auraGraphics.drawCircle(0, 0, rad * 0.85);
-    this.auraGraphics.lineStyle(0);
+    // 1. Deep Seraphic Crimson-Gold Core Glow
+    const baseRad = 68 + p * 66 + Math.sin(animTimer * 18) * 7;
+    g.beginFill(0x991b1b, 0.28 * fade);
+    g.drawCircle(0, 0, baseRad * 1.25);
+    g.endFill();
+    g.beginFill(0xfde047, 0.22 * fade);
+    g.drawCircle(0, 0, baseRad * 0.72);
+    g.endFill();
+
+    // 2. Six radiating Seraph Light Rays
+    const raySpin = animTimer * 1.65;
+    const lockFlare = p >= 0.7 ? Math.sin(Math.min(1, (p - 0.7) / 0.3) * Math.PI) : 0;
+    const rayLen = baseRad * (1.55 + lockFlare * 1.2);
+    for (let k = 0; k < 6; k++) {
+      const a = raySpin + (Math.PI * 2 * k) / 6;
+      const spread = 0.12 + lockFlare * 0.08;
+      g.beginFill(k % 2 === 0 ? 0xfde047 : 0xff2b5b, (0.16 + lockFlare * 0.28) * fade);
+      g.moveTo(0, 0);
+      g.lineTo(Math.cos(a - spread) * rayLen, Math.sin(a - spread) * rayLen);
+      g.lineTo(Math.cos(a + spread) * rayLen, Math.sin(a + spread) * rayLen);
+      g.closePath();
+      g.endFill();
+    }
+
+    // 3. Outer rotating Ophanim Wheel & 8 Sacred Eye Sigils
+    const wheelR = 88 + p * 44;
+    g.lineStyle(2.8, 0xff2b5b, 0.85 * fade);
+    g.drawCircle(0, 0, wheelR);
+    g.lineStyle(1.4, 0xfde047, 0.75 * fade);
+    g.drawCircle(0, 0, wheelR * 0.86);
+    g.lineStyle(0);
+
+    for (let e = 0; e < 8; e++) {
+      const ea = animTimer * 2.1 + (Math.PI * 2 * e) / 8;
+      const ex = Math.cos(ea) * wheelR;
+      const ey = Math.sin(ea) * wheelR;
+      g.beginFill(0xfef08a, 0.9 * fade);
+      g.drawCircle(ex, ey, 4.5 + Math.sin(animTimer * 12 + e) * 1.5);
+      g.endFill();
+    }
+
+    // 4. Counter-rotating Inner 6-Point Star Polygon
+    const starR = wheelR * 0.72;
+    const cRot = -animTimer * 2.8;
+    g.lineStyle(2, 0xfacc15, 0.82 * fade);
+    for (let tri = 0; tri < 2; tri++) {
+      const offset = (tri * Math.PI) / 3;
+      for (let v = 0; v < 3; v++) {
+        const a1 = cRot + offset + (Math.PI * 2 * v) / 3;
+        const a2 = cRot + offset + (Math.PI * 2 * ((v + 1) % 3)) / 3;
+        g.moveTo(Math.cos(a1) * starR, Math.sin(a1) * starR);
+        g.lineTo(Math.cos(a2) * starR, Math.sin(a2) * starR);
+      }
+    }
+
+    // 5. Imploding Compression Ring (0.42..0.70) -> Exploding Lock Shockwave (0.70..0.98)
+    if (p >= 0.42 && p < 0.7) {
+      const imp = (p - 0.42) / 0.28;
+      g.lineStyle(3, 0xffffff, 0.85 * imp);
+      g.drawCircle(0, 0, (1 - imp) * 210 + 36);
+    } else if (p >= 0.7) {
+      const exp = (p - 0.7) / 0.28;
+      const shockFade = Math.max(0, 1 - exp);
+      g.lineStyle(Math.max(1.5, 6 * shockFade), 0xfef08a, 0.95 * shockFade);
+      g.drawCircle(0, 0, 42 + exp * 220);
+      g.lineStyle(Math.max(1, 3.5 * shockFade), 0xff2b5b, 0.85 * shockFade);
+      g.drawCircle(0, 0, 24 + exp * 165);
+    }
+    g.lineStyle(0);
+  }
+
+  private renderRefillAura(animTimer: number, progress: number): void {
+    const rad = 45 + Math.sin(animTimer * 20) * 8 + progress * 25;
+    this.auraGraphics.visible = true;
+    this.auraGraphics.scale.set(rad / 50);
+    this.auraGraphics.alpha = Math.max(0.2, 1 - progress * 0.45);
   }
 
   private renderMagicCircle(animTimer: number): void {
-    this.magicCircleGraphics.clear();
-
     // Solo mostrar círculo mágico en fases de Spell Card normales cuando no está en Mega Láser / Struggle
-    if (this.phase === 1 || this.phase === 3 || this.isLockedForBeam) return;
-
-    const rot = animTimer * 2.2;
-    const circleColor = this.phase === 5 ? 0xffdd00 : (this.phase === 4 ? 0xff2b5b : 0x00f2fe);
-    const radius = 68 + Math.sin(animTimer * 6) * 5;
-
-    // Anillo Exterior
-    this.magicCircleGraphics.lineStyle(2.5, circleColor, 0.8);
-    this.magicCircleGraphics.drawCircle(0, 0, radius);
-    this.magicCircleGraphics.lineStyle(1.2, 0xffffff, 0.6);
-    this.magicCircleGraphics.drawCircle(0, 0, radius * 0.78);
-
-    // Runas / Polígonos Sagrados Giratorios
-    this.magicCircleGraphics.lineStyle(1.5, circleColor, 0.7);
-    const points = this.phase === 5 ? 8 : 6;
-    for (let i = 0; i < points; i++) {
-      const a1 = rot + (Math.PI * 2 * i) / points;
-      const a2 = rot + (Math.PI * 2 * (i + 2)) / points;
-      const x1 = Math.cos(a1) * radius;
-      const y1 = Math.sin(a1) * radius;
-      const x2 = Math.cos(a2) * radius;
-      const y2 = Math.sin(a2) * radius;
-      this.magicCircleGraphics.moveTo(x1, y1);
-      this.magicCircleGraphics.lineTo(x2, y2);
+    if (this.phase === 1 || this.phase === 3 || this.isLockedForBeam) {
+      this.magicCircleGraphics.visible = false;
+      return;
     }
-    this.magicCircleGraphics.lineStyle(0);
+
+    // Reconstruir geometría vectorial SOLO cuando cambia la fase del jefe (0 clear/redraw por frame!)
+    if (this.cachedCirclePhase !== this.phase) {
+      this.cachedCirclePhase = this.phase;
+      this.magicCircleGraphics.clear();
+
+      const circleColor = this.phase === 5 ? 0xffdd00 : (this.phase === 4 ? 0xff2b5b : 0x00f2fe);
+      const baseRadius = 68;
+
+      this.magicCircleGraphics.lineStyle(2.5, circleColor, 0.8);
+      this.magicCircleGraphics.drawCircle(0, 0, baseRadius);
+      this.magicCircleGraphics.lineStyle(1.2, 0xffffff, 0.6);
+      this.magicCircleGraphics.drawCircle(0, 0, baseRadius * 0.78);
+
+      this.magicCircleGraphics.lineStyle(1.5, circleColor, 0.7);
+      const points = this.phase === 5 ? 8 : 6;
+      for (let i = 0; i < points; i++) {
+        const a1 = (Math.PI * 2 * i) / points;
+        const a2 = (Math.PI * 2 * (i + 2)) / points;
+        this.magicCircleGraphics.moveTo(Math.cos(a1) * baseRadius, Math.sin(a1) * baseRadius);
+        this.magicCircleGraphics.lineTo(Math.cos(a2) * baseRadius, Math.sin(a2) * baseRadius);
+      }
+      this.magicCircleGraphics.lineStyle(0);
+    }
+
+    this.magicCircleGraphics.visible = true;
+    this.magicCircleGraphics.rotation = animTimer * 2.2;
+    this.magicCircleGraphics.scale.set((68 + Math.sin(animTimer * 6) * 5) / 68);
   }
 
   public triggerRhombusLasers(

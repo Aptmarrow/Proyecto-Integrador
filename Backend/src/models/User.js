@@ -1,40 +1,55 @@
 const db = require('../config/database');
 
 const User = {
-  findByEmail(email) {
-    return db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  async findByEmail(email) {
+    const { rows } = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    return rows[0] || null;
   },
 
-  findById(id) {
-    return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  async findById(id) {
+    const { rows } = await db.query('SELECT * FROM users WHERE id = $1', [id]);
+    return rows[0] || null;
   },
 
-  findAll() {
-    return db.prepare('SELECT id, username, email, password FROM users').all();
+  async findAll() {
+    const { rows } = await db.query('SELECT id, username, email, is_verified, danmas FROM users');
+    return rows;
   },
 
-  create({ id, username, email, password, verificationToken, danmas }) {
-    const insert = db.transaction(() => {
-      db.prepare(
-        'INSERT INTO users (id, username, email, password, is_verified, verification_token, danmas) VALUES (?, ?, ?, ?, 0, ?, ?)'
-      ).run(id, username, email, password, verificationToken ?? null, danmas ?? 0);
-
-      db.prepare('INSERT INTO inventory (owner_id) VALUES (?)').run(id);
-    });
-    insert();
+  async create({ id, username, email, password, verificationToken, danmas }) {
+    const client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        'INSERT INTO users (id, username, email, password, is_verified, verification_token, danmas) VALUES ($1, $2, $3, $4, 0, $5, $6)',
+        [id, username, email, password, verificationToken ?? null, danmas ?? 0]
+      );
+      await client.query(
+        'INSERT INTO inventory (owner_id) VALUES ($1) ON CONFLICT (owner_id) DO NOTHING',
+        [id]
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
     return this.findById(id);
   },
 
-  verify(id) {
-    db.prepare(
-      'UPDATE users SET is_verified = 1, verification_token = NULL WHERE id = ?'
-    ).run(id);
+  async verify(id) {
+    await db.query(
+      'UPDATE users SET is_verified = 1, verification_token = NULL WHERE id = $1',
+      [id]
+    );
   },
 
-  setVerificationToken(id, token) {
-    db.prepare(
-      'UPDATE users SET verification_token = ?, is_verified = 0 WHERE id = ?'
-    ).run(token, id);
+  async setVerificationToken(id, token) {
+    await db.query(
+      'UPDATE users SET verification_token = $1, is_verified = 0 WHERE id = $2',
+      [token, id]
+    );
   },
 };
 

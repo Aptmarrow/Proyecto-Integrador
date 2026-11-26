@@ -21,11 +21,21 @@ Frontend/dist-ssr/
 Backend/data/
 
 # ========================
-# Archivos sensibles y Entorno
+# Archivos de datos y pruebas locales
 # ========================
+*.local.json
+specialHellData.json
+*specialHell*
+
 .env
 .env.*
 !.env.example
+
+# Certificados SSL / Claves privadas
+*.key
+*.pem
+*.crt
+HttpsNmg-*
 
 # ========================
 # Logs y temporales
@@ -54,3 +64,8 @@ Thumbs.db
 *.userosscache
 *.sln.docstates
 *.rsuser
+
+# ========================
+# Agent Skills y personalizaciones locales
+# ========================
+.agents/

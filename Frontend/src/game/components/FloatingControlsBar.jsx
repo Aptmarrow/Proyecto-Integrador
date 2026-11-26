@@ -1,12 +1,17 @@
-export default function FloatingControlsBar({
+import { memo } from 'react';
+
+function FloatingControlsBar({
   selectedClass,
   isFullscreen,
   canSwitchRole = false,
   showDebugActions = false,
+  stagePreviewVariants = [],
+  activeStagePreviewIdx = -1,
   onSelectRole,
   onTriggerSkill,
   onSpawnBoss,
   onStartStruggle,
+  onSelectStagePreview,
   onToggleFullscreen,
 }) {
   return (
@@ -77,6 +82,29 @@ export default function FloatingControlsBar({
             >
               ⚡ CLASH [T]
             </button>
+            {stagePreviewVariants.length > 0 && (
+              <>
+                {stagePreviewVariants.map((variant, idx) => (
+                  <button
+                    key={variant.key || variant.label || idx}
+                    type="button"
+                    className={`dk-action-btn dk-preview-act-btn ${activeStagePreviewIdx === idx ? 'active' : ''}`}
+                    onClick={() => onSelectStagePreview?.(idx)}
+                    title={`Probar ${variant.label} [${variant.key || idx + 5}]`}
+                  >
+                    ✨ {variant.label} [{variant.key || idx + 5}]
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="dk-action-btn dk-preview-reset-btn"
+                  onClick={() => onSelectStagePreview?.(-1)}
+                  title="Restaurar línea temporal [0]"
+                >
+                  ↺ RESET [0]
+                </button>
+              </>
+            )}
           </>
         )}
         <button
@@ -91,4 +119,6 @@ export default function FloatingControlsBar({
     </div>
   );
 }
+
+export default memo(FloatingControlsBar);
 
