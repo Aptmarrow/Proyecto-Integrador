@@ -1,0 +1,792 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Danmakrew API — NoMercyGames",
+    "description": "API REST oficial de Danmakrew: autenticación JWT, usuarios, amigos, inventario de chips y salas cooperativas en tiempo real (complementada por WebSockets en `/signal` y `/game`).",
+    "version": "1.0.0"
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token JWT obtenido desde POST /api/auth/login"
+      }
+    },
+    "schemas": {
+      "RegisterRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "email",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 11,
+            "example": "Rodri"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "player@nomercygames.me"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 6,
+            "example": "secret123"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "player@nomercygames.me"
+          },
+          "password": {
+            "type": "string",
+            "example": "secret123"
+          }
+        }
+      },
+      "ResendVerificationRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "player@nomercygames.me"
+          }
+        }
+      },
+      "CreateChipRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Overclock Core"
+          },
+          "rarity": {
+            "type": "integer",
+            "minimum": 1,
+            "example": 3
+          },
+          "level": {
+            "type": "integer",
+            "minimum": 1,
+            "example": 1
+          },
+          "image": {
+            "type": "string",
+            "nullable": true
+          },
+          "stats": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "HP": {
+                "type": "number",
+                "nullable": true
+              },
+              "Bullet_Damage": {
+                "type": "number",
+                "nullable": true
+              },
+              "SP_Charge": {
+                "type": "number",
+                "nullable": true
+              },
+              "Defense": {
+                "type": "number",
+                "nullable": true
+              },
+              "Ultimate_Damage": {
+                "type": "number",
+                "nullable": true
+              },
+              "Cadency": {
+                "type": "number",
+                "nullable": true
+              },
+              "Critic_Chance": {
+                "type": "number",
+                "nullable": true
+              },
+              "Crit_Damage": {
+                "type": "number",
+                "nullable": true
+              }
+            }
+          }
+        }
+      },
+      "CreateRoomRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 30,
+            "example": "NO MERCY LOBBY"
+          },
+          "map": {
+            "type": "string",
+            "example": "classic"
+          },
+          "maxPlayers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "example": 4
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "isPublic": {
+            "type": "boolean",
+            "example": true
+          },
+          "difficulty": {
+            "type": "string",
+            "example": "normal"
+          },
+          "world": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3,
+            "example": 1
+          },
+          "stage": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3,
+            "example": 1
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Health"
+        ],
+        "summary": "Información básica de la API"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Health"
+        ],
+        "summary": "Healthcheck de API, base de datos PostgreSQL y puerto WebSocket"
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Registrar un nuevo usuario y enviar correo de verificación",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/verify-email": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Verificar correo electrónico mediante token"
+      }
+    },
+    "/api/auth/resend-verification": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Reenviar correo de verificación",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendVerificationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Listar usuarios públicos (id, username, email)"
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Iniciar sesión y obtener token JWT Bearer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Cerrar sesión autenticada",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/AllGood": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Endpoint público de prueba"
+      }
+    },
+    "/api/auth/AllAuthorized": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Endpoint protegido de prueba (JWT)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Obtener perfil del usuario autenticado",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/{id}/friend-request": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Friends"
+        ],
+        "summary": "Enviar solicitud de amistad",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/{id}/friend-requests": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Friends"
+        ],
+        "summary": "Listar solicitudes de amistad pendientes",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/friend-requests/{requestId}/accept": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "requestId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Friends"
+        ],
+        "summary": "Aceptar solicitud de amistad",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/user/inventory": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Obtener inventario, skins y chips del usuario",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/user/inventory/chips": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Crear y agregar un nuevo chip al inventario",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChipRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rooms": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Crear sala multijugador efímera",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoomRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Listar salas públicas activas"
+      }
+    },
+    "/api/rooms/{roomId}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "roomId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Obtener detalle de una sala por ID"
+      },
+      "patch": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "roomId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Actualizar configuración de la sala (solo host)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "roomId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Cerrar/eliminar sala (solo host)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/rooms/by-code/{code}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "code",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Buscar sala por código de 6 caracteres"
+      }
+    },
+    "/api/rooms/{roomId}/join": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "roomId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Unirse a una sala (con contraseña opcional)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "roomId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Salir de una sala",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/rooms/{roomId}/character": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "roomId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Seleccionar rol único en el escuadrón",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/rooms/{roomId}/ready": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "roomId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Rooms"
+        ],
+        "summary": "Marcar estado LISTO para iniciar partida",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://nomercygames.me",
+      "description": "Producción (nomercygames.me)"
+    },
+    {
+      "url": "http://localhost:8080",
+      "description": "Backend Local (:8080)"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Proxy Frontend Local (:3000)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Estado del servicio y conectividad de base de datos"
+    },
+    {
+      "name": "Auth",
+      "description": "Registro, verificación por correo e inicio de sesión JWT"
+    },
+    {
+      "name": "Friends",
+      "description": "Gestión de solicitudes de amistad"
+    },
+    {
+      "name": "Inventory",
+      "description": "Inventario, scraps, skins y chips con estadísticas"
+    },
+    {
+      "name": "Rooms",
+      "description": "Lobby, salas públicas/privadas, roles y transición a partida"
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+name: CD — Continuous Deployment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-containers:
+    name: Verify Tests & Build Docker Images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+
+      - name: Install Backend dependencies
+        run: npm --prefix ./Backend ci
+
+      - name: Run Backend smoke tests before build
+        run: npm run test:backend
+
+      - name: Prepare example .env for Docker build validation
+        run: cp Backend/.env.example Backend/.env
+
+      - name: Build production Docker images
+        run: docker compose build
+
+  deploy-cloud:
+    name: Deploy to Cloud Hosting
+    needs: build-containers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Railway Deploy Webhook (if configured)
+        if: ${{ secrets.RAILWAY_WEBHOOK_URL != '' }}
+        env:
+          RAILWAY_WEBHOOK_URL: ${{ secrets.RAILWAY_WEBHOOK_URL }}
+        run: |
+          curl --fail --silent --show-error -X POST "$RAILWAY_WEBHOOK_URL"
+          echo "Railway deployment triggered successfully."
+
+      - name: Deploy via SSH to Cloud VPS (if configured)
+        if: ${{ secrets.VPS_HOST != '' && secrets.VPS_USER != '' && secrets.VPS_SSH_KEY != '' }}
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH || '~/Proyecto-Integrador' }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key "${VPS_USER}@${VPS_HOST}" \
+            "cd ${VPS_DEPLOY_PATH} && git pull --ff-only origin main && docker compose up -d --build"
+
+      - name: Deployment target status
+        if: ${{ secrets.RAILWAY_WEBHOOK_URL == '' && secrets.VPS_HOST == '' }}
+        run: |
+          echo "Docker build & tests passed."
+          echo "Configure GitHub Secrets (RAILWAY_WEBHOOK_URL, or VPS_HOST + VPS_USER + VPS_SSH_KEY) to enable automatic remote rollout."
+

@@ -1,0 +1,47 @@
+name: CI — OpenAPI Documentation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  generate-openapi:
+    name: Generate & Validate Swagger / OpenAPI Spec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+
+      - name: Install Backend dependencies
+        run: npm --prefix ./Backend ci
+
+      - name: Generate OpenAPI 3.0 specification
+        run: npm run docs:openapi
+
+      - name: Validate generated OpenAPI JSON
+        run: |
+          node -e "
+            const spec = require('./Backend/docs/openapi.json');
+            if (!spec.openapi || !spec.paths || Object.keys(spec.paths).length < 10) {
+              throw new Error('Invalid OpenAPI spec generated');
+            }
+            console.log('Validated OpenAPI', spec.openapi, 'with', Object.keys(spec.paths).length, 'paths');
+          "
+
+      - name: Upload OpenAPI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: danmakrew-openapi-spec
+          path: Backend/docs/openapi.json
+          retention-days: 30
+

@@ -4,12 +4,22 @@ class InMemoryRedis {
   constructor() {
     this.store = new Map();
     this.zsets = new Map();
+    this.timers = new Map();
     this.status = 'ready';
   }
 
   on(event, cb) {
     if (event === 'connect' || event === 'ready') {
-      setTimeout(cb, 0);
+      const t = setTimeout(cb, 0);
+      if (t.unref) t.unref();
+    }
+  }
+
+  _clearTimer(key) {
+    const existing = this.timers.get(key);
+    if (existing) {
+      clearTimeout(existing);
+      this.timers.delete(key);
     }
   }
 
@@ -20,12 +30,21 @@ class InMemoryRedis {
   async set(key, val, ex, ttl) {
     this.store.set(key, String(val));
     if (ex === 'EX' && ttl) {
-      setTimeout(() => this.store.delete(key), ttl * 1000);
+      this._clearTimer(key);
+      const timer = setTimeout(() => {
+        this.store.delete(key);
+        this.timers.delete(key);
+      }, ttl * 1000);
+      if (timer.unref) timer.unref();
+      this.timers.set(key, timer);
+    } else if (ex !== 'KEEPTTL') {
+      this._clearTimer(key);
     }
     return 'OK';
   }
 
   async del(key) {
+    this._clearTimer(key);
     const existed = this.store.delete(key);
     this.zsets.delete(key);
     return existed ? 1 : 0;
@@ -88,7 +107,12 @@ class InMemoryRedis {
     return p;
   }
 
-  disconnect() {}
+  disconnect() {
+    for (const timer of this.timers.values()) {
+      clearTimeout(timer);
+    }
+    this.timers.clear();
+  }
 }
 
 module.exports = new InMemoryRedis();

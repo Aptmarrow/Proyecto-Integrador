@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const { generateUserId, signToken } = require('../config/auth');
 const authenticate = require('../middleware/auth');
 const { User, Friend, FriendRequest, FRIEND_REQUEST_STATUS, Inventory, Chip } = require('../models');
-const { sendVerificationEmail } = require('../utils/mailer');
+const mailer = require('../utils/mailer');
 
 // ---- Schemas Zod ----
 const registerSchema = z.object({
@@ -67,7 +67,7 @@ async function userRoutes(fastify) {
       await User.setVerificationToken(existingUser.id, verificationToken);
 
       try {
-        await sendVerificationEmail(existingUser.email, existingUser.id, verificationToken);
+        await mailer.sendVerificationEmail(existingUser.email, existingUser.id, verificationToken);
       } catch (err) {
         fastify.log.warn({ err }, 'No se pudo reenviar el email de verificación.');
       }
@@ -83,7 +83,7 @@ async function userRoutes(fastify) {
     const newUser = await User.create({ id: userId, username, email, password: hashedPassword, verificationToken });
 
     try {
-      await sendVerificationEmail(newUser.email, newUser.id, verificationToken);
+      await mailer.sendVerificationEmail(newUser.email, newUser.id, verificationToken);
     } catch (err) {
       fastify.log.warn({ err }, 'No se pudo enviar el email de verificación.');
     }
@@ -131,7 +131,7 @@ async function userRoutes(fastify) {
     await User.setVerificationToken(user.id, verificationToken);
 
     try {
-      await sendVerificationEmail(user.email, user.id, verificationToken);
+      await mailer.sendVerificationEmail(user.email, user.id, verificationToken);
     } catch (err) {
       fastify.log.warn({ err }, 'No se pudo reenviar el email de verificación.');
       return reply.status(500).send({ message: 'No se pudo reenviar el correo. Intenta nuevamente.' });
