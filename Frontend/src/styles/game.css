@@ -715,6 +715,45 @@
   box-shadow: 0 4px 15px rgba(255, 208, 0, 0.6);
 }
 
+.dk-stage-transition-black {
+  position: absolute;
+  inset: 0;
+  background: #020308;
+  z-index: 38;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dk-stage-transition-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(186, 230, 253, 0.9);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-shadow: 0 0 14px rgba(56, 189, 248, 0.65);
+}
+
+.dk-transition-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 12px #38bdf8;
+}
+
+.dk-stage-reveal-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 60% 50%, #ffffff 0%, #e0f7ff 45%, rgba(125, 211, 252, 0.82) 100%);
+  mix-blend-mode: screen;
+  z-index: 39;
+  pointer-events: none;
+}
+
 .dk-stage-clear-overlay {
   position: absolute;
   inset: 0;

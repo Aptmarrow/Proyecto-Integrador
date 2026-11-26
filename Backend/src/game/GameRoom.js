@@ -18,6 +18,7 @@ const { buildRoomSnapshot } = require('./serializers/roomSnapshot');
 
 const SKILL_COOLDOWN    = 1.5;   // 1.5s skill cooldown
 const STRUGGLE_BOSS_WIN_PLAYER_DAMAGE = 35;
+const AUTO_ADVANCE_DURATION = 2.0; // 0.7s victory beat -> 0.9s fade-to-black -> 0.4s hold -> auto next level
 
 const SPAWN_POSITIONS = [
   { x: 100, y: 100 },
@@ -44,6 +45,7 @@ class GameRoom {
     this.tick          = 0;
     this.stageTime     = 0;
     this._countdownMs  = 0;
+    this._autoAdvanceTimer = 0;
     this._phaseController = new RoomPhaseController({
       initialPhase: options.initialPhase || 'loading',
       expectedPlayerCount: options.expectedPlayerCount || 1,
@@ -62,6 +64,9 @@ class GameRoom {
       this.bulletSystem.clearByOwner('boss');
       this.laserSystem.lasers = [];
       this.itemSystem.spawnItemFountain(this.boss.x, this.boss.y, 20);
+      if (this.campaign.hasNextStage()) {
+        this._autoAdvanceTimer = AUTO_ADVANCE_DURATION;
+      }
     };
 
     this._setupTimeline();
@@ -388,6 +393,18 @@ class GameRoom {
     // 14. Player bullets vs boss
     this._resolvePlayerBulletsAgainstBoss();
 
+    // 15. Automatic seamless stage-to-stage transition (fade-to-black -> auto-advance, no prompt!)
+    if (this._autoAdvanceTimer > 0 && this.campaign.stageState === 'stage_clear') {
+      this._autoAdvanceTimer = Math.max(0, this._autoAdvanceTimer - deltaTime);
+      const elapsed = AUTO_ADVANCE_DURATION - this._autoAdvanceTimer;
+      // 0..0.7s victory beat, 0.7..1.65s smooth fade to black, 1.65..2.0s dark hold before instant switch
+      this.campaign.autoAdvancing = true;
+      this.campaign.transitionBlackAlpha = Math.max(0, Math.min(1, (elapsed - 0.7) / 0.95));
+      if (this._autoAdvanceTimer <= 0) {
+        this.advanceStage();
+      }
+    }
+
     return [...bulletHits, ...laserHits];
   }
 
@@ -573,12 +590,27 @@ class GameRoom {
     if (!this.campaign.hasNextStage()) return false;
     if (!this.campaign.advanceToNextStage()) return false;
 
+    this._autoAdvanceTimer = 0;
     this._resetStageRuntime();
+    // Reward squad with tactical inter-stage recharge when entering next sector
+    for (const [, player] of this.players) {
+      if (!player.active) continue;
+      const stats = player.stats || DEFAULT_PLAYER_STATS;
+      if (player.hp > 0) {
+        player.hp = Math.min(stats.hpMax, player.hp + Math.round(stats.hpMax * 0.35));
+      } else {
+        player.hp = Math.round(stats.hpMax * 0.5);
+      }
+      player.sp = stats.spMax;
+    }
     return true;
   }
 
   restartStage() {
+    this._autoAdvanceTimer = 0;
     this.campaign.stageState = 'intro';
+    this.campaign.autoAdvancing = false;
+    this.campaign.transitionBlackAlpha = 0;
     this._resetStageRuntime();
     let idx = 0;
     for (const [, player] of this.players) {

@@ -6,7 +6,6 @@ import { Boss } from './entities/Boss';
 import { EnemySystem } from './systems/EnemySystem';
 import { ItemSystem } from './systems/ItemSystem';
 import { BeamStruggleSystem } from './systems/BeamStruggleSystem';
-import { loadStage1Sprites } from './SpriteFactory';
 import { getCachedLutProfile } from './SpriteLutCache';
 import { getSpaceStageConfig } from '../campaign/spaceCampaignCatalog';
 import type { StageDirectorPreviewVariant } from './systems/StageDirectorRenderer';
@@ -28,7 +27,12 @@ export class GameEngine extends BaseStageEngine {
   private _showBossHpBar: boolean = false;
   private lastBannerText: string = '';
   private lastSyncedSpellcard: string = '';
+  private lastStageKey: string = '';
   private hasSyncedStageTime: boolean = false;
+  public stageTransitionBlackAlpha: number = 0;
+  public stageRevealFlashAlpha: number = 0;
+  private revealCurtainTimer: number = 0;
+  private revealFlashTimer: number = 0;
 
   public get showBossHpBar(): boolean {
     return this._showBossHpBar || (!!this.boss && this.boss.isActive && !this.boss.isDefeated);
@@ -64,22 +68,6 @@ export class GameEngine extends BaseStageEngine {
       const initialCfg = getSpaceStageConfig(options?.difficulty || 'normal', options?.world || 1, options?.stage || 1);
       this.backgroundRenderer.setSpaceTheme(initialCfg.spaceTheme);
     }
-
-    // Cargar sprites de hadas y efectos de forma asíncrona
-    loadStage1Sprites().then((sprites) => {
-      if (sprites && sprites.isReady) {
-        if (!hasCustomPass) {
-          this.backgroundRenderer.setTexture(sprites.bgTexture);
-        }
-        this.enemySystem.setTextures({
-          fairyGreen: sprites.fairyGreen,
-          fairyRed: sprites.fairyRed,
-          fairyBig: sprites.fairyBig,
-        });
-      }
-    }).catch(() => {
-      // Fallback a gráficos procedimentales vectoriales
-    });
 
     // Configurar callbacks del Jefe
     this.boss.onPhaseChange = (phase: BossPhase, spellName: string, isSpellCard: boolean) => {
@@ -134,6 +122,10 @@ export class GameEngine extends BaseStageEngine {
 
   public get canAdvanceStage(): boolean {
     return this.isStageClear && !(this.networkSync.campaignState?.campaignComplete);
+  }
+
+  public get isAutoAdvancingStage(): boolean {
+    return Boolean(this.networkSync.campaignState?.autoAdvancing);
   }
 
   public get isCampaignComplete(): boolean {
@@ -484,6 +476,25 @@ export class GameEngine extends BaseStageEngine {
     if (!campaign) return;
     this.networkSync.applyCampaignSnapshot(campaign);
 
+    const nextStageKey = `${campaign.difficulty}:${campaign.world}-${campaign.stage}`;
+    if (this.lastStageKey && this.lastStageKey !== nextStageKey) {
+      // Seamless arrival in new level: brief black lift + crisp luminous reveal flash!
+      this.revealCurtainTimer = 0.36;
+      this.revealFlashTimer = 0.85;
+      this.stageTransitionBlackAlpha = 1.0;
+      this.stageRevealFlashAlpha = 1.0;
+      this.lastSyncedSpellcard = '';
+      this.bossWarningActive = false;
+      this.showBossHpBar = false;
+      this.boss.reset();
+      this.playSound('/assets/sounds/gasterintro.wav', 0.45);
+    }
+    this.lastStageKey = nextStageKey;
+
+    if (campaign.autoAdvancing && typeof campaign.transitionBlackAlpha === 'number') {
+      this.stageTransitionBlackAlpha = Math.max(this.stageTransitionBlackAlpha, campaign.transitionBlackAlpha);
+    }
+
     const theme =
       campaign.spaceTheme ||
       getSpaceStageConfig(campaign.difficulty, campaign.world, campaign.stage).spaceTheme;
@@ -582,7 +593,24 @@ export class GameEngine extends BaseStageEngine {
       this.spellcardOverlayGraphics.lineStyle(0);
     }
 
-    // 4. Actualizar Banners de Texto
+    // 4. Actualizar Banners de Texto y Transición Automática (Negro -> Mini Destello)
+    if (this.revealCurtainTimer > 0) {
+      this.revealCurtainTimer = Math.max(0, this.revealCurtainTimer - dt);
+      this.stageTransitionBlackAlpha = this.revealCurtainTimer / 0.36;
+    } else if (!this.isAutoAdvancingStage) {
+      this.stageTransitionBlackAlpha = Math.max(0, this.stageTransitionBlackAlpha - dt * 3.5);
+    }
+
+    if (this.revealFlashTimer > 0) {
+      this.revealFlashTimer = Math.max(0, this.revealFlashTimer - dt);
+      // Slight delay while black lifts, then crisp luminous flash fading cleanly
+      const progress = 1 - this.revealFlashTimer / 0.85;
+      const peak = progress < 0.22 ? progress / 0.22 : Math.pow(1 - (progress - 0.22) / 0.78, 1.85);
+      this.stageRevealFlashAlpha = Math.max(0, Math.min(1, peak * 0.92));
+    } else {
+      this.stageRevealFlashAlpha = 0;
+    }
+
     if (this.stageBanner) {
       this.stageBanner.timer -= dt;
       if (this.stageBanner.timer <= 0) this.stageBanner = null;

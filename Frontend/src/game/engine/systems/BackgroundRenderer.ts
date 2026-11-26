@@ -1,5 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { StageDirectorRenderer, StageDirectorPreviewVariant, StageDirectorSpec } from './StageDirectorRenderer';
+import { World1SpaceDirector, isWorld1NormalStage } from './World1SpaceDirector';
 import type { SpaceThemeSpec } from '../../campaign/spaceCampaignCatalog';
 
 interface StarParticle {
@@ -41,7 +42,7 @@ interface CompiledLutVariant {
 }
 
 const DEFAULT_SPACE_THEME: SpaceThemeSpec = {
-  id: 'normal-1-1',
+  id: 'default',
   skyTop: 0x040818,
   skyBottom: 0x0a1633,
   nebulaA: 0x102a5c,
@@ -93,6 +94,7 @@ export class BackgroundRenderer {
   private lutSurface: PIXI.Sprite | null = null;
   private lutFilter: PIXI.Filter | null = null;
   private stageDirector: StageDirectorRenderer | null = null;
+  private world1Director: World1SpaceDirector | null = null;
   private lutClock: number = 0;
   private stars: StarParticle[] = [];
 
@@ -173,13 +175,48 @@ export class BackgroundRenderer {
     return Boolean(this.stageDirector || this.lutMesh || (this.lutFilter && this.lutSurface));
   }
 
+  private clearWorld1Director(): void {
+    if (this.world1Director) {
+      this.world1Director.destroy();
+      this.world1Director = null;
+    }
+  }
+
   /**
    * Apply one of the 27 Space Sector backdrop themes (cached static WebGL geometry, 0 per-frame redraws).
+   * World 1 Normal (`normal-1-1`, `normal-1-2`, `normal-1-3`) activates the cohesive multi-phase WebGL World1SpaceDirector.
    */
   public setSpaceTheme(theme?: SpaceThemeSpec | null): void {
     if (!theme || this.hasActiveLutStagePass()) return;
-    if (this.activeSpaceTheme.id === theme.id && this.cachedWidth > 0) return;
+    const world1StageId = isWorld1NormalStage(theme.id) ? theme.id : null;
+    const needsWorld1Init = world1StageId !== null && !this.world1Director;
+    if (!needsWorld1Init && this.activeSpaceTheme.id === theme.id && this.cachedWidth > 0) return;
     this.activeSpaceTheme = theme;
+
+    if (world1StageId !== null && this.renderer) {
+      if (!this.world1Director) {
+        try {
+          this.world1Director = new World1SpaceDirector(
+            this.container,
+            this.renderer,
+            world1StageId,
+            this.cachedWidth || 1024,
+            this.cachedHeight || 576
+          );
+          this.setNormalLayersVisible(false);
+          return;
+        } catch {
+          this.clearWorld1Director();
+        }
+      } else {
+        this.world1Director.setStage(world1StageId);
+        this.setNormalLayersVisible(false);
+        return;
+      }
+    } else if (this.world1Director) {
+      this.clearWorld1Director();
+      this.setNormalLayersVisible(true);
+    }
 
     const palette = theme.starColors?.length ? theme.starColors : DEFAULT_SPACE_THEME.starColors;
     for (let i = 0; i < this.starSprites.length; i++) {
@@ -279,6 +316,7 @@ export class BackgroundRenderer {
 
   public setLutStagePass(spec?: LutStagePassSpec | null, width: number = 1024, height: number = 576): void {
     if (!spec?.spriteDirector && !spec?.fragmentSrc && !spec?.variants?.length) return;
+    this.clearWorld1Director();
     this.clearLutStagePass();
 
     if (spec.spriteDirector && this.renderer) {
@@ -444,6 +482,18 @@ export class BackgroundRenderer {
       return;
     }
 
+    if (this.world1Director) {
+      this.world1Director.update({
+        stageTime: ctx?.stageTime ?? this.lutClock,
+        clockTime: this.lutClock,
+        playerX: ctx?.playerX ?? 220,
+        playerY: ctx?.playerY ?? 288,
+        bossActive: ctx?.bossActive,
+        bossPhase: ctx?.bossPhase,
+      });
+      return;
+    }
+
     if (this.lutMesh && this.lutVariants.length > 0) {
       const stageTime = ctx?.stageTime ?? this.lutClock;
       const targetShader = this.selectVariantShader(stageTime);
@@ -475,6 +525,7 @@ export class BackgroundRenderer {
   }
 
   public destroy(): void {
+    this.clearWorld1Director();
     this.clearLutStagePass();
     this.starSprites = [];
     if (this.starTexture && this.starTexture !== PIXI.Texture.WHITE) {

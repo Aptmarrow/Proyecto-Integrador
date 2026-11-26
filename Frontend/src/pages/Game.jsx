@@ -118,6 +118,9 @@ export default function Game({ isDevMode = false }) {
   const [bossWarningActive, setBossWarningActive] = useState(false);
   const [spellcardBanner, setSpellcardBanner] = useState(null);
   const [isStageClear, setIsStageClear] = useState(false);
+  const [isAutoAdvancingStage, setIsAutoAdvancingStage] = useState(false);
+  const [stageBlackAlpha, setStageBlackAlpha] = useState(0);
+  const [stageFlashAlpha, setStageFlashAlpha] = useState(0);
   const [currentDifficultyLabel, setCurrentDifficultyLabel] = useState(
     launchConfig.difficulty === 'no_mercy'
       ? 'No Mercy'
@@ -226,8 +229,9 @@ export default function Game({ isDevMode = false }) {
       },
       onEngineFrame: (engine) => {
         const now = performance.now();
-        // Sync React HUD at ~20Hz so PixiJS WebGL renders at full 60+ FPS with minimal React overhead
-        if (now - lastHudSync < 48 && !engine.isBeamStruggle && !engine.isStageClear) {
+        // Sync React HUD at ~20Hz (60Hz during struggle, stage clear, or cinematic transitions)
+        const isTransitioning = engine.stageTransitionBlackAlpha > 0.005 || engine.stageRevealFlashAlpha > 0.005;
+        if (now - lastHudSync < 48 && !engine.isBeamStruggle && !engine.isStageClear && !isTransitioning) {
           return;
         }
         lastHudSync = now;
@@ -249,6 +253,9 @@ export default function Game({ isDevMode = false }) {
           engine.spellcardBanner.active ? { active: true, name: engine.spellcardBanner.name } : null
         );
         setIsStageClear(engine.isStageClear);
+        setIsAutoAdvancingStage(engine.isAutoAdvancingStage);
+        setStageBlackAlpha(engine.stageTransitionBlackAlpha);
+        setStageFlashAlpha(engine.stageRevealFlashAlpha);
         setCurrentDifficultyLabel(engine.currentDifficultyLabel);
         setCurrentWorld(engine.currentWorld);
         setCurrentStage(engine.currentStage);
@@ -427,7 +434,10 @@ export default function Game({ isDevMode = false }) {
               struggleProgress={struggleProgress}
               struggleTimeLeft={struggleTimeLeft}
               isTouchDevice={isTouchDevice}
-              isStageClear={isStageClear}
+              isStageClear={isStageClear && !isAutoAdvancingStage}
+              isAutoAdvancingStage={isAutoAdvancingStage}
+              stageBlackAlpha={stageBlackAlpha}
+              stageFlashAlpha={stageFlashAlpha}
               isPlayerDefeated={playerHp <= 0}
               stageClearTitle={stageClearTitle}
               stageClearSubtext={stageClearSubtext}

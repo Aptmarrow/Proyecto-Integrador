@@ -198,6 +198,8 @@ class DanmakrewSimulationWorker {
   private difficulty: string = 'normal';
   private customStageProfile: any = null;
   private stageState: 'intro' | 'waves' | 'boss_warning' | 'boss_battle' | 'stage_clear' = 'intro';
+  private autoAdvanceTimer = 0;
+  private readonly autoAdvanceDuration = 2.0;
   private triggeredEvents = new Set<string>();
   private myPlayerId = 'player-local-host';
   private loopTimer: ReturnType<typeof setInterval> | null = null;
@@ -484,11 +486,17 @@ class DanmakrewSimulationWorker {
     if (this.customStageProfile) return false;
     if (this.stageIndex >= TOTAL_STAGES_PER_DIFFICULTY - 1) return false;
     this.stageIndex++;
+    this.autoAdvanceTimer = 0;
     this.resetStageRuntime();
+    for (const [, p] of this.players) {
+      p.hp = p.hp > 0 ? Math.min(p.stats.hpMax, p.hp + Math.round(p.stats.hpMax * 0.35)) : Math.round(p.stats.hpMax * 0.5);
+      p.sp = p.stats.spMax;
+    }
     return true;
   }
 
   public restartStage(): void {
+    this.autoAdvanceTimer = 0;
     this.resetStageRuntime();
     let idx = 0;
     for (const [, p] of this.players) {
@@ -512,6 +520,7 @@ class DanmakrewSimulationWorker {
     this.triggeredEvents.clear();
     this.stageTime = 0;
     this.stageState = 'intro';
+    this.autoAdvanceTimer = 0;
     this.struggle = {
       active: false,
       isAligning: false,
@@ -582,6 +591,13 @@ class DanmakrewSimulationWorker {
     this.updateLasers(dt);
     this.updateBeamStruggle(dt);
     this.updateWalls(dt);
+
+    if (this.autoAdvanceTimer > 0 && this.stageState === 'stage_clear') {
+      this.autoAdvanceTimer = Math.max(0, this.autoAdvanceTimer - dt);
+      if (this.autoAdvanceTimer <= 0) {
+        this.advanceStage();
+      }
+    }
   }
 
   private updateTimeline(): void {
@@ -1249,6 +1265,9 @@ class DanmakrewSimulationWorker {
       this.stageState = 'stage_clear';
       this.lasers = [];
       this.spawnItemFountain(this.boss.x, this.boss.y, 18);
+      if (!this.customStageProfile && this.stageIndex < TOTAL_STAGES_PER_DIFFICULTY - 1) {
+        this.autoAdvanceTimer = this.autoAdvanceDuration;
+      }
     }
   }
 
@@ -1695,6 +1714,12 @@ class DanmakrewSimulationWorker {
           ? 'Difficult'
           : 'Normal');
 
+    const autoAdvancing = this.stageState === 'stage_clear' && this.autoAdvanceTimer > 0;
+    const transitionElapsed = this.autoAdvanceDuration - this.autoAdvanceTimer;
+    const transitionBlackAlpha = autoAdvancing
+      ? Math.max(0, Math.min(1, (transitionElapsed - 0.7) / 0.95))
+      : 0;
+
     const campaign: ServerCampaign = {
       difficulty: this.difficulty,
       difficultyLabel,
@@ -1705,6 +1730,8 @@ class DanmakrewSimulationWorker {
       bossSpawnAt: meta.bossSpawnAt,
       bossWarningAt: meta.bossWarningAt,
       spaceTheme: meta.spaceTheme,
+      autoAdvancing,
+      transitionBlackAlpha: Number(transitionBlackAlpha.toFixed(3)),
       stageState: this.stageState,
       campaignComplete:
         this.stageState === 'stage_clear' &&

@@ -8,6 +8,9 @@ export default function GameArenaOverlays({
   struggleTimeLeft,
   isTouchDevice,
   isStageClear,
+  isAutoAdvancingStage = false,
+  stageBlackAlpha = 0,
+  stageFlashAlpha = 0,
   isPlayerDefeated = false,
   stageClearTitle = 'STAGE 1 CLEARED!',
   stageClearSubtext = '¡Misión completada con éxito!',
@@ -114,6 +117,29 @@ export default function GameArenaOverlays({
             </div>
           </div>
         </div>
+      )}
+
+      {stageBlackAlpha > 0.005 && (
+        <div
+          className="dk-stage-transition-black"
+          style={{ opacity: Math.min(1, Math.max(0, stageBlackAlpha)) }}
+          aria-hidden="true"
+        >
+          {isAutoAdvancingStage && stageBlackAlpha > 0.45 && (
+            <div className="dk-stage-transition-caption">
+              <span className="dk-transition-dot" />
+              <span>SALTANDO AL SIGUIENTE SECTOR...</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {stageFlashAlpha > 0.005 && (
+        <div
+          className="dk-stage-reveal-flash"
+          style={{ opacity: Math.min(1, Math.max(0, stageFlashAlpha)) }}
+          aria-hidden="true"
+        />
       )}
 
       {isStageClear && (

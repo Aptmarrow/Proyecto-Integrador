@@ -106,6 +106,8 @@ export interface ServerCampaign {
   bossSpawnAt?: number;
   bossWarningAt?: number;
   spaceTheme?: SpaceThemeSpec;
+  autoAdvancing?: boolean;
+  transitionBlackAlpha?: number;
 }
 
 export interface ServerBeamStruggle {

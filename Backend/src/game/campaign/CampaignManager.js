@@ -34,6 +34,8 @@ class CampaignManager {
     this.stageIndex = isStandard ? clampIndex(initialStage, STAGES_PER_WORLD) : 0;
     this.campaignComplete = false;
     this.stageState = 'intro'; // 'intro' | 'waves' | 'boss_warning' | 'boss_battle' | 'stage_clear'
+    this.autoAdvancing = false;
+    this.transitionBlackAlpha = 0;
   }
 
   setLevel(world = 1, stage = 1) {
@@ -42,6 +44,8 @@ class CampaignManager {
     this.stageIndex = isStandard ? clampIndex(stage, STAGES_PER_WORLD) : 0;
     this.campaignComplete = false;
     this.stageState = 'intro';
+    this.autoAdvancing = false;
+    this.transitionBlackAlpha = 0;
   }
 
   getStageConfig() {
@@ -51,6 +55,8 @@ class CampaignManager {
   markStageCleared() {
     this.stageState = 'stage_clear';
     this.campaignComplete = !hasNextStage(this.worldIndex, this.stageIndex, this.difficulty);
+    this.autoAdvancing = !this.campaignComplete;
+    this.transitionBlackAlpha = 0;
   }
 
   advanceToNextStage() {
@@ -60,6 +66,8 @@ class CampaignManager {
     this.stageIndex = next.stageIndex;
     this.campaignComplete = false;
     this.stageState = 'intro';
+    this.autoAdvancing = false;
+    this.transitionBlackAlpha = 0;
     return true;
   }
 
@@ -111,6 +119,8 @@ class CampaignManager {
       bossSpawnAt: config.bossSpawnAt,
       bossWarningAt: config.bossWarningAt,
       spaceTheme: config.spaceTheme,
+      autoAdvancing: Boolean(this.autoAdvancing),
+      transitionBlackAlpha: Number((this.transitionBlackAlpha || 0).toFixed(3)),
     };
   }
 }
