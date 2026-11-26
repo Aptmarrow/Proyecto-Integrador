@@ -33,6 +33,7 @@ export class GameEngine extends BaseStageEngine {
   public stageRevealFlashAlpha: number = 0;
   private revealCurtainTimer: number = 0;
   private revealFlashTimer: number = 0;
+  private lastMoIntroLocked: boolean = false;
 
   public get showBossHpBar(): boolean {
     return this._showBossHpBar || (!!this.boss && this.boss.isActive && !this.boss.isDefeated);
@@ -52,7 +53,19 @@ export class GameEngine extends BaseStageEngine {
     this.player = new Player(this.playerContainer, 'DPS');
     this.boss = new Boss(this.enemyContainer, '/assets/sprites/FirstBoss.png', 100);
     this.enemySystem = new EnemySystem(this.enemyContainer);
+    this.enemySystem.onKamikazeExplode = (x, y, armed) => {
+      this.particleSystem.spawnBurst(
+        x,
+        y,
+        armed ? 22 : 12,
+        armed ? 260 : 170,
+        [0xffffff, 0xfef08a, 0xf97316, 0xff2b5b],
+        true
+      );
+      this.shakeTimer = Math.max(this.shakeTimer, armed ? 0.3 : 0.14);
+    };
     this.itemSystem = new ItemSystem(this.playfieldContainer);
+    this.applyDifficultyVisuals(options?.difficulty);
 
     const activeLut = getCachedLutProfile();
     const hasCustomPass = Boolean(
@@ -492,6 +505,15 @@ export class GameEngine extends BaseStageEngine {
     this.itemSystem.applyBackendItems(items, this.SCALE_X, this.SCALE_Y);
   }
 
+  private applyDifficultyVisuals(difficulty?: string): void {
+    const norm = difficulty === 'no_mercy' ? 'no_mercy' : difficulty === 'difficult' ? 'difficult' : 'normal';
+    const entityTint = norm === 'difficult' ? 0xff8a8a : norm === 'no_mercy' ? 0xcea0ff : 0xffffff;
+    const bulletTint = norm === 'difficult' ? 0xffb4b4 : norm === 'no_mercy' ? 0xddbfff : 0xffffff;
+    this.enemySystem.setDifficultyTint(entityTint);
+    this.boss.setDifficultyTint(entityTint);
+    this.bulletSystem.setDifficultyBulletTint(bulletTint, norm);
+  }
+
   public applyBackendCampaign(campaign?: ServerCampaign): void {
     if (!campaign) return;
     this.networkSync.applyCampaignSnapshot(campaign);
@@ -519,6 +541,7 @@ export class GameEngine extends BaseStageEngine {
       campaign.spaceTheme ||
       getSpaceStageConfig(campaign.difficulty, campaign.world, campaign.stage).spaceTheme;
     this.backgroundRenderer.setSpaceTheme(theme);
+    this.applyDifficultyVisuals(campaign.difficulty);
 
     if (campaign.stageState) {
       this.stageState = campaign.stageState as StageState;
@@ -642,8 +665,26 @@ export class GameEngine extends BaseStageEngine {
     }
 
     // 5. Boss, Enemy & Item visual sync
+    if (this.boss.moIntroActive) {
+      const isLocked = this.boss.moIntroProgress >= 0.7;
+      if (isLocked && !this.lastMoIntroLocked) {
+        this.lastMoIntroLocked = true;
+        this.shakeTimer = Math.max(this.shakeTimer, 0.36);
+        this.particleSystem.spawnBurst(
+          this.boss.pos.x,
+          this.boss.pos.y,
+          28,
+          290,
+          [0xffffff, 0xfef08a, 0xfacc15, 0xff2b5b],
+          true
+        );
+        this.playSound('/assets/sounds/gasterintro.wav', 0.65);
+      }
+    } else {
+      this.lastMoIntroLocked = false;
+    }
     this.boss.syncVisuals(dt, this.animTimer, this.SCALE_X, this.SCALE_Y);
-    this.enemySystem.syncRemoteVisuals(this.animTimer, this.player.pos);
+    this.enemySystem.syncRemoteVisuals(this.animTimer, this.player.pos, dt);
     this.itemSystem.render(this.animTimer);
 
     // 6. Actualizar Láseres y Renderizado de Choque

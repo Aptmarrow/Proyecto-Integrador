@@ -204,7 +204,7 @@ class EnemySystem {
         }
       }
 
-      if (!e.isMiniboss && (e.x < -70 || (e.spawnTime > 6.0 && e.x > WORLD_WIDTH + 220) || e.y < -90 || e.y > WORLD_HEIGHT + 90)) {
+      if (!e.isMiniboss && e.type !== 'mo_enemy2' && (e.x < -70 || (e.spawnTime > 6.0 && e.x > WORLD_WIDTH + 220) || e.y < -90 || e.y > WORLD_HEIGHT + 90)) {
         this.active.splice(i, 1);
         continue;
       }

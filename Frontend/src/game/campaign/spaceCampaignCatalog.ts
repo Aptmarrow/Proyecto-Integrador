@@ -6,10 +6,10 @@
 
 import {
   ENABLE_NORMAL_OVERHAUL,
-  MINIBOSS_DEFS,
   buildNormalWorldWaves,
   fireNormalBossPattern,
   getNormalWorldBossProfile,
+  getScaledMinibossDef,
   type BulletSpawnOpts,
   type NormalMinibossDef,
 } from './normalCampaignOverhaul';
@@ -48,6 +48,7 @@ export interface SpaceBossProfile {
   moveArchetype: string;
   palette: [number, number, number];
   speedScale: number;
+  statScale?: number;
   phases: BossPhaseProfile[];
 }
 
@@ -779,6 +780,7 @@ export function fireBossPattern(
     shotIndex: number;
     palette: [number, number, number];
     speedScale: number;
+    statScale?: number;
     phase: number;
   },
   emitBullet: (x: number, y: number, angle: number, speed: number, radius: number, color: number, damage: number, opts?: BulletSpawnOpts) => void
@@ -979,22 +981,29 @@ function createSpaceStage(spec: {
     };
   });
 
+  const useOverhaul =
+    ENABLE_NORMAL_OVERHAUL &&
+    (spec.difficulty === 'normal' || spec.difficulty === 'difficult' || spec.difficulty === 'no_mercy');
+
   const baseWaves = buildLevelWaveScript(spec.waveArchetypes, spec.bossSpawnAt, {
-    hpScale: spec.waveHpScale,
-    speedScale: spec.waveSpeedScale,
+    hpScale: useOverhaul ? 1.0 : spec.waveHpScale,
+    speedScale: useOverhaul ? 1.0 : spec.waveSpeedScale,
     palette: spec.palette,
     levelSeed: seed,
   });
 
-  const useNormalOverhaul = ENABLE_NORMAL_OVERHAUL && spec.difficulty === 'normal';
-  const hasBoss = useNormalOverhaul ? spec.stage === 3 : true;
-  const miniboss = useNormalOverhaul && !hasBoss ? (MINIBOSS_DEFS[`${spec.world}-${spec.stage}`] || null) : null;
-  const waves = useNormalOverhaul
-    ? buildNormalWorldWaves(spec.world, spec.stage, spec.bossSpawnAt, baseWaves, { palette: spec.palette, levelSeed: seed })
+  const hasBoss = useOverhaul ? spec.stage === 3 : true;
+  const miniboss = useOverhaul && !hasBoss ? getScaledMinibossDef(spec.world, spec.stage, spec.difficulty) : null;
+  const waves = useOverhaul
+    ? buildNormalWorldWaves(spec.world, spec.stage, spec.bossSpawnAt, baseWaves, {
+        palette: spec.palette,
+        levelSeed: seed,
+        difficulty: spec.difficulty,
+      })
     : baseWaves;
   const bossProfile: SpaceBossProfile =
-    useNormalOverhaul && hasBoss
-      ? getNormalWorldBossProfile(spec.world, spec.palette)
+    useOverhaul && hasBoss
+      ? getNormalWorldBossProfile(spec.world, spec.palette, spec.difficulty)
       : {
           bossId: 'first_boss',
           bossName: spec.boss.bossName,
@@ -1004,6 +1013,7 @@ function createSpaceStage(spec: {
           moveArchetype: spec.boss.moveArchetype,
           palette: spec.palette,
           speedScale: spec.boss.speedScale,
+          statScale: 1.0,
           phases,
         };
 

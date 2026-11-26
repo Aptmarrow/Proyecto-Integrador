@@ -27,6 +27,7 @@ class BossController {
     this._palette = [0x00f2fe, 0xff2b5b, 0xffdd00];
     this._moveArchetype = 'orbital_lissajous';
     this._speedScale = 1.0;
+    this._statScale = 1.0;
     this._squadScale = 1.0;
 
     this.bossId = 'first_boss';
@@ -76,6 +77,7 @@ class BossController {
       this._palette = bossProfile.palette || [0x00f2fe, 0xff2b5b, 0xffdd00];
       this._moveArchetype = bossProfile.moveArchetype || 'orbital_lissajous';
       this._speedScale = bossProfile.speedScale || 1.0;
+      this._statScale = bossProfile.statScale || 1.0;
       this.bossId = bossProfile.bossId || 'first_boss';
       this.fullBossName = bossProfile.fullBossName || bossProfile.bossName || 'FirstBoss';
       this.sprite = bossProfile.sprite || '/assets/sprites/FirstBoss.png';
@@ -135,10 +137,12 @@ class BossController {
         introDuration: this._introDuration || 3.8,
         lineIndex: 0,
         segIndex: 0,
+        dashSpeedScale: 1.0,
         dashChain: [],
         dashHitPlayers: new Set(),
         sparkAccum: 0,
         restShotAccum: 0,
+        summonTimer: 2.0,
       };
     } else {
       this.moIntroActive = false;
@@ -147,7 +151,7 @@ class BossController {
     }
   }
 
-  update(dt, playerPos, bulletSystem, laserSystem, onMoContactDamage = null) {
+  update(dt, playerPos, bulletSystem, laserSystem, onMoContactDamage = null, onSpawnEnemy = null) {
     if (!this.isActive || this.isDefeated) return;
 
     this._animTimer += dt;
@@ -169,7 +173,7 @@ class BossController {
 
     // 2. Special Mecanical Ophanim (M.O) state machine
     if (this.bossId === 'mo' && this._moState && !this.isLockedForBeam) {
-      updateMechanicalOphanim(this, dt, playerPos, bulletSystem, onMoContactDamage);
+      updateMechanicalOphanim(this, dt, playerPos, bulletSystem, onMoContactDamage, onSpawnEnemy);
       return;
     }
 
@@ -217,6 +221,7 @@ class BossController {
           shotIndex: this._shotIndex++,
           palette: this._palette,
           speedScale: this._speedScale,
+          statScale: this._statScale,
           phase: this.phase,
         },
         (bx, by, angle, speed, radius, color, damage, opts = null) => {
@@ -306,6 +311,7 @@ class BossController {
         if (this._moState && this._moState.mode !== 'intro') {
           this._moState.mode = 'resting';
           this._moState.timer = 1.2;
+          this._moState.dashSpeedScale = 1.0;
           this.moDashLines = [];
         }
 

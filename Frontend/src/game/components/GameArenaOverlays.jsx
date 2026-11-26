@@ -56,21 +56,51 @@ export default function GameArenaOverlays({
 
       {moIntroActive && (() => {
         const p = Math.max(0, Math.min(1, moIntroProgress));
-        const enterOpacity = p < 0.14 ? p / 0.14 : (p > 0.88 ? Math.max(0, (1 - p) / 0.12) : 1);
+        const enterOpacity = p < 0.12 ? p / 0.12 : (p > 0.89 ? Math.max(0, (1 - p) / 0.11) : 1);
         const compress = p <= 0.44 ? 0 : Math.min(1, (p - 0.44) / 0.26);
-        const finalBurst = p >= 0.7 ? Math.min(1, (p - 0.7) / 0.15) : 0;
+        const finalBurst = p >= 0.7 ? Math.min(1, (p - 0.7) / 0.16) : 0;
+        const lockFlash = p >= 0.7 && p <= 0.84 ? Math.sin(((p - 0.7) / 0.14) * Math.PI) : 0;
+        const shockScale = p >= 0.7 ? 0.35 + ((p - 0.7) / 0.3) * 2.1 : 0.35;
+        const shockOpacity = p >= 0.7 ? Math.max(0, 1 - (p - 0.7) / 0.28) : 0;
+        const convergeScale = p >= 0.38 && p < 0.7 ? 1.8 - ((p - 0.38) / 0.32) * 1.45 : 0;
+        const convergeOpacity = p >= 0.38 && p < 0.7 ? (p - 0.38) / 0.32 : 0;
         const collapseStyle = {
           maxWidth: `${(1 - compress) * 11}em`,
           opacity: Math.max(0, 1 - compress * 1.35),
           transform: `scaleX(${Math.max(0.01, 1 - compress)})`,
         };
-        const titleScale = 1 + finalBurst * 0.34;
+        const titleScale = 1 + finalBurst * 0.42;
         return (
           <div className="dk-mo-intro-overlay" style={{ opacity: enterOpacity }}>
+            <div className="dk-mo-letterbox top" />
+            <div className="dk-mo-letterbox bottom" />
+            <div className="dk-mo-scanlines" />
+            <div className="dk-mo-aura-flare" />
             <div className="dk-mo-halo-ring outer" />
+            <div className="dk-mo-halo-ring mid" />
             <div className="dk-mo-halo-ring inner" />
+            <div className="dk-mo-orbit-sigils">
+              {[0, 1, 2, 3, 4, 5].map((idx) => (
+                <span key={idx} className={`dk-mo-sigil s${idx}`}>◈</span>
+              ))}
+            </div>
+            {convergeOpacity > 0 && (
+              <div
+                className="dk-mo-converge-ring"
+                style={{ transform: `scale(${convergeScale})`, opacity: convergeOpacity }}
+              />
+            )}
+            {shockOpacity > 0 && (
+              <div
+                className="dk-mo-lock-shockwave"
+                style={{ transform: `scale(${shockScale})`, opacity: shockOpacity }}
+              />
+            )}
+            {lockFlash > 0.02 && (
+              <div className="dk-mo-flash-veil" style={{ opacity: lockFlash * 0.55 }} />
+            )}
             <div className="dk-mo-intro-badge">
-              {compress < 0.75 ? 'OMEGA SERAPH UNIT // FINAL SECTOR 3-3' : 'DESIGNATION LOCKED'}
+              {compress < 0.75 ? 'OMEGA SERAPH UNIT // FINAL SECTOR 3-3' : '◈ DESIGNATION LOCKED // THREAT MAX ◈'}
             </div>
             <div
               className={`dk-mo-morph-title ${finalBurst > 0.2 ? 'locked' : ''}`}
@@ -92,7 +122,7 @@ export default function GameArenaOverlays({
               <span className="dk-mo-collapse" style={collapseStyle}>PHANIM</span>
             </div>
             <div className="dk-mo-intro-sub">
-              {finalBurst > 0.3 ? '⚠ PROTOCOLO DE ASALTO LINEAL ACTIVO ⚠' : 'MECANICAL OPHANIM · PREPARANDO VECTORES'}
+              {finalBurst > 0.3 ? '⚠ PROTOCOLO DE ASALTO LINEAL ACTIVO ⚠' : 'MECANICAL OPHANIM · DESPLEGANDO SELLOS DEL TRONO'}
             </div>
           </div>
         );

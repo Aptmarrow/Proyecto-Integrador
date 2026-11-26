@@ -96,6 +96,8 @@ export class GameRuntimeSession {
   private animFrameId = 0;
   private lastTime = performance.now();
   private stopped = false;
+  private numpad6Streak = 0;
+  private lastNumpad6At = 0;
 
   private readonly onFirstTouch = () => {
     this.options.onTouchDeviceChange(true);
@@ -115,6 +117,24 @@ export class GameRuntimeSession {
 
     if ((e.code === 'KeyZ' || e.code === 'Space') && !e.repeat && this.engine.isBeamStruggle) {
       this.pushStruggle();
+    }
+
+    if (!e.repeat) {
+      const isNumpad6 = e.code === 'Numpad6' || (e.location === 3 && e.key === '6');
+      if (isNumpad6) {
+        const nowMs = performance.now();
+        this.numpad6Streak = nowMs - this.lastNumpad6At <= 1500 ? this.numpad6Streak + 1 : 1;
+        this.lastNumpad6At = nowMs;
+        if (this.numpad6Streak >= 3) {
+          this.numpad6Streak = 0;
+          this.lastNumpad6At = 0;
+          this.spawnBossNow();
+          return;
+        }
+      } else if (/^(?:Digit|Numpad)[0-9]$/.test(e.code)) {
+        this.numpad6Streak = 0;
+        this.lastNumpad6At = 0;
+      }
     }
 
     if (!e.repeat && this.engine.hasStagePreviewVariants()) {

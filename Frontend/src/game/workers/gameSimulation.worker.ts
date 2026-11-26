@@ -218,6 +218,7 @@ class DanmakrewSimulationWorker {
   private triggeredEvents = new Set<string>();
   private myPlayerId = 'player-local-host';
   private loopTimer: ReturnType<typeof setInterval> | null = null;
+  private activeEnemyStatScale = 1.0;
 
   private boss = {
     x: 685,
@@ -243,6 +244,7 @@ class DanmakrewSimulationWorker {
     bossId: 'first_boss',
     sprite: '/assets/sprites/FirstBoss.png',
     fullBossName: 'FirstBoss',
+    statScale: 1.0,
     angle: Math.PI,
     isInvulnerable: false,
     moIntroActive: false,
@@ -253,11 +255,13 @@ class DanmakrewSimulationWorker {
     moTimer: 0,
     moLineIndex: 0,
     moSegIndex: 0,
+    moDashSpeedScale: 1.0,
     moDashChain: [] as Array<{ x1: number; y1: number; x2: number; y2: number; isReturn?: boolean }>,
     moRestDuration: 3.0,
     moDashHitPlayers: new Set<string>(),
     moSparkAccum: 0,
     moRestShotAccum: 0,
+    moSummonTimer: 2.0,
   };
 
   private struggle: ServerBeamStruggle = {
@@ -598,6 +602,7 @@ class DanmakrewSimulationWorker {
       bossId: profile.bossId || 'first_boss',
       sprite: profile.sprite || '/assets/sprites/FirstBoss.png',
       fullBossName: profile.fullBossName || profile.bossName,
+      statScale: profile.statScale || 1.0,
       angle: Math.PI,
       isInvulnerable: false,
       moIntroActive: false,
@@ -608,11 +613,13 @@ class DanmakrewSimulationWorker {
       moTimer: 0,
       moLineIndex: 0,
       moSegIndex: 0,
+      moDashSpeedScale: 1.0,
       moDashChain: [],
       moRestDuration: 3.0,
       moDashHitPlayers: new Set<string>(),
       moSparkAccum: 0,
       moRestShotAccum: 0,
+      moSummonTimer: 2.0,
     };
   }
 
@@ -678,6 +685,7 @@ class DanmakrewSimulationWorker {
     this.boss.bossId = profile.bossId || 'first_boss';
     this.boss.sprite = profile.sprite || '/assets/sprites/FirstBoss.png';
     this.boss.fullBossName = profile.fullBossName || profile.bossName;
+    this.boss.statScale = profile.statScale || 1.0;
     this.boss.moDashLines = [];
     this.boss.moDashState = 'idle';
     this.boss.angle = Math.PI;
@@ -690,6 +698,8 @@ class DanmakrewSimulationWorker {
       this.boss.moMode = 'intro';
       this.boss.moTimer = 0;
       this.boss.moSegIndex = 0;
+      this.boss.moDashSpeedScale = 1.0;
+      this.boss.moSummonTimer = 2.0;
       this.boss.moDashChain = [];
     } else {
       this.boss.isInvulnerable = false;
@@ -1096,8 +1106,34 @@ class DanmakrewSimulationWorker {
           const hoverX = p.hoverX ?? 590;
           const ampY = p.ampY ?? 120;
           const freqY = p.freqY ?? 1.25;
-          e.x = e.x > hoverX ? Math.max(hoverX, e.x - e.speed * 1.45 * dt) : hoverX + Math.cos(t * 0.9) * 24;
-          e.y = Math.max(68, Math.min(WORLD_HEIGHT - 68, 300 + Math.sin(t * freqY) * ampY));
+          const style = p.moveStyle || 'vertical_sine';
+          if (e.x > hoverX + 35 && t < 2.2) {
+            e.x = Math.max(hoverX, e.x - e.speed * 1.45 * dt);
+            e.y = 300 + Math.sin(t * freqY) * (ampY * 0.35);
+          } else if (style === 'figure8') {
+            e.x = hoverX + Math.sin(t * freqY) * 48;
+            e.y = 300 + Math.sin(t * freqY * 2) * (ampY * 0.78);
+          } else if (style === 'diamond_drift') {
+            const ang = t * freqY;
+            const sx = Math.cos(ang);
+            const sy = Math.sin(ang);
+            e.x = hoverX + Math.sign(sx) * Math.pow(Math.abs(sx), 0.75) * 56;
+            e.y = 300 + Math.sign(sy) * Math.pow(Math.abs(sy), 0.75) * ampY;
+          } else if (style === 'arc_sway') {
+            e.x = hoverX - Math.abs(Math.cos(t * freqY)) * 62;
+            e.y = 300 + Math.sin(t * freqY) * ampY;
+          } else if (style === 'pendulum_guard') {
+            e.x = hoverX + Math.sin(t * 0.75) * 52;
+            e.y = 300 + Math.cos(t * freqY) * ampY;
+          } else if (style === 'orbital_patrol') {
+            e.x = hoverX + Math.cos(t * freqY) * 62;
+            e.y = 300 + Math.sin(t * freqY + 0.65) * ampY;
+          } else {
+            e.x = hoverX + Math.cos(t * 0.9) * 24;
+            e.y = 300 + Math.sin(t * freqY) * ampY;
+          }
+          e.x = Math.max(470, Math.min(720, e.x));
+          e.y = Math.max(68, Math.min(WORLD_HEIGHT - 68, e.y));
           break;
         }
         case 'kamikaze_homing': {
@@ -1121,8 +1157,8 @@ class DanmakrewSimulationWorker {
             curSpeed = Math.max(12, e.speed * (1 - Math.pow(ratio, 1.25) * 0.92));
           }
 
-          e.x = Math.max(24, Math.min(WORLD_WIDTH + 120, e.x + (dx / dist) * curSpeed * dt));
-          e.y = Math.max(24, Math.min(WORLD_HEIGHT - 24, e.y + (dy / dist) * curSpeed * dt));
+          e.x = Math.max(-75, Math.min(WORLD_WIDTH + 90, e.x + (dx / dist) * curSpeed * dt));
+          e.y = Math.max(-75, Math.min(WORLD_HEIGHT + 75, e.y + (dy / dist) * curSpeed * dt));
           e.fuseProgress = Number(ratio.toFixed(2));
           break;
         }
@@ -1237,7 +1273,7 @@ class DanmakrewSimulationWorker {
         }
       }
 
-      if (!e.isMiniboss && (e.x < -70 || (e.spawnTime > 6.0 && e.x > WORLD_WIDTH + 220) || e.y < -90 || e.y > WORLD_HEIGHT + 90)) {
+      if (!e.isMiniboss && e.type !== 'mo_enemy2' && (e.x < -70 || (e.spawnTime > 6.0 && e.x > WORLD_WIDTH + 220) || e.y < -90 || e.y > WORLD_HEIGHT + 90)) {
         this.enemies.splice(i, 1);
         continue;
       }
@@ -1245,7 +1281,13 @@ class DanmakrewSimulationWorker {
       e.shootTimer += dt;
       if (e.x < WORLD_WIDTH - 8 && e.x > 40 && e.shootTimer >= e.shootInterval && e.attackPattern !== 'none') {
         e.shootTimer = 0;
-        this.fireEnemyPattern(e, target, dt);
+        const scale = Number(e.customParams?.statScale) > 0 ? Number(e.customParams.statScale) : 1.0;
+        this.activeEnemyStatScale = scale;
+        try {
+          this.fireEnemyPattern(e, target, dt);
+        } finally {
+          this.activeEnemyStatScale = 1.0;
+        }
       }
     }
   }
@@ -1289,7 +1331,7 @@ class DanmakrewSimulationWorker {
         }
         break;
       case 'w2_gfg1_fast':
-        for (const off of [-0.08, 0.08]) this.spawnEnemyBullet(mx, my, aim + off, 275, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
+        this.spawnEnemyBullet(mx, my, aim, 285, 5, 0xef4444, 5, { spriteType: 'GFGbullet1png' });
         break;
       case 'w2_gfg2_sniper022':
         if (!cp.burstLeft || cp.burstLeft <= 0) {
@@ -1306,7 +1348,14 @@ class DanmakrewSimulationWorker {
         if (cp.burstLeft <= 0) cp.burstCooldown = 1.45;
         break;
       case 'w2_gfg3_linear_accel':
-        for (const off of [-0.22, 0, 0.22]) this.spawnEnemyBullet(mx, my, aim + off, 38, 5, 0xf97316, 5, { spriteType: 'GFGbullet3png', expAccel: 1.7, maxSpeed: 520, ttl: 4.8 });
+        this.spawnEnemyBullet(mx, my, aim, 55, 5.5, 0xf97316, 5, {
+          spriteType: 'GFGbullet3png',
+          expAccel: 1.35,
+          maxSpeed: 420,
+          homeRate: 0.72,
+          homeTime: 1.35,
+          ttl: 4.8,
+        });
         break;
       case 'gfg_mini1_shotgun':
         for (let k = 0; k < 10; k++) {
@@ -1441,22 +1490,25 @@ class DanmakrewSimulationWorker {
     damage: number = 5,
     opts?: BulletSpawnOpts & { ttl?: number }
   ): void {
+    const scale = this.activeEnemyStatScale || 1.0;
+    const finalSpeed = speed * scale;
+    const finalDamage = Math.max(1, Math.round(damage * scale));
     this.bullets.push({
       id: this.nextBulletId++,
       ownerId: 'boss',
       x,
       y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
+      vx: Math.cos(angle) * finalSpeed,
+      vy: Math.sin(angle) * finalSpeed,
       radius,
       ttl: opts?.ttl ?? 4.4,
       type: 'normal',
-      damage,
+      damage: finalDamage,
       color,
       spriteType: opts?.spriteType,
-      accel: opts?.accel,
+      accel: opts?.accel ? opts.accel * scale : opts?.accel,
       expAccel: opts?.expAccel,
-      maxSpeed: opts?.maxSpeed,
+      maxSpeed: opts?.maxSpeed ? opts.maxSpeed * scale : opts?.maxSpeed,
       homeRate: opts?.homeRate,
       homeTime: opts?.homeTime,
       splitOnImpact: opts?.splitOnImpact,
@@ -1537,6 +1589,7 @@ class DanmakrewSimulationWorker {
           shotIndex: this.boss.shotIndex++,
           palette: profile.palette,
           speedScale: profile.speedScale,
+          statScale: this.boss.statScale || 1.0,
           phase: this.boss.phase,
         },
         (bx, by, angle, speed, radius, color, damage, opts) => {
@@ -1610,51 +1663,110 @@ class DanmakrewSimulationWorker {
     return { x: Math.round(exitX), y: Math.round(exitY) };
   }
 
-  private buildWorkerMoDashChain(startX: number, startY: number, phase: number, target: { x: number; y: number }, seed: number) {
+  private pickRandomWorkerOuterPoint(): { x: number; y: number } {
+    const pad = 125;
+    const edge = Math.floor(Math.random() * 4);
+    if (edge === 0) return { x: -pad, y: Math.round(70 + Math.random() * (WORLD_HEIGHT - 140)) };
+    if (edge === 1) return { x: WORLD_WIDTH + pad, y: Math.round(70 + Math.random() * (WORLD_HEIGHT - 140)) };
+    if (edge === 2) return { x: Math.round(90 + Math.random() * (WORLD_WIDTH - 180)), y: -pad };
+    return { x: Math.round(90 + Math.random() * (WORLD_WIDTH - 180)), y: WORLD_HEIGHT + pad };
+  }
+
+  private buildWorkerMoDashChain(startX: number, startY: number, phase: number, target: { x: number; y: number }, _seed: number) {
     const centerX = WORLD_WIDTH / 2;
     const centerY = WORLD_HEIGHT / 2;
-    const dashes = Math.min(4, 2 + Math.floor(phase / 2));
-    const px = Math.max(130, Math.min(WORLD_WIDTH - 130, target.x || 200));
-    const py = Math.max(100, Math.min(WORLD_HEIGHT - 100, target.y || centerY));
+    const dashes = 4 + Math.max(1, phase || 1);
+    const px = Math.max(90, Math.min(WORLD_WIDTH - 90, target.x || 200));
+    const py = Math.max(70, Math.min(WORLD_HEIGHT - 70, target.y || centerY));
 
     const chain: Array<{ x1: number; y1: number; x2: number; y2: number; isReturn?: boolean }> = [];
-    let curX = startX;
-    let curY = startY;
+    let lastEndX = startX;
+    let lastEndY = startY;
 
     for (let k = 0; k < dashes; k++) {
-      let tx = px;
-      let ty = py;
+      let sx: number;
+      let sy: number;
+      let tx: number;
+      let ty: number;
+
       if (k === 0) {
-        if (Math.hypot(tx - curX, ty - curY) < 60) {
+        sx = startX;
+        sy = startY;
+        tx = px;
+        ty = py;
+        if (Math.hypot(tx - sx, ty - sy) < 60) {
           tx = 180;
           ty = py > centerY ? 190 : 410;
         }
       } else {
-        const fromLeft = curX < 100;
-        const fromRight = curX > WORLD_WIDTH - 100;
-        const fromTop = curY < 100;
-        const fromBottom = curY > WORLD_HEIGHT - 100;
-        tx = fromLeft ? 480 + ((seed + k) % 2) * 80 : fromRight ? 240 : (k + seed) % 2 === 0 ? 280 : 520;
-        ty = fromTop ? 405 : fromBottom ? 195 : curY < centerY ? 420 : 180;
-        if (k === dashes - 1) {
-          tx = Math.max(160, Math.min(640, (tx + px) * 0.5));
-          ty = Math.max(120, Math.min(480, (ty + py) * 0.5));
-        }
+        const entry = this.pickRandomWorkerOuterPoint();
+        sx = entry.x;
+        sy = entry.y;
+        tx = Math.round(130 + Math.random() * (WORLD_WIDTH - 260));
+        ty = Math.round(95 + Math.random() * (WORLD_HEIGHT - 190));
       }
-      const exitPt = this.clipWorkerRayToOuterBounds(curX, curY, tx, ty);
-      chain.push({ x1: curX, y1: curY, x2: exitPt.x, y2: exitPt.y, isReturn: false });
-      curX = exitPt.x;
-      curY = exitPt.y;
+
+      const exitPt = this.clipWorkerRayToOuterBounds(sx, sy, tx, ty);
+      chain.push({ x1: sx, y1: sy, x2: exitPt.x, y2: exitPt.y, isReturn: false });
+      lastEndX = exitPt.x;
+      lastEndY = exitPt.y;
     }
 
-    chain.push({ x1: curX, y1: curY, x2: centerX, y2: centerY, isReturn: true });
+    chain.push({ x1: lastEndX, y1: lastEndY, x2: centerX, y2: centerY, isReturn: true });
     return chain;
+  }
+
+  private spawnWorkerMoKamikaze(phase: number, maxActive: number, statScale: number = 1.0, target?: { x: number; y: number }): void {
+    const activeCount = this.enemies.filter((e) => e.type === 'mo_enemy2').length;
+    if (activeCount >= maxActive) return;
+
+    // Never spawn behind the player (no left edge, and top/bottom spawns stay strictly ahead of player X)
+    const edge = Math.floor(Math.random() * 3); // 0: right, 1: top, 2: bottom
+    const pad = 42;
+    const minFrontX = Math.min(WORLD_WIDTH - 40, Math.max(120, Math.round((target?.x ?? 120) + 70)));
+    let startX: number;
+    let startY: number;
+    if (edge === 0) {
+      startX = WORLD_WIDTH + pad;
+      startY = Math.round(45 + Math.random() * (WORLD_HEIGHT - 90));
+    } else if (edge === 1) {
+      startX = Math.round(minFrontX + Math.random() * Math.max(20, WORLD_WIDTH - 20 - minFrontX));
+      startY = -pad;
+    } else {
+      startX = Math.round(minFrontX + Math.random() * Math.max(20, WORLD_WIDTH - 20 - minFrontX));
+      startY = WORLD_HEIGHT + pad;
+    }
+
+    const hp = Math.max(10, Math.round(20 * statScale * this.getSquadHpScale()));
+    this.enemies.push({
+      id: `en_${this.nextEntityId++}`,
+      type: 'mo_enemy2',
+      x: startX,
+      y: startY,
+      startX,
+      startY,
+      speed: Math.round((184 + phase * 9) * statScale),
+      hp,
+      maxHp: hp,
+      radius: 18,
+      itemDrop: 'point',
+      trajectory: 'kamikaze_homing',
+      attackPattern: 'none',
+      shootInterval: 99,
+      shootTimer: 0,
+      spawnTime: 0,
+      bulletColor: 0xfef08a,
+      sprite: '/assets/sprites/MOenemy2png.png',
+      angle: Math.PI,
+      customParams: { fuseTime: 1.75, triggerDist: 135, statScale },
+    });
   }
 
   private updateWorkerMoBoss(dt: number, target: { x: number; y: number }): void {
     const b = this.boss;
     const centerX = WORLD_WIDTH / 2;
     const centerY = WORLD_HEIGHT / 2;
+    const statScale = b.statScale || 1.0;
 
     if (b.moMode === 'intro') {
       b.moTimer += dt;
@@ -1674,6 +1786,8 @@ class DanmakrewSimulationWorker {
         b.moMode = 'telegraph';
         b.moTimer = 0;
         b.moSegIndex = 0;
+        b.moDashSpeedScale = 1.0;
+        b.moSummonTimer = 2.6;
         b.moDashChain = this.buildWorkerMoDashChain(b.x, b.y, b.phase, target, b.moLineIndex++);
       }
       return;
@@ -1682,9 +1796,26 @@ class DanmakrewSimulationWorker {
     b.isInvulnerable = false;
     b.moIntroActive = false;
 
+    // Offscreen MOenemy2 summons:
+    // Normal: P1=0, P2-3=1, P4-5=2 | Difficult: P1=1, P2-3=2, P4-5=3 | No Mercy: P1=2, P2-3=3, P4-5=4
+    const diffBonus = statScale >= 1.2 ? 2 : statScale >= 1.08 ? 1 : 0;
+    const phaseStep = b.phase >= 4 ? 2 : b.phase >= 2 ? 1 : 0;
+    const summonCount = phaseStep + diffBonus;
+    if (summonCount > 0) {
+      b.moSummonTimer += dt;
+      const summonInterval = Math.max(3.8, 6.0 - b.phase * 0.45);
+      if (b.moSummonTimer >= summonInterval) {
+        b.moSummonTimer = 0;
+        const maxActive = Math.min(5 + diffBonus * 2, b.phase + diffBonus);
+        for (let k = 0; k < summonCount; k++) {
+          this.spawnWorkerMoKamikaze(b.phase, maxActive, statScale, target);
+        }
+      }
+    }
+
     if (b.moMode === 'telegraph') {
       b.moTimer += dt;
-      const dur = Math.max(0.88, 1.28 - b.phase * 0.06);
+      const dur = Math.max(0.85, 1.25 - b.phase * 0.05);
       if (!b.moDashChain.length) {
         b.moDashChain = this.buildWorkerMoDashChain(b.x, b.y, b.phase, target, b.moLineIndex++);
       }
@@ -1708,6 +1839,7 @@ class DanmakrewSimulationWorker {
       if (b.moTimer >= dur) {
         b.moMode = 'dashing';
         b.moSegIndex = 0;
+        b.moDashSpeedScale = 1.0;
         b.moTimer = 0;
         b.moDashHitPlayers = new Set();
         b.moSparkAccum = 0;
@@ -1719,15 +1851,18 @@ class DanmakrewSimulationWorker {
       const seg = b.moDashChain[b.moSegIndex];
       if (!seg) {
         b.moMode = 'resting';
+        b.moDashSpeedScale = 1.0;
         b.moTimer = 0;
         b.moDashLines = [];
         return;
       }
 
       const segLen = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1) || 1;
+      const baseDashSpeed = (1350 + b.phase * 120) * statScale;
+      const speedScale = b.moDashSpeedScale || 1.0;
       const segDur = seg.isReturn
-        ? Math.max(0.36, Math.min(0.56, segLen / 1600))
-        : Math.max(0.32, Math.min(0.54, segLen / Math.max(1850, 2150 + b.phase * 90)));
+        ? Math.max(0.32, Math.min(0.55, segLen / (1650 * statScale)))
+        : Math.max(0.14, Math.min(0.65, segLen / (baseDashSpeed * speedScale)));
 
       const prevX = b.x;
       const prevY = b.y;
@@ -1755,11 +1890,17 @@ class DanmakrewSimulationWorker {
         }));
 
       b.moSparkAccum += dt;
-      if (!seg.isReturn && b.moSparkAccum >= 0.08 && b.x > -20 && b.x < WORLD_WIDTH + 20 && b.y > -20 && b.y < WORLD_HEIGHT + 20) {
+      const wakeInterval = Math.max(0.032, 0.068 - b.phase * 0.007);
+      if (!seg.isReturn && b.moSparkAccum >= wakeInterval && b.x > -20 && b.x < WORLD_WIDTH + 20 && b.y > -20 && b.y < WORLD_HEIGHT + 20) {
         b.moSparkAccum = 0;
-        const perp = b.angle + Math.PI / 2;
+        const pairsPerSide = Math.ceil(b.phase / 2);
         for (const sgn of [-1, 1]) {
-          this.spawnEnemyBullet(b.x, b.y, perp * sgn + (Math.random() - 0.5) * 0.25, 115, 4.5, 0xfef08a, 4, { spriteType: 'MObullet3png', ttl: 1.4 });
+          const perp = b.angle + sgn * (Math.PI / 2);
+          for (let sp = 0; sp < pairsPerSide; sp++) {
+            const jitter = (Math.random() - 0.5) * 0.42;
+            const spd = (110 + sp * 28 + Math.random() * 25) * statScale;
+            this.spawnEnemyBullet(b.x, b.y, perp + jitter, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
+          }
         }
       }
 
@@ -1771,7 +1912,7 @@ class DanmakrewSimulationWorker {
             const st = s / 4;
             const sx = prevX + (b.x - prevX) * st;
             const sy = prevY + (b.y - prevY) * st;
-            if (Math.hypot(pos.x - sx, pos.y - sy) <= 40) {
+            if (Math.hypot(pos.x - sx, pos.y - sy) <= 42) {
               b.moDashHitPlayers.add(pid);
               this.applyDamageToPlayer(pl, 14);
               break;
@@ -1783,8 +1924,32 @@ class DanmakrewSimulationWorker {
       if (rawT >= 1) {
         b.x = seg.x2;
         b.y = seg.y2;
+        if (!seg.isReturn) {
+          const lineNodes = 2 + Math.max(1, b.phase);
+          const sparksPerSide = Math.ceil(b.phase / 2);
+          const lineAngle = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
+          for (let n = 1; n <= lineNodes; n++) {
+            const u = n / (lineNodes + 1);
+            const nx = seg.x1 + (seg.x2 - seg.x1) * u;
+            const ny = seg.y1 + (seg.y2 - seg.y1) * u;
+            if (nx < 10 || nx > WORLD_WIDTH - 10 || ny < 10 || ny > WORLD_HEIGHT - 10) continue;
+            for (const sgn of [-1, 1]) {
+              const perp = lineAngle + sgn * (Math.PI / 2);
+              for (let sp = 0; sp < sparksPerSide; sp++) {
+                const spread = (Math.random() - 0.5) * 0.48;
+                const spd = (100 + sp * 30 + Math.random() * 30) * statScale;
+                this.spawnEnemyBullet(nx, ny, perp + spread, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
+              }
+            }
+          }
+          b.moDashSpeedScale = (b.moDashSpeedScale || 1.0) + 0.28;
+        }
         b.moSegIndex += 1;
         if (b.moSegIndex < b.moDashChain.length) {
+          const nextSeg = b.moDashChain[b.moSegIndex];
+          b.x = nextSeg.x1;
+          b.y = nextSeg.y1;
+          b.angle = Math.atan2(nextSeg.y2 - nextSeg.y1, nextSeg.x2 - nextSeg.x1);
           b.moTimer = 0;
           b.moDashHitPlayers = new Set();
           b.moSparkAccum = 0;
@@ -1792,6 +1957,7 @@ class DanmakrewSimulationWorker {
           b.x = centerX;
           b.y = centerY;
           b.moMode = 'resting';
+          b.moDashSpeedScale = 1.0;
           b.moTimer = 0;
           b.moRestDuration = Math.max(2.3, 3.2 - b.phase * 0.15);
           b.moRestShotAccum = 0;
@@ -1802,23 +1968,28 @@ class DanmakrewSimulationWorker {
     }
 
     b.moTimer += dt;
+    b.moDashSpeedScale = 1.0;
     b.moDashState = 'resting';
     b.moDashLines = [];
-    b.x += (centerX - b.x) * Math.min(1, dt * 4.5);
-    b.y += (centerY - b.y) * Math.min(1, dt * 4.5);
+    const restHoverX = centerX + Math.cos(b.moTimer * 1.45) * 52;
+    const restHoverY = centerY + Math.sin(b.moTimer * 2.2) * 62;
+    b.x += (restHoverX - b.x) * Math.min(1, dt * 4.5);
+    b.y += (restHoverY - b.y) * Math.min(1, dt * 4.5);
     b.angle = Math.atan2(target.y - b.y, target.x - b.x);
     b.moRestShotAccum += dt;
-    if (b.phase >= 2 && b.moRestShotAccum >= 1.15) {
+    const restShotInterval = Math.max(0.54, (1.05 - b.phase * 0.06) / statScale);
+    if (b.moRestShotAccum >= restShotInterval) {
       b.moRestShotAccum = 0;
-      const count = 6 + b.phase * 2;
+      const count = 8 + b.phase * 2;
       for (let k = 0; k < count; k++) {
-        this.spawnEnemyBullet(b.x, b.y, b.animTimer * 0.7 + (Math.PI * 2 * k) / count, 140, 4.5, 0xef4444, 4, { spriteType: k % 2 === 0 ? 'MObullet1png' : 'MObullet3png', ttl: 3.2 });
+        this.spawnEnemyBullet(b.x, b.y, b.animTimer * 0.75 + (Math.PI * 2 * k) / count, 175 * statScale, 5, 0xef4444, Math.max(1, Math.round(5 * statScale)), { spriteType: 'MObullet1png', ttl: 3.4 });
       }
     }
     if (b.moTimer >= b.moRestDuration) {
       b.moMode = 'telegraph';
       b.moTimer = 0;
       b.moSegIndex = 0;
+      b.moDashSpeedScale = 1.0;
       b.moDashChain = this.buildWorkerMoDashChain(b.x, b.y, b.phase, target, b.moLineIndex++);
     }
   }
@@ -1859,6 +2030,7 @@ class DanmakrewSimulationWorker {
       this.boss.isActive = false;
       this.stageState = 'stage_clear';
       this.lasers = [];
+      this.enemies = [];
       this.spawnItemFountain(this.boss.x, this.boss.y, 18);
       if (!this.customStageProfile && this.stageIndex < TOTAL_STAGES_PER_DIFFICULTY - 1) {
         this.autoAdvanceTimer = this.autoAdvanceDuration;

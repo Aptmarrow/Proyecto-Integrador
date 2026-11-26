@@ -18,6 +18,7 @@ export interface EnemyConfig {
   shootDelay?: number;
   texture?: PIXI.Texture;
   isMiniboss?: boolean;
+  difficultyTint?: number;
   customParams?: Record<string, any>;
 }
 
@@ -43,6 +44,7 @@ export class Enemy {
   public isMiniboss: boolean = false;
   public fuseProgress: number = 0;
   public facingAngle: number = Math.PI;
+  public difficultyTint: number = 0xffffff;
   public customParams: Record<string, any>;
 
   public container = new PIXI.Container();
@@ -66,6 +68,7 @@ export class Enemy {
     this.itemDrop = config.itemDrop ?? (this.type === 'big_fairy' ? 'bomb_frag' : (this.type === 'red_fairy' ? 'power' : 'point'));
     this.shootInterval = config.shootInterval ?? (this.type === 'big_fairy' ? 0.35 : 1.2);
     this.shootTimer = -(config.shootDelay ?? 0.4);
+    this.difficultyTint = config.difficultyTint ?? 0xffffff;
     this.customParams = config.customParams || {};
 
     parentContainer.addChild(this.container);
@@ -75,6 +78,7 @@ export class Enemy {
       sprite.anchor.set(0.5);
       this.baseScale = this.isMiniboss ? 0.84 : (this.type === 'third_enemy' ? 0.54 : (this.type === 'big_fairy' ? 0.9 : 0.44));
       sprite.scale.set(this.baseScale);
+      sprite.tint = this.difficultyTint;
       this.sprite = sprite;
       if (this.isMiniboss) {
         const ring = this.wingGlow;
@@ -100,6 +104,13 @@ export class Enemy {
     } else {
       sprite.scale.set(sx, sy);
       sprite.rotation = Math.atan2(Math.sin(worldAngle - Math.PI), Math.cos(worldAngle - Math.PI));
+    }
+  }
+
+  public setDifficultyTint(tint: number): void {
+    this.difficultyTint = tint;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.tint = tint;
     }
   }
 
@@ -129,9 +140,9 @@ export class Enemy {
       this.applySpriteOrientation(this.sprite, this.baseScale + breath, this.baseScale - breath * 0.6, this.facingAngle);
       if (this.type === 'mo_enemy2' && this.fuseProgress > 0.03) {
         const warnFlash = Math.sin(animTimer * (12 + this.fuseProgress * 30)) > 0;
-        this.sprite.tint = warnFlash ? 0xff4444 : 0xffffff;
+        this.sprite.tint = warnFlash ? 0xff4444 : this.difficultyTint;
       } else {
-        this.sprite.tint = 0xffffff;
+        this.sprite.tint = this.difficultyTint;
       }
     }
     if (this.isMiniboss) {
@@ -227,7 +238,7 @@ export class Enemy {
       this.facingAngle += diff * Math.min(1, dt * 12);
       const breath = Math.sin(animTimer * 12) * 0.05;
       this.applySpriteOrientation(this.sprite, this.baseScale + breath, this.baseScale - breath, this.facingAngle);
-      this.sprite.tint = this.flashTimer > 0 ? 0xffffff : 0xffffff;
+      this.sprite.tint = this.flashTimer > 0 ? 0xffffff : this.difficultyTint;
     }
   }
 

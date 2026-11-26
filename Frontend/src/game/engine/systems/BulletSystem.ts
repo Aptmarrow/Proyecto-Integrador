@@ -8,6 +8,23 @@ export class BulletSystem {
   public spriteContainer = new PIXI.Container();
   private spritePool: PIXI.Sprite[] = [];
   private enemySpritePool: PIXI.Sprite[] = [];
+  private difficultyBulletTint: number = 0xffffff;
+  private difficultyMode: 'normal' | 'difficult' | 'no_mercy' = 'normal';
+
+  public setDifficultyBulletTint(tint: number, difficulty: string = 'normal'): void {
+    this.difficultyBulletTint = tint;
+    this.difficultyMode = difficulty === 'no_mercy' ? 'no_mercy' : difficulty === 'difficult' ? 'difficult' : 'normal';
+  }
+
+  private shiftOrbColor(color: number): number {
+    if (this.difficultyMode === 'normal') return color;
+    const target = this.difficultyMode === 'difficult' ? 0xff5a5a : 0xb37aff;
+    const blend = 0.28;
+    const r = Math.round(((color >> 16) & 0xff) * (1 - blend) + ((target >> 16) & 0xff) * blend);
+    const g = Math.round(((color >> 8) & 0xff) * (1 - blend) + ((target >> 8) & 0xff) * blend);
+    const b = Math.round((color & 0xff) * (1 - blend) + (target & 0xff) * blend);
+    return (r << 16) | (g << 8) | b;
+  }
   private bulletTextures: Record<string, PIXI.Texture> = {
     dps: PIXI.Texture.from('/assets/sprites/PhyAttackBulletpng.png'),
     special_attack: PIXI.Texture.from('/assets/sprites/SpeAttackBulletpng.png'),
@@ -233,17 +250,19 @@ export class BulletSystem {
             es.scale.set(0.82);
           }
         }
+        es.tint = this.difficultyBulletTint;
         es.visible = true;
         enemySpriteIdx++;
         continue;
       }
 
       const r = b.radius;
-      graphics.beginFill(b.color, 0.28);
+      const orbColor = this.shiftOrbColor(b.color);
+      graphics.beginFill(orbColor, 0.28);
       graphics.drawCircle(b.x, b.y, r * 1.42);
       graphics.endFill();
 
-      graphics.beginFill(b.color, 0.95);
+      graphics.beginFill(orbColor, 0.95);
       graphics.drawCircle(b.x, b.y, r);
       graphics.endFill();
 

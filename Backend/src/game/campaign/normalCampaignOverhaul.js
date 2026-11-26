@@ -10,6 +10,25 @@ const ENABLE_NORMAL_OVERHAUL = true;
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
 
+function getDifficultyStatScale(difficulty = 'normal') {
+  if (difficulty === 'no_mercy') return 1.25;
+  if (difficulty === 'difficult') return 1.1;
+  return 1.0;
+}
+
+function getScaledMinibossDef(world, stage, difficulty = 'normal') {
+  const base = MINIBOSS_DEFS[`${world}-${stage}`];
+  if (!base) return null;
+  const scale = getDifficultyStatScale(difficulty);
+  return {
+    ...base,
+    hp: Math.round(base.hp * scale),
+    speed: Math.round(base.speed * scale),
+    shootInterval: Number((base.shootInterval / scale).toFixed(3)),
+    customParams: { ...(base.customParams || {}), statScale: scale },
+  };
+}
+
 const MINIBOSS_DEFS = {
   '1-1': {
     type: 'fb_mini2',
@@ -27,7 +46,7 @@ const MINIBOSS_DEFS = {
     shootInterval: 1.05,
     shootDelay: 0.4,
     bulletColor: 0x3b82f6,
-    customParams: { hoverX: 590, ampY: 115, freqY: 1.1 },
+    customParams: { hoverX: 590, ampY: 115, freqY: 1.1, moveStyle: 'vertical_sine' },
   },
   '1-2': {
     type: 'fb_mini1',
@@ -45,7 +64,7 @@ const MINIBOSS_DEFS = {
     shootInterval: 0.92,
     shootDelay: 0.35,
     bulletColor: 0xfacc15,
-    customParams: { hoverX: 585, ampY: 135, freqY: 1.45 },
+    customParams: { hoverX: 585, ampY: 135, freqY: 1.35, moveStyle: 'figure8' },
   },
   '2-1': {
     type: 'gfg_mini1',
@@ -63,7 +82,7 @@ const MINIBOSS_DEFS = {
     shootInterval: 1.05,
     shootDelay: 0.4,
     bulletColor: 0xff3b30,
-    customParams: { hoverX: 595, ampY: 140, freqY: 1.35 },
+    customParams: { hoverX: 595, ampY: 140, freqY: 1.25, moveStyle: 'diamond_drift' },
   },
   '2-2': {
     type: 'gfg_mini2',
@@ -81,7 +100,7 @@ const MINIBOSS_DEFS = {
     shootInterval: 0.1,
     shootDelay: 0.4,
     bulletColor: 0xef4444,
-    customParams: { hoverX: 590, ampY: 150, freqY: 1.5 },
+    customParams: { hoverX: 605, ampY: 150, freqY: 1.4, moveStyle: 'arc_sway' },
   },
   '3-1': {
     type: 'mo_mini1',
@@ -99,7 +118,7 @@ const MINIBOSS_DEFS = {
     shootInterval: 1.45,
     shootDelay: 0.5,
     bulletColor: 0x9ca3af,
-    customParams: { hoverX: 590, ampY: 110, freqY: 1.05 },
+    customParams: { hoverX: 590, ampY: 115, freqY: 1.05, moveStyle: 'pendulum_guard' },
   },
   '3-2': {
     type: 'mo_mini2',
@@ -117,7 +136,7 @@ const MINIBOSS_DEFS = {
     shootInterval: 1.25,
     shootDelay: 0.45,
     bulletColor: 0x818cf8,
-    customParams: { hoverX: 585, ampY: 135, freqY: 1.25 },
+    customParams: { hoverX: 585, ampY: 130, freqY: 1.2, moveStyle: 'orbital_patrol' },
   },
 };
 
@@ -147,6 +166,7 @@ function makeWaveEnemySpec(overrides) {
 function buildNormalWorldWaves(world, stage, bossSpawnAt, baseWaves, meta = {}) {
   const palette = meta.palette || [0x00f2fe, 0xff2b5b, 0xffdd00];
   const seed = meta.levelSeed || 1;
+  const statScale = getDifficultyStatScale(meta.difficulty || 'normal');
   const firstWaveAt = 0.6;
   const lastWaveAt = Math.max(24, bossSpawnAt - 9.5);
   const count = Array.isArray(baseWaves) && baseWaves.length > 0 ? baseWaves.length : 10;
@@ -169,18 +189,26 @@ function buildNormalWorldWaves(world, stage, bossSpawnAt, baseWaves, meta = {}) 
       enemies = buildWorld3NormalWave(i, v, stage, palette, baseWave);
     }
 
+    const scaledEnemies = enemies.map((e) => ({
+      ...e,
+      hp: Math.max(8, Math.round((e.hp || 18) * statScale)),
+      speed: Math.round((e.speed || 130) * statScale),
+      shootInterval: Number(((e.shootInterval || 1.5) / statScale).toFixed(3)),
+      customParams: { ...(e.customParams || {}), statScale },
+    }));
+
     waves.push({
       key: `w_${i + 1}`,
       at,
       archetype: baseWave?.archetype || `normal_w${world}_v${i % 4}`,
-      enemies,
+      enemies: scaledEnemies,
     });
   }
 
   return waves;
 }
 
-function buildWorld1NormalWave(idx, variant, _stage, palette, baseWave) {
+function buildWorld1NormalWave(idx, variant, stage, palette, baseWave) {
   const mode = idx % 4;
   // Slightly keep & vary existing wave trajectories every 4th wave so nothing feels completely wiped
   if (mode === 3 && Array.isArray(baseWave?.enemies) && baseWave.enemies.length > 0) {
@@ -205,49 +233,60 @@ function buildWorld1NormalWave(idx, variant, _stage, palette, baseWave) {
 
   const out = [];
   if (mode === 0) {
-    // Vanguard FirstEnemy formation
+    // Stage 1-1: v_formation | Stage 1-2: swoop_arc | Stage 1-3: cross_top / cross_bottom
     const baseY = variant % 2 === 0 ? 180 : 300;
     for (let i = 0; i < 5; i++) {
+      const isTop = i % 2 === 0;
+      const trajectory = stage === 2 ? 'swoop_arc' : (stage === 3 ? (isTop ? 'cross_top' : 'cross_bottom') : 'v_formation');
+      const startY = stage === 3
+        ? (isTop ? 52 : WORLD_HEIGHT - 52)
+        : Math.max(70, Math.min(530, baseY + (i - 2) * 58));
       out.push(makeWaveEnemySpec({
         type: 'first_enemy',
-        trajectory: 'v_formation',
+        trajectory,
         attackPattern: 'w1_first_normal',
         startX: WORLD_WIDTH + 45 + i * 48,
-        startY: Math.max(70, Math.min(530, baseY + (i - 2) * 58)),
-        speed: 136,
+        startY,
+        speed: stage === 3 ? 148 : 136,
         hp: 16,
         itemDrop: i === 2 ? 'power' : 'point',
         shootInterval: 1.45,
         shootDelay: 0.3 + i * 0.16,
         bulletColor: palette[0],
-        customParams: { driftY: (variant % 2 === 0 ? 1 : -1) * 18 },
+        customParams: stage === 2
+          ? { apexX: 525 - i * 18, targetY: Math.max(95, Math.min(505, 140 + i * 78)) }
+          : { driftY: (variant % 2 === 0 ? 1 : -1) * 18 },
       }));
     }
   } else if (mode === 1) {
-    // Homing SecondEnemy flankers
+    // Stage 1-1: sine | Stage 1-2: pendulum | Stage 1-3: spiral
+    const trajectory = stage === 2 ? 'pendulum' : (stage === 3 ? 'spiral' : 'sine');
     for (let i = 0; i < 4; i++) {
       const isTop = i % 2 === 0;
       out.push(makeWaveEnemySpec({
         type: 'second_enemy',
-        trajectory: 'sine',
+        trajectory,
         attackPattern: 'w1_second_homing',
         startX: WORLD_WIDTH + 50 + i * 62,
-        startY: isTop ? 155 : 445,
+        startY: stage === 2 ? 300 : (isTop ? 155 : 445),
         speed: 126,
         hp: 20,
         itemDrop: i % 2 === 0 ? 'power' : 'point',
         shootInterval: 1.7,
         shootDelay: 0.35 + i * 0.22,
         bulletColor: 0xfacc15,
-        customParams: { amp: 60, freq: 2.6, phase: i * 0.5 },
+        customParams: stage === 2
+          ? { freq: 1.9, ampY: 155, phase: i * 0.85 }
+          : { amp: 60, freq: 2.6, phase: i * 0.5 },
       }));
     }
   } else {
-    // Armored ThirdEnemy (higher HP, slower heavy orbs) + FirstEnemy escorts
-    for (const sy of [190, 410]) {
+    // Stage 1-1: hover_retreat + double_helix | Stage 1-2: orbit_anchor + perimeter_skimmer | Stage 1-3: hover_retreat + zigzag
+    for (const [ti, sy] of [190, 410].entries()) {
+      const useOrbit = stage === 2;
       out.push(makeWaveEnemySpec({
         type: 'third_enemy',
-        trajectory: 'hover_retreat',
+        trajectory: useOrbit ? 'orbit_anchor' : 'hover_retreat',
         attackPattern: 'w1_third_slow',
         startX: WORLD_WIDTH + 55,
         startY: sy,
@@ -259,29 +298,34 @@ function buildWorld1NormalWave(idx, variant, _stage, palette, baseWave) {
         shootInterval: 1.75,
         shootDelay: 0.45,
         bulletColor: 0x3b82f6,
-        customParams: { hoverX: 585, hoverTime: 5.0 },
+        customParams: useOrbit
+          ? { anchorX: 560, anchorY: sy, orbitR: 62, phase: ti * Math.PI }
+          : { hoverX: stage === 3 ? 545 + ti * 50 : 585, hoverTime: 5.0 },
       }));
     }
     for (let k = 0; k < 2; k++) {
+      const escortTraj = stage === 2 ? 'perimeter_skimmer' : (stage === 3 ? 'zigzag' : 'double_helix');
       out.push(makeWaveEnemySpec({
         type: 'first_enemy',
-        trajectory: 'double_helix',
+        trajectory: escortTraj,
         attackPattern: 'w1_first_normal',
         startX: WORLD_WIDTH + 110 + k * 56,
-        startY: 300,
+        startY: stage === 2 ? (k === 0 ? 78 : 522) : (stage === 3 ? (k === 0 ? 150 : 450) : 300),
         speed: 132,
         hp: 16,
         itemDrop: 'point',
         shootInterval: 1.55,
         shootDelay: 0.4 + k * 0.25,
-        customParams: { amp: 70, freq: 3.0, phase: k * Math.PI },
+        customParams: stage === 2
+          ? { bobAmp: 16 }
+          : { amp: 70, freq: 3.0, phase: k * Math.PI },
       }));
     }
   }
   return out;
 }
 
-function buildWorld2NormalWave(idx, variant, _stage, _palette, baseWave) {
+function buildWorld2NormalWave(idx, variant, stage, _palette, baseWave) {
   const mode = idx % 4;
   if (mode === 3 && Array.isArray(baseWave?.enemies) && baseWave.enemies.length > 0) {
     return baseWave.enemies.map((e, k) => {
@@ -293,36 +337,40 @@ function buildWorld2NormalWave(idx, variant, _stage, _palette, baseWave) {
         type,
         attackPattern,
         hp: Math.max(18, Math.round((e.hp || 20) * 1.1)),
-        shootInterval: m === 1 ? 0.055 : (m === 0 ? 1.25 : 1.55),
+        shootInterval: m === 1 ? 0.055 : (m === 0 ? 0.56 : 1.55),
       };
     });
   }
 
   const out = [];
   if (mode === 0) {
-    // GFGEnemy1 fast gunfire squadron
+    // Stage 2-1: perimeter_skimmer | Stage 2-2: zigzag | Stage 2-3: double_helix
+    const trajectory = stage === 2 ? 'zigzag' : (stage === 3 ? 'double_helix' : 'perimeter_skimmer');
     for (let i = 0; i < 5; i++) {
       out.push(makeWaveEnemySpec({
         type: 'gfg_enemy1',
-        trajectory: 'sine',
+        trajectory,
         attackPattern: 'w2_gfg1_fast',
         startX: WORLD_WIDTH + 45 + i * 54,
-        startY: 110 + i * 95,
+        startY: stage === 3 ? (i % 2 === 0 ? 200 : 400) : 110 + i * 95,
         speed: 142,
         hp: 22,
         itemDrop: i % 2 === 0 ? 'power' : 'point',
-        shootInterval: 1.18,
+        shootInterval: 0.56,
         shootDelay: 0.25 + i * 0.14,
         bulletColor: 0xef4444,
-        customParams: { amp: 32, freq: 2.5, phase: i * 0.6 },
+        customParams: stage === 3
+          ? { amp: 65, freq: 2.9, phase: i * 0.9 }
+          : { bobAmp: 18, amp: 32, freq: 2.5, phase: i * 0.6 },
       }));
     }
   } else if (mode === 1) {
-    // GFGEnemy2 Sniper (#022) perimeter hoverers + GFGEnemy1
+    // Stage 2-1: hover_retreat + v_formation | Stage 2-2: orbit_anchor + sine | Stage 2-3: swoop_arc + cross_top/bottom
     for (const [k, sy] of [115, 485].entries()) {
+      const sniperTraj = stage === 2 ? 'orbit_anchor' : (stage === 3 ? 'swoop_arc' : 'hover_retreat');
       out.push(makeWaveEnemySpec({
         type: 'gfg_enemy2',
-        trajectory: 'hover_retreat',
+        trajectory: sniperTraj,
         attackPattern: 'w2_gfg2_sniper022',
         startX: WORLD_WIDTH + 50 + k * 45,
         startY: sy,
@@ -334,33 +382,40 @@ function buildWorld2NormalWave(idx, variant, _stage, _palette, baseWave) {
         shootInterval: 0.055,
         shootDelay: 0.5 + k * 0.3,
         bulletColor: 0xff2b5b,
-        customParams: { hoverX: 615, hoverTime: 5.5, burstLeft: 0, burstCooldown: 0.4 + k * 0.45 },
+        customParams: stage === 2
+          ? { anchorX: 600, anchorY: sy < 300 ? 155 : 445, orbitR: 48, phase: k * Math.PI, burstLeft: 0, burstCooldown: 0.4 + k * 0.45 }
+          : stage === 3
+            ? { apexX: 565, targetY: sy < 300 ? 140 : 460, burstLeft: 0, burstCooldown: 0.4 + k * 0.45 }
+            : { hoverX: 615, hoverTime: 5.5, burstLeft: 0, burstCooldown: 0.4 + k * 0.45 },
       }));
     }
     for (let j = 0; j < 3; j++) {
+      const escortTraj = stage === 2 ? 'sine' : (stage === 3 ? (j % 2 === 0 ? 'cross_top' : 'cross_bottom') : 'v_formation');
       out.push(makeWaveEnemySpec({
         type: 'gfg_enemy1',
-        trajectory: 'v_formation',
+        trajectory: escortTraj,
         attackPattern: 'w2_gfg1_fast',
         startX: WORLD_WIDTH + 90 + j * 45,
-        startY: 240 + j * 60,
+        startY: stage === 3 ? (j % 2 === 0 ? 50 : WORLD_HEIGHT - 50) : 240 + j * 60,
         speed: 145,
         hp: 20,
         itemDrop: 'point',
-        shootInterval: 1.25,
+        shootInterval: 0.62,
         shootDelay: 0.35 + j * 0.2,
+        customParams: { amp: 48, freq: 2.6, phase: j * 0.7 },
       }));
     }
   } else {
-    // GFGEnemy3 Linear accelerating artillery
+    // Stage 2-1: swoop_arc | Stage 2-2: pendulum | Stage 2-3: orbit_anchor
     const ys = variant % 2 === 0 ? [150, 300, 450] : [180, 300, 420];
+    const traj = stage === 2 ? 'pendulum' : (stage === 3 ? 'orbit_anchor' : 'swoop_arc');
     ys.forEach((sy, idxY) => {
       out.push(makeWaveEnemySpec({
         type: 'gfg_enemy3',
-        trajectory: 'hover_retreat',
+        trajectory: traj,
         attackPattern: 'w2_gfg3_linear_accel',
         startX: WORLD_WIDTH + 48 + idxY * 36,
-        startY: sy,
+        startY: stage === 2 ? 300 : sy,
         speed: 120,
         hp: 32,
         radius: 20,
@@ -368,14 +423,18 @@ function buildWorld2NormalWave(idx, variant, _stage, _palette, baseWave) {
         shootInterval: 1.4,
         shootDelay: 0.3 + idxY * 0.2,
         bulletColor: 0xf97316,
-        customParams: { hoverX: 590 - idxY * 22, hoverTime: 4.8 },
+        customParams: stage === 2
+          ? { freq: 1.85, ampY: 145, phase: idxY * 1.1 }
+          : stage === 3
+            ? { anchorX: 560, anchorY: sy, orbitR: 54, phase: idxY * 2.1 }
+            : { apexX: 540 - idxY * 24, targetY: sy },
       }));
     });
   }
   return out;
 }
 
-function buildWorld3NormalWave(idx, variant, _stage, _palette, baseWave) {
+function buildWorld3NormalWave(idx, variant, stage, _palette, baseWave) {
   const mode = idx % 4;
   if (mode === 3 && Array.isArray(baseWave?.enemies) && baseWave.enemies.length > 0) {
     return baseWave.enemies.map((e, k) => {
@@ -392,25 +451,31 @@ function buildWorld3NormalWave(idx, variant, _stage, _palette, baseWave) {
 
   const out = [];
   if (mode === 0) {
-    // MOenemy1 mini-laser drones
+    // Stage 3-1: hover_retreat | Stage 3-2: swoop_arc | Stage 3-3: perimeter_skimmer
+    const traj = stage === 2 ? 'swoop_arc' : (stage === 3 ? 'perimeter_skimmer' : 'hover_retreat');
     for (let i = 0; i < 4; i++) {
+      const sy = stage === 3 ? (i % 2 === 0 ? 85 + i * 22 : 515 - i * 22) : 105 + i * 125;
       out.push(makeWaveEnemySpec({
         type: 'mo_enemy1',
-        trajectory: 'hover_retreat',
+        trajectory: traj,
         attackPattern: 'w3_mo1_laser',
         startX: WORLD_WIDTH + 45 + i * 38,
-        startY: 105 + i * 125,
+        startY: sy,
         speed: 138,
         hp: 26,
         itemDrop: i % 2 === 0 ? 'power' : 'point',
         shootInterval: 0.08,
         shootDelay: 0.4 + i * 0.2,
         bulletColor: 0xff2b5b,
-        customParams: { hoverX: 605 - (i % 2) * 35, hoverTime: 4.5, laserBurstLeft: 0, laserCooldown: 0.4 + i * 0.25 },
+        customParams: stage === 2
+          ? { apexX: 550 - (i % 2) * 35, targetY: sy, laserBurstLeft: 0, laserCooldown: 0.4 + i * 0.25 }
+          : stage === 3
+            ? { bobAmp: 20, laserBurstLeft: 0, laserCooldown: 0.4 + i * 0.25 }
+            : { hoverX: 605 - (i % 2) * 35, hoverTime: 4.5, laserBurstLeft: 0, laserCooldown: 0.4 + i * 0.25 },
       }));
     }
   } else if (mode === 1) {
-    // MOenemy2 Kamikaze chasers (slow down & explode!) + MOenemy1 backup
+    // MOenemy2 Kamikaze chasers + MOenemy1 backup (3-1: sine | 3-2: zigzag | 3-3: double_helix)
     for (let i = 0; i < 4; i++) {
       out.push(makeWaveEnemySpec({
         type: 'mo_enemy2',
@@ -426,30 +491,33 @@ function buildWorld3NormalWave(idx, variant, _stage, _palette, baseWave) {
         customParams: { fuseTime: 1.75, triggerDist: 135 },
       }));
     }
-    for (const sy of [170, 430]) {
+    const backupTraj = stage === 2 ? 'zigzag' : (stage === 3 ? 'double_helix' : 'sine');
+    for (const [k, sy] of [170, 430].entries()) {
       out.push(makeWaveEnemySpec({
         type: 'mo_enemy1',
-        trajectory: 'sine',
+        trajectory: backupTraj,
         attackPattern: 'w3_mo1_laser',
         startX: WORLD_WIDTH + 120,
-        startY: sy,
+        startY: stage === 3 ? 300 : sy,
         speed: 130,
         hp: 24,
         itemDrop: 'point',
         shootInterval: 0.08,
         shootDelay: 0.5,
-        customParams: { amp: 45, freq: 2.2, laserBurstLeft: 0, laserCooldown: 0.7 },
+        customParams: { amp: 65, freq: 2.6, phase: k * Math.PI, laserBurstLeft: 0, laserCooldown: 0.7 },
       }));
     }
   } else {
-    // MOenemy3 erratic short-range sparks (#99 tuned) + kamikaze pair
+    // MOenemy3 erratic short-range sparks (3-1: orbit_anchor | 3-2: pendulum | 3-3: spiral) + kamikaze pair
+    const sparkTraj = stage === 2 ? 'pendulum' : (stage === 3 ? 'spiral' : 'orbit_anchor');
     for (let i = 0; i < 3; i++) {
+      const sy = 140 + i * 160;
       out.push(makeWaveEnemySpec({
         type: 'mo_enemy3',
-        trajectory: 'hover_retreat',
+        trajectory: sparkTraj,
         attackPattern: 'w3_mo3_sparks',
         startX: WORLD_WIDTH + 50 + i * 48,
-        startY: 140 + i * 160,
+        startY: stage === 2 ? 300 : sy,
         speed: 128,
         hp: 30,
         radius: 20,
@@ -457,7 +525,11 @@ function buildWorld3NormalWave(idx, variant, _stage, _palette, baseWave) {
         shootInterval: 0.22,
         shootDelay: 0.35 + i * 0.15,
         bulletColor: 0xfef08a,
-        customParams: { hoverX: 515 + (variant % 2) * 35, hoverTime: 5.2 },
+        customParams: stage === 2
+          ? { freq: 1.9, ampY: 150, phase: i * 1.1 }
+          : stage === 3
+            ? { phase: i * 1.2 }
+            : { anchorX: 520 + (variant % 2) * 30, anchorY: sy, orbitR: 52, phase: i * 2.1 },
       }));
     }
     for (const sy of [80, 520]) {
@@ -490,12 +562,34 @@ function updateSpecialEnemyTrajectory(e, dt, _playerPos, nearestPlayerPos) {
     const hoverX = p.hoverX || 590;
     const ampY = p.ampY || 120;
     const freqY = p.freqY || 1.25;
-    if (e.x > hoverX) {
+    const style = p.moveStyle || 'vertical_sine';
+
+    if (e.x > hoverX + 35 && t < 2.2) {
       e.x = Math.max(hoverX, e.x - e.speed * 1.45 * dt);
+      e.y = 300 + Math.sin(t * freqY) * (ampY * 0.35);
+    } else if (style === 'figure8') {
+      e.x = hoverX + Math.sin(t * freqY) * 48;
+      e.y = 300 + Math.sin(t * freqY * 2) * (ampY * 0.78);
+    } else if (style === 'diamond_drift') {
+      const ang = t * freqY;
+      const sx = Math.cos(ang);
+      const sy = Math.sin(ang);
+      e.x = hoverX + Math.sign(sx) * Math.pow(Math.abs(sx), 0.75) * 56;
+      e.y = 300 + Math.sign(sy) * Math.pow(Math.abs(sy), 0.75) * ampY;
+    } else if (style === 'arc_sway') {
+      e.x = hoverX - Math.abs(Math.cos(t * freqY)) * 62;
+      e.y = 300 + Math.sin(t * freqY) * ampY;
+    } else if (style === 'pendulum_guard') {
+      e.x = hoverX + Math.sin(t * 0.75) * 52;
+      e.y = 300 + Math.cos(t * freqY) * ampY;
+    } else if (style === 'orbital_patrol') {
+      e.x = hoverX + Math.cos(t * freqY) * 62;
+      e.y = 300 + Math.sin(t * freqY + 0.65) * ampY;
     } else {
       e.x = hoverX + Math.cos(t * 0.9) * 24;
+      e.y = 300 + Math.sin(t * freqY) * ampY;
     }
-    e.y = 300 + Math.sin(t * freqY) * ampY;
+    e.x = Math.max(470, Math.min(720, e.x));
     e.y = Math.max(68, Math.min(WORLD_HEIGHT - 68, e.y));
     return true;
   }
@@ -526,8 +620,8 @@ function updateSpecialEnemyTrajectory(e, dt, _playerPos, nearestPlayerPos) {
 
     e.x += (dx / dist) * currentSpeed * dt;
     e.y += (dy / dist) * currentSpeed * dt;
-    e.x = Math.max(24, Math.min(WORLD_WIDTH + 120, e.x));
-    e.y = Math.max(24, Math.min(WORLD_HEIGHT - 24, e.y));
+    e.x = Math.max(-75, Math.min(WORLD_WIDTH + 90, e.x));
+    e.y = Math.max(-75, Math.min(WORLD_HEIGHT + 75, e.y));
     e._fuseProgress = Number(ratio.toFixed(2));
     return true;
   }
@@ -539,8 +633,33 @@ function updateSpecialEnemyTrajectory(e, dt, _playerPos, nearestPlayerPos) {
  * Execute Normal-mode bespoke enemy & miniboss shoot patterns.
  * Returns true if pattern was handled.
  */
-function fireSpecialEnemyPattern(e, bulletSystem, targetPos, dt = 1 / 60) {
+function fireSpecialEnemyPattern(e, rawBulletSystem, targetPos, dt = 1 / 60) {
   const p = e.customParams || {};
+  const statScale = p.statScale || 1.0;
+  const bulletSystem = statScale === 1.0
+    ? rawBulletSystem
+    : {
+        spawn: (owner, x, y, ang, spd, rad, ttl, type, dmg, col, opts) =>
+          rawBulletSystem.spawn(
+            owner,
+            x,
+            y,
+            ang,
+            spd * statScale,
+            rad,
+            ttl,
+            type,
+            Number(((dmg || 5) * statScale).toFixed(1)),
+            col,
+            opts
+              ? {
+                  ...opts,
+                  accel: opts.accel ? opts.accel * statScale : opts.accel,
+                  maxSpeed: opts.maxSpeed ? opts.maxSpeed * statScale : opts.maxSpeed,
+                }
+              : opts
+          ),
+      };
   const aim = Math.atan2(targetPos.y - e.y, targetPos.x - e.x);
   e.angle = aim;
   const mx = e.x + Math.cos(aim) * 16;
@@ -625,11 +744,9 @@ function fireSpecialEnemyPattern(e, bulletSystem, targetPos, dt = 1 / 60) {
 
     // ── WORLD 2 ──
     case 'w2_gfg1_fast': {
-      for (const off of [-0.08, 0.08]) {
-        bulletSystem.spawn('boss', mx, my, aim + off, 275, 5, 3.8, 'normal', 5, 0xef4444, {
-          spriteType: 'GFGbullet1png',
-        });
-      }
+      bulletSystem.spawn('boss', mx, my, aim, 285, 5, 3.8, 'normal', 5, 0xef4444, {
+        spriteType: 'GFGbullet1png',
+      });
       return true;
     }
 
@@ -656,14 +773,14 @@ function fireSpecialEnemyPattern(e, bulletSystem, targetPos, dt = 1 / 60) {
     }
 
     case 'w2_gfg3_linear_accel': {
-      // Starts slow and accelerates EXPONENTIALLY in a straight line (no homing)
-      for (const off of [-0.22, 0, 0.22]) {
-        bulletSystem.spawn('boss', mx, my, aim + off, 38, 5, 4.8, 'normal', 5, 0xf97316, {
-          spriteType: 'GFGbullet3png',
-          expAccel: 1.7,
-          maxSpeed: 520,
-        });
-      }
+      // Single GFGbullet3png that accelerates exponentially and curves slightly toward player before passing by if dodged
+      bulletSystem.spawn('boss', mx, my, aim, 55, 5.5, 4.8, 'normal', 5, 0xf97316, {
+        spriteType: 'GFGbullet3png',
+        expAccel: 1.35,
+        maxSpeed: 420,
+        homeRate: 0.72,
+        homeTime: 1.35,
+      });
       return true;
     }
 
@@ -778,22 +895,30 @@ function fireSpecialEnemyPattern(e, bulletSystem, targetPos, dt = 1 / 60) {
  *  - 2-3: GunsForGunsCube.png
  *  - 3-3: M.O.png (Mecanical Ophanim)
  */
-function getNormalWorldBossConfig(world) {
+function getNormalWorldBossConfig(world, difficulty = 'normal') {
+  const scale = getDifficultyStatScale(difficulty);
+  const scalePhases = (list) =>
+    list.map((ph) => ({
+      ...ph,
+      shootInterval: Number((ph.shootInterval / scale).toFixed(3)),
+    }));
+
   if (world === 1) {
     return {
       bossId: 'first_boss',
       bossName: 'FirstBoss · Centinela Tri-Protocolo',
       sprite: '/assets/sprites/FirstBoss.png',
       moveArchetype: 'orbital_lissajous',
-      baseHp: 118,
-      speedScale: 0.94,
-      phases: [
+      baseHp: Math.round(118 * scale),
+      speedScale: Number((0.94 * scale).toFixed(3)),
+      statScale: scale,
+      phases: scalePhases([
         { name: 'Fase 1 "Salva Estándar & Lenta"', pattern: 'fb_boss_mix_fan', shootInterval: 0.55, laserMode: 'targeted', laserInterval: 5.0, megaLaserInterval: 0 },
         { name: 'Sello I "Enjambre Teledirigido"', pattern: 'fb_boss_homing_salvo', shootInterval: 0.95, laserMode: 'targeted', laserInterval: 4.5, megaLaserInterval: 7.5 },
         { name: 'Fase 3 "Cadencia Alterna"', pattern: 'fb_boss_slow_fast_swap', shootInterval: 0.45, laserMode: 'none', laserInterval: 5.0, megaLaserInterval: 0 },
         { name: 'Protocolo #92 "Tormenta Buscadora"', pattern: 'fb_boss_homing_92', shootInterval: 1.05, laserMode: 'both', laserInterval: 4.2, megaLaserInterval: 6.8 },
         { name: 'Protocolo Final "Trinidad Orbital"', pattern: 'fb_boss_tri_symphony', shootInterval: 0.42, laserMode: 'both', laserInterval: 3.8, megaLaserInterval: 6.2 },
-      ],
+      ]),
     };
   }
 
@@ -803,15 +928,16 @@ function getNormalWorldBossConfig(world) {
       bossName: 'GunsForGunsCube',
       sprite: '/assets/sprites/GunsForGunsCube.png',
       moveArchetype: 'diamond_tactical',
-      baseHp: 145,
-      speedScale: 1.0,
-      phases: [
+      baseHp: Math.round(145 * scale),
+      speedScale: Number((1.0 * scale).toFixed(3)),
+      statScale: scale,
+      phases: scalePhases([
         { name: 'Fase 1 "Arsenal Cinético"', pattern: 'gfg_boss_p1_mix', shootInterval: 0.48, laserMode: 'targeted', laserInterval: 4.6, megaLaserInterval: 0 },
         { name: 'Sello Balístico "Francotirador #022"', pattern: 'gfg_boss_p2_sniper', shootInterval: 0.06, laserMode: 'targeted', laserInterval: 4.4, megaLaserInterval: 7.2 },
         { name: 'Fase 3 "Cortina Acelerada"', pattern: 'gfg_boss_p3_accel', shootInterval: 0.55, laserMode: 'none', laserInterval: 4.8, megaLaserInterval: 0 },
         { name: 'Protocolo Cubo "Fuego y Perdigones"', pattern: 'gfg_boss_p4_shotgun_rapid', shootInterval: 0.12, laserMode: 'both', laserInterval: 3.8, megaLaserInterval: 6.5 },
         { name: 'Sobrecarga Total "Guns For Guns"', pattern: 'gfg_boss_p5_all_bullets', shootInterval: 0.36, laserMode: 'both', laserInterval: 3.6, megaLaserInterval: 6.0 },
-      ],
+      ]),
     };
   }
 
@@ -822,16 +948,17 @@ function getNormalWorldBossConfig(world) {
     fullBossName: 'Mecanical Ophanim',
     sprite: '/assets/sprites/M.O.png',
     moveArchetype: 'mo_ophanim_dash',
-    baseHp: 175,
-    speedScale: 1.06,
+    baseHp: Math.round(175 * scale),
+    speedScale: Number((1.06 * scale).toFixed(3)),
+    statScale: scale,
     introDuration: 3.8,
-    phases: [
+    phases: scalePhases([
       { name: 'Fase 1 "Vectores Rectos"', pattern: 'mo_dash_pattern', shootInterval: 0.5, laserMode: 'none', laserInterval: 99, megaLaserInterval: 0 },
       { name: 'Sello Ophanim "Trazos del Trono"', pattern: 'mo_dash_pattern', shootInterval: 0.45, laserMode: 'none', laserInterval: 99, megaLaserInterval: 8.5 },
       { name: 'Fase 3 "Aceleración Axial"', pattern: 'mo_dash_pattern', shootInterval: 0.4, laserMode: 'none', laserInterval: 99, megaLaserInterval: 0 },
       { name: 'Protocolo Serafín "Cruce Mecánico"', pattern: 'mo_dash_pattern', shootInterval: 0.35, laserMode: 'none', laserInterval: 99, megaLaserInterval: 7.5 },
       { name: 'Protocolo Final "MECANICAL OPHANIM"', pattern: 'mo_dash_pattern', shootInterval: 0.3, laserMode: 'none', laserInterval: 99, megaLaserInterval: 6.8 },
-    ],
+    ]),
   };
 }
 
@@ -839,8 +966,27 @@ function getNormalWorldBossConfig(world) {
  * Fire Normal Boss patterns for 1-3 (FirstBoss) and 2-3 (GunsForGunsCube).
  * Returns true if handled.
  */
-function fireNormalBossPattern(patternId, ctx, emitBullet) {
-  const { bossX, bossY, playerX, playerY, animTimer, shotIndex, phase = 1 } = ctx;
+function fireNormalBossPattern(patternId, ctx, rawEmitBullet) {
+  const { bossX, bossY, playerX, playerY, animTimer, shotIndex, phase = 1, statScale = 1.0 } = ctx;
+  const emitBullet = statScale === 1.0
+    ? rawEmitBullet
+    : (bx, by, angle, speed, radius, color, damage, opts = null) =>
+        rawEmitBullet(
+          bx,
+          by,
+          angle,
+          speed * statScale,
+          radius,
+          color,
+          Number(((damage || 5) * statScale).toFixed(1)),
+          opts
+            ? {
+                ...opts,
+                accel: opts.accel ? opts.accel * statScale : opts.accel,
+                maxSpeed: opts.maxSpeed ? opts.maxSpeed * statScale : opts.maxSpeed,
+              }
+            : opts
+        );
   const aim = Math.atan2(playerY - bossY, playerX - bossX);
 
   switch (patternId) {
@@ -1067,62 +1213,68 @@ function clipRayToOuterBounds(x0, y0, tx, ty) {
   return { x: Math.round(exitX), y: Math.round(exitY) };
 }
 
+function pickRandomOuterPoint() {
+  const edge = Math.floor(Math.random() * 4);
+  if (edge === 0) return { x: -MO_OUTER_PAD, y: Math.round(70 + Math.random() * (WORLD_HEIGHT - 140)) };
+  if (edge === 1) return { x: WORLD_WIDTH + MO_OUTER_PAD, y: Math.round(70 + Math.random() * (WORLD_HEIGHT - 140)) };
+  if (edge === 2) return { x: Math.round(90 + Math.random() * (WORLD_WIDTH - 180)), y: -MO_OUTER_PAD };
+  return { x: Math.round(90 + Math.random() * (WORLD_WIDTH - 180)), y: WORLD_HEIGHT + MO_OUTER_PAD };
+}
+
 /**
- * Generates M.O's full connected dash chain across the entire screen:
- * - Attack lines always slice through the visible arena and terminate strictly OFFSCREEN.
- * - Each line starts at the exact offscreen endpoint of the previous line.
- * - After the final offscreen attack line, a return line brings M.O back to the center to rest.
+ * Generates M.O's full dash sequence across the map:
+ * - Line 0 always launches from M.O toward the player's direction and exits strictly OFFSCREEN.
+ * - Subsequent lines start from any random offscreen edge outside the map and slash across any part of the map to a far offscreen exit.
+ * - After the final offscreen attack line, a return line directs M.O back to the center area to rest.
  */
-function buildMoDashChain(startX, startY, phase, playerPos, seed) {
-  const dashes = Math.min(4, 2 + Math.floor((phase || 1) / 2));
-  const px = Math.max(130, Math.min(WORLD_WIDTH - 130, playerPos?.x || 200));
-  const py = Math.max(100, Math.min(WORLD_HEIGHT - 100, playerPos?.y || MO_CENTER_Y));
+function buildMoDashChain(startX, startY, phase, playerPos) {
+  const dashes = 4 + Math.max(1, phase || 1);
+  const px = Math.max(90, Math.min(WORLD_WIDTH - 90, playerPos?.x || 200));
+  const py = Math.max(70, Math.min(WORLD_HEIGHT - 70, playerPos?.y || MO_CENTER_Y));
 
   const chain = [];
-  let curX = startX;
-  let curY = startY;
+  let lastEndX = startX;
+  let lastEndY = startY;
 
   for (let k = 0; k < dashes; k++) {
-    let tx = px;
-    let ty = py;
+    let sx;
+    let sy;
+    let tx;
+    let ty;
+
     if (k === 0) {
+      sx = startX;
+      sy = startY;
       tx = px;
       ty = py;
-      if (Math.hypot(tx - curX, ty - curY) < 60) {
+      if (Math.hypot(tx - sx, ty - sy) < 60) {
         tx = 180;
         ty = py > MO_CENTER_Y ? 190 : 410;
       }
     } else {
-      // Pick interior anchor in opposite region from previous offscreen exit so next line cuts cleanly across map
-      const fromLeft = curX < 100;
-      const fromRight = curX > WORLD_WIDTH - 100;
-      const fromTop = curY < 100;
-      const fromBottom = curY > WORLD_HEIGHT - 100;
-
-      tx = fromLeft ? 480 + ((seed + k) % 2) * 80 : (fromRight ? 240 : ((k + seed) % 2 === 0 ? 280 : 520));
-      ty = fromTop ? 405 : (fromBottom ? 195 : (curY < MO_CENTER_Y ? 420 : 180));
-      if (k === dashes - 1) {
-        tx = Math.max(160, Math.min(640, (tx + px) * 0.5));
-        ty = Math.max(120, Math.min(480, (ty + py) * 0.5));
-      }
+      const entry = pickRandomOuterPoint();
+      sx = entry.x;
+      sy = entry.y;
+      tx = Math.round(130 + Math.random() * (WORLD_WIDTH - 260));
+      ty = Math.round(95 + Math.random() * (WORLD_HEIGHT - 190));
     }
 
-    const exitPt = clipRayToOuterBounds(curX, curY, tx, ty);
+    const exitPt = clipRayToOuterBounds(sx, sy, tx, ty);
     chain.push({
-      x1: curX,
-      y1: curY,
+      x1: sx,
+      y1: sy,
       x2: exitPt.x,
       y2: exitPt.y,
       isReturn: false,
     });
-    curX = exitPt.x;
-    curY = exitPt.y;
+    lastEndX = exitPt.x;
+    lastEndY = exitPt.y;
   }
 
-  // Final segment directs M.O back along a straight line into the screen center to rest
+  // Final segment directs M.O back from the last offscreen endpoint into the center area to rest
   chain.push({
-    x1: curX,
-    y1: curY,
+    x1: lastEndX,
+    y1: lastEndY,
     x2: MO_CENTER_X,
     y2: MO_CENTER_Y,
     isReturn: true,
@@ -1131,10 +1283,43 @@ function buildMoDashChain(startX, startY, phase, playerPos, seed) {
   return chain;
 }
 
+function buildMoKamikazeSpec(phase, statScale = 1.0, playerPos = null) {
+  // Never spawn behind the player (no left edge, and top/bottom spawns stay strictly ahead of player X)
+  const edge = Math.floor(Math.random() * 3); // 0: right, 1: top, 2: bottom
+  const pad = 42;
+  const minFrontX = Math.min(WORLD_WIDTH - 40, Math.max(120, Math.round((playerPos?.x ?? 120) + 70)));
+  let startX;
+  let startY;
+  if (edge === 0) {
+    startX = WORLD_WIDTH + pad;
+    startY = Math.round(45 + Math.random() * (WORLD_HEIGHT - 90));
+  } else if (edge === 1) {
+    startX = Math.round(minFrontX + Math.random() * Math.max(20, WORLD_WIDTH - 20 - minFrontX));
+    startY = -pad;
+  } else {
+    startX = Math.round(minFrontX + Math.random() * Math.max(20, WORLD_WIDTH - 20 - minFrontX));
+    startY = WORLD_HEIGHT + pad;
+  }
+  return {
+    type: 'mo_enemy2',
+    sprite: '/assets/sprites/MOenemy2png.png',
+    trajectory: 'kamikaze_homing',
+    attackPattern: 'none',
+    startX,
+    startY,
+    speed: Math.round((184 + phase * 9) * statScale),
+    hp: Math.round(20 * statScale),
+    radius: 18,
+    scoreValue: 260,
+    itemDrop: 'point',
+    customParams: { fuseTime: 1.75, triggerDist: 135, statScale },
+  };
+}
+
 /**
  * State machine update for Boss 3-3: M.O (Mecanical Ophanim).
  */
-function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerContactDamage) {
+function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerContactDamage, emitSpawnEnemy = null) {
   const state = boss._moState;
   if (!state) return;
 
@@ -1157,6 +1342,8 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
       state.mode = 'telegraph';
       state.timer = 0;
       state.segIndex = 0;
+      state.dashSpeedScale = 1.0;
+      state.summonTimer = 2.6;
       state.dashChain = buildMoDashChain(boss.x, boss.y, boss.phase, playerPos, state.lineIndex++);
       state.dashHitPlayers = new Set();
     }
@@ -1166,10 +1353,29 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
   boss.moIntroActive = false;
   boss.isInvulnerable = false;
 
+  // Continuous offscreen MOenemy2 summons:
+  // Normal: P1=0, P2-3=1, P4-5=2 | Difficult: P1=1, P2-3=2, P4-5=3 | No Mercy: P1=2, P2-3=3, P4-5=4
+  const statScale = boss._statScale || 1.0;
+  const phase = boss.phase || 1;
+  const diffBonus = statScale >= 1.2 ? 2 : statScale >= 1.08 ? 1 : 0;
+  const phaseStep = phase >= 4 ? 2 : phase >= 2 ? 1 : 0;
+  const summonCount = phaseStep + diffBonus;
+  if (typeof emitSpawnEnemy === 'function' && summonCount > 0) {
+    state.summonTimer = (state.summonTimer ?? 2.0) + dt;
+    const summonInterval = Math.max(3.8, 6.0 - phase * 0.45);
+    if (state.summonTimer >= summonInterval) {
+      state.summonTimer = 0;
+      const maxActive = Math.min(5 + diffBonus * 2, phase + diffBonus);
+      for (let k = 0; k < summonCount; k++) {
+        emitSpawnEnemy(buildMoKamikazeSpec(phase, statScale, playerPos), maxActive);
+      }
+    }
+  }
+
   // 2. Full-map line telegraph BEFORE dashing
   if (state.mode === 'telegraph') {
     state.timer += dt;
-    const duration = Math.max(0.88, 1.28 - boss.phase * 0.06);
+    const duration = Math.max(0.85, 1.25 - boss.phase * 0.05);
     if (!Array.isArray(state.dashChain) || state.dashChain.length === 0) {
       state.dashChain = buildMoDashChain(boss.x, boss.y, boss.phase, playerPos, state.lineIndex++);
     }
@@ -1195,6 +1401,7 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
     if (state.timer >= duration) {
       state.mode = 'dashing';
       state.segIndex = 0;
+      state.dashSpeedScale = 1.0;
       state.timer = 0;
       state.dashHitPlayers = new Set();
       state.sparkAccum = 0;
@@ -1202,21 +1409,24 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
     return;
   }
 
-  // 3. Continuous connected dashing along chain (offscreen -> offscreen -> ... -> center)
+  // 3. Continuous dashing along lines with escalating speed per line -> return to center -> rest
   if (state.mode === 'dashing') {
     const chain = state.dashChain || [];
     const seg = chain[state.segIndex];
     if (!seg) {
       state.mode = 'resting';
+      state.dashSpeedScale = 1.0;
       state.timer = 0;
       boss.moDashLines = [];
       return;
     }
 
     const segLen = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1) || 1;
+    const baseDashSpeed = (1350 + boss.phase * 120) * statScale;
+    const speedScale = state.dashSpeedScale || 1.0;
     const segDur = seg.isReturn
-      ? Math.max(0.36, Math.min(0.56, segLen / 1600))
-      : Math.max(0.32, Math.min(0.54, segLen / Math.max(1850, 2150 + boss.phase * 90)));
+      ? Math.max(0.32, Math.min(0.55, segLen / (1650 * statScale)))
+      : Math.max(0.16, Math.min(0.65, segLen / (baseDashSpeed * speedScale)));
 
     const prevX = boss.x;
     const prevY = boss.y;
@@ -1244,15 +1454,21 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
         isReturn: Boolean(s.isReturn),
       }));
 
-    // Emit wake sparks while dashing across the screen
+    // Emit wake sparks while dashing across the screen (density & pairs scale up with boss.phase)
     state.sparkAccum = (state.sparkAccum || 0) + dt;
-    if (!seg.isReturn && state.sparkAccum >= 0.08 && boss.x > -20 && boss.x < WORLD_WIDTH + 20 && boss.y > -20 && boss.y < WORLD_HEIGHT + 20) {
+    const wakeInterval = Math.max(0.032, 0.068 - (boss.phase || 1) * 0.007);
+    if (!seg.isReturn && state.sparkAccum >= wakeInterval && boss.x > -20 && boss.x < WORLD_WIDTH + 20 && boss.y > -20 && boss.y < WORLD_HEIGHT + 20) {
       state.sparkAccum = 0;
-      const perp = boss.angle + Math.PI / 2;
+      const pairsPerSide = Math.ceil((boss.phase || 1) / 2);
       for (const sgn of [-1, 1]) {
-        bulletSystem.spawn('boss', boss.x, boss.y, perp * sgn + (Math.random() - 0.5) * 0.25, 115, 4.5, 1.4, 'normal', 4, 0xfef08a, {
-          spriteType: 'MObullet3png',
-        });
+        const perp = boss.angle + sgn * (Math.PI / 2);
+        for (let sp = 0; sp < pairsPerSide; sp++) {
+          const jitter = (Math.random() - 0.5) * 0.42;
+          const spd = (110 + sp * 28 + Math.random() * 25) * statScale;
+          bulletSystem.spawn('boss', boss.x, boss.y, perp + jitter, spd, 4.5, 12.0, 'normal', Math.max(1, Math.round(4 * statScale)), 0xfef08a, {
+            spriteType: 'MObullet3png',
+          });
+        }
       }
     }
 
@@ -1263,7 +1479,7 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
         emitPlayerContactDamage(
           prevX + (boss.x - prevX) * st,
           prevY + (boss.y - prevY) * st,
-          34,
+          36,
           14,
           state.dashHitPlayers
         );
@@ -1273,8 +1489,36 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
     if (rawT >= 1) {
       boss.x = seg.x2;
       boss.y = seg.y2;
+      if (!seg.isReturn) {
+        // After traversing a line, erupt trailing MObullet3png sparks along the line scaled by phase
+        const lineNodes = 2 + Math.max(1, boss.phase || 1);
+        const sparksPerSide = Math.ceil((boss.phase || 1) / 2);
+        const lineAngle = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
+        for (let n = 1; n <= lineNodes; n++) {
+          const u = n / (lineNodes + 1);
+          const nx = seg.x1 + (seg.x2 - seg.x1) * u;
+          const ny = seg.y1 + (seg.y2 - seg.y1) * u;
+          if (nx < 10 || nx > WORLD_WIDTH - 10 || ny < 10 || ny > WORLD_HEIGHT - 10) continue;
+          for (const sgn of [-1, 1]) {
+            const perp = lineAngle + sgn * (Math.PI / 2);
+            for (let sp = 0; sp < sparksPerSide; sp++) {
+              const spread = (Math.random() - 0.5) * 0.48;
+              const spd = (100 + sp * 30 + Math.random() * 30) * statScale;
+              bulletSystem.spawn('boss', nx, ny, perp + spread, spd, 4.5, 12.0, 'normal', Math.max(1, Math.round(4 * statScale)), 0xfef08a, {
+                spriteType: 'MObullet3png',
+              });
+            }
+          }
+        }
+        state.dashSpeedScale = (state.dashSpeedScale || 1.0) + 0.28;
+      }
       state.segIndex += 1;
       if (state.segIndex < chain.length) {
+        const nextSeg = chain[state.segIndex];
+        // Reposition seamlessly while offscreen to the next line's start so prevX/prevY never sweep across the arena
+        boss.x = nextSeg.x1;
+        boss.y = nextSeg.y1;
+        boss.angle = Math.atan2(nextSeg.y2 - nextSeg.y1, nextSeg.x2 - nextSeg.x1);
         state.timer = 0;
         state.dashHitPlayers = new Set();
         state.sparkAccum = 0;
@@ -1282,6 +1526,7 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
         boss.x = MO_CENTER_X;
         boss.y = MO_CENTER_Y;
         state.mode = 'resting';
+        state.dashSpeedScale = 1.0; // Reset line speed on rest!
         state.timer = 0;
         state.restDuration = Math.max(2.3, 3.2 - boss.phase * 0.15);
         state.restShotAccum = 0;
@@ -1291,24 +1536,28 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
     return;
   }
 
-  // 4. Resting in arena center, facing player, before marking next dash chain
+  // 4. Resting around center with active figure-8 hover movement, shooting pure MObullet1png rings
   state.timer += dt;
+  state.dashSpeedScale = 1.0;
   boss.moDashState = 'resting';
   boss.moDashLines = [];
-  boss.x += (MO_CENTER_X - boss.x) * Math.min(1, dt * 4.5);
-  boss.y += (MO_CENTER_Y - boss.y) * Math.min(1, dt * 4.5);
+  const restHoverX = MO_CENTER_X + Math.cos(state.timer * 1.45) * 52;
+  const restHoverY = MO_CENTER_Y + Math.sin(state.timer * 2.2) * 62;
+  boss.x += (restHoverX - boss.x) * Math.min(1, dt * 4.5);
+  boss.y += (restHoverY - boss.y) * Math.min(1, dt * 4.5);
   if (playerPos) {
     boss.angle = Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x);
   }
 
   state.restShotAccum = (state.restShotAccum || 0) + dt;
-  if (boss.phase >= 2 && state.restShotAccum >= 1.15) {
+  const restShotInterval = Math.max(0.6, (1.05 - boss.phase * 0.06) / statScale);
+  if (state.restShotAccum >= restShotInterval) {
     state.restShotAccum = 0;
-    const count = 6 + boss.phase * 2;
-    const rot = boss._animTimer * 0.7;
+    const count = 8 + boss.phase * 2;
+    const rot = boss._animTimer * 0.75;
     for (let k = 0; k < count; k++) {
-      bulletSystem.spawn('boss', boss.x, boss.y, rot + (Math.PI * 2 * k) / count, 140, 4.5, 3.2, 'normal', 4, 0xef4444, {
-        spriteType: k % 2 === 0 ? 'MObullet1png' : 'MObullet3png',
+      bulletSystem.spawn('boss', boss.x, boss.y, rot + (Math.PI * 2 * k) / count, 175 * statScale, 5, 3.4, 'normal', Number((5 * statScale).toFixed(1)), 0xef4444, {
+        spriteType: 'MObullet1png',
       });
     }
   }
@@ -1317,6 +1566,7 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
     state.mode = 'telegraph';
     state.timer = 0;
     state.segIndex = 0;
+    state.dashSpeedScale = 1.0;
     state.dashChain = buildMoDashChain(boss.x, boss.y, boss.phase, playerPos, state.lineIndex++);
   }
 }
@@ -1324,6 +1574,8 @@ function updateMechanicalOphanim(boss, dt, playerPos, bulletSystem, emitPlayerCo
 module.exports = {
   ENABLE_NORMAL_OVERHAUL,
   MINIBOSS_DEFS,
+  getDifficultyStatScale,
+  getScaledMinibossDef,
   buildNormalWorldWaves,
   updateSpecialEnemyTrajectory,
   fireSpecialEnemyPattern,

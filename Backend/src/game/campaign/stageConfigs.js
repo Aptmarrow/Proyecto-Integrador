@@ -18,7 +18,7 @@
 const { buildLevelWaveScript } = require('./spaceThemesAndWaves');
 const {
   ENABLE_NORMAL_OVERHAUL,
-  MINIBOSS_DEFS,
+  getScaledMinibossDef,
   buildNormalWorldWaves,
   getNormalWorldBossConfig,
 } = require('./normalCampaignOverhaul');
@@ -75,6 +75,7 @@ function makeBossProfile(def) {
     moveArchetype: def.moveArchetype || 'orbital_lissajous',
     palette: def.palette || [0x00f2fe, 0xff2b5b, 0xffdd00],
     speedScale,
+    statScale: def.statScale || 1.0,
     phases,
   };
 }
@@ -87,27 +88,26 @@ function createSpaceStage(spec) {
   const bossWarningAt = Number((bossSpawnAt - 3.5).toFixed(1));
   const palette = spec.palette || [0x00f2fe, 0xff2b5b, 0xffdd00];
 
+  const useOverhaul = ENABLE_NORMAL_OVERHAUL && (spec.difficulty === 'normal' || spec.difficulty === 'difficult' || spec.difficulty === 'no_mercy');
   const baseWaves = buildLevelWaveScript(spec.waveArchetypes, bossSpawnAt, {
-    hpScale: spec.waveHpScale || 1.0,
-    speedScale: spec.waveSpeedScale || 1.0,
+    hpScale: useOverhaul ? 1.0 : (spec.waveHpScale || 1.0),
+    speedScale: useOverhaul ? 1.0 : (spec.waveSpeedScale || 1.0),
     palette,
     levelSeed: seed,
   });
 
-  const useNormalOverhaul = ENABLE_NORMAL_OVERHAUL && spec.difficulty === 'normal';
-  const hasBoss = useNormalOverhaul ? spec.stage === 3 : true;
-  const miniboss = useNormalOverhaul && !hasBoss
-    ? (MINIBOSS_DEFS[`${spec.world}-${spec.stage}`] || null)
+  const hasBoss = useOverhaul ? spec.stage === 3 : true;
+  const miniboss = useOverhaul && !hasBoss
+    ? getScaledMinibossDef(spec.world, spec.stage, spec.difficulty)
     : null;
-  const waves = useNormalOverhaul
+  const waves = useOverhaul
     ? buildNormalWorldWaves(spec.world, spec.stage, bossSpawnAt, baseWaves, {
-        hpScale: spec.waveHpScale || 1.0,
-        speedScale: spec.waveSpeedScale || 1.0,
+        difficulty: spec.difficulty,
         palette,
         levelSeed: seed,
       })
     : baseWaves;
-  const normalBossCfg = useNormalOverhaul && hasBoss ? getNormalWorldBossConfig(spec.world) : null;
+  const overhaulBossCfg = useOverhaul && hasBoss ? getNormalWorldBossConfig(spec.world, spec.difficulty) : null;
 
   return {
     difficulty: spec.difficulty,
@@ -136,16 +136,17 @@ function createSpaceStage(spec) {
     bossWarningAt,
     bossSpawnAt,
     bossProfile: makeBossProfile({
-      bossId: normalBossCfg?.bossId || 'first_boss',
-      bossName: normalBossCfg?.bossName || spec.boss.bossName,
-      fullBossName: normalBossCfg?.fullBossName || normalBossCfg?.bossName || spec.boss.bossName,
-      sprite: normalBossCfg?.sprite || '/assets/sprites/FirstBoss.png',
-      introDuration: normalBossCfg?.introDuration || 0,
-      baseHp: normalBossCfg?.baseHp || spec.boss.baseHp,
-      speedScale: normalBossCfg?.speedScale || spec.boss.speedScale,
-      moveArchetype: normalBossCfg?.moveArchetype || spec.boss.moveArchetype,
+      bossId: overhaulBossCfg?.bossId || 'first_boss',
+      bossName: overhaulBossCfg?.bossName || spec.boss.bossName,
+      fullBossName: overhaulBossCfg?.fullBossName || overhaulBossCfg?.bossName || spec.boss.bossName,
+      sprite: overhaulBossCfg?.sprite || '/assets/sprites/FirstBoss.png',
+      introDuration: overhaulBossCfg?.introDuration || 0,
+      baseHp: overhaulBossCfg?.baseHp || spec.boss.baseHp,
+      speedScale: overhaulBossCfg?.speedScale || spec.boss.speedScale,
+      statScale: overhaulBossCfg?.statScale || 1.0,
+      moveArchetype: overhaulBossCfg?.moveArchetype || spec.boss.moveArchetype,
       palette,
-      phases: normalBossCfg?.phases || spec.boss.phases,
+      phases: overhaulBossCfg?.phases || spec.boss.phases,
     }),
   };
 }

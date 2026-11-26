@@ -63,6 +63,7 @@ class GameRoom {
       this.campaign.markStageCleared();
       this.bulletSystem.clearByOwner('boss');
       this.laserSystem.lasers = [];
+      this.enemySystem.clear();
       this.itemSystem.spawnItemFountain(this.boss.x, this.boss.y, 20);
       if (this.campaign.hasNextStage()) {
         this._autoAdvanceTimer = AUTO_ADVANCE_DURATION;
@@ -332,19 +333,33 @@ class GameRoom {
     // 3. Update boss AI and patterns
     if (this.boss.isActive && !this.boss.isDefeated) {
       const playerPos = this._getAveragePlayerPos();
-      this.boss.update(deltaTime, playerPos, this.bulletSystem, this.laserSystem, (bx, by, radius, damage, hitSet) => {
-        const r2 = (radius + 10) * (radius + 10);
-        for (const [pid, player] of this.players) {
-          if (!player.active || player.hp <= 0 || hitSet.has(pid)) continue;
-          const pos = player.body.getPosition();
-          const dx = pos.x - bx;
-          const dy = pos.y - by;
-          if (dx * dx + dy * dy <= r2) {
-            hitSet.add(pid);
-            this.applyDamageToPlayer(player, damage);
+      this.boss.update(
+        deltaTime,
+        playerPos,
+        this.bulletSystem,
+        this.laserSystem,
+        (bx, by, radius, damage, hitSet) => {
+          const r2 = (radius + 10) * (radius + 10);
+          for (const [pid, player] of this.players) {
+            if (!player.active || player.hp <= 0 || hitSet.has(pid)) continue;
+            const pos = player.body.getPosition();
+            const dx = pos.x - bx;
+            const dy = pos.y - by;
+            if (dx * dx + dy * dy <= r2) {
+              hitSet.add(pid);
+              this.applyDamageToPlayer(player, damage);
+            }
           }
+        },
+        (spec, maxActive = 12) => {
+          const curKamikazes = this.enemySystem.active.filter((e) => e.type === spec.type && !e.isDead).length;
+          if (curKamikazes >= maxActive) return;
+          this.enemySystem.spawn({
+            ...spec,
+            hp: Math.round((spec.hp || 20) * this._getSquadHpScale()),
+          });
         }
-      });
+      );
     }
 
     // 4. Unlock boss beam if mega laser finished

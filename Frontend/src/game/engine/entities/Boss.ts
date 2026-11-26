@@ -40,6 +40,7 @@ export class Boss {
   // Extensiones de Campaña Normal (Boss Dinámico, Minijefe HUD y M.O)
   public bossId: string = 'first_boss';
   public currentSpriteUrl: string = '/assets/sprites/FirstBoss.png';
+  public difficultyTint: number = 0xffffff;
   public angle: number = Math.PI;
   private displayAngle: number = Math.PI;
   public renderHudOnly: boolean = false;
@@ -104,6 +105,13 @@ export class Boss {
     this.container.visible = false;
   }
 
+  public setDifficultyTint(tint: number): void {
+    this.difficultyTint = tint;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.tint = tint;
+    }
+  }
+
   public setSpriteUrl(spriteUrl: string): void {
     if (!spriteUrl || spriteUrl === this.currentSpriteUrl) return;
     this.currentSpriteUrl = spriteUrl;
@@ -111,6 +119,7 @@ export class Boss {
     if (this.sprite instanceof PIXI.Sprite) {
       this.sprite.texture = tex;
       this.sprite.scale.set(0.42);
+      this.sprite.tint = this.difficultyTint;
     } else {
       if (this.sprite && this.sprite.parent) {
         this.sprite.parent.removeChild(this.sprite);
@@ -118,6 +127,7 @@ export class Boss {
       const next = new PIXI.Sprite(tex);
       next.anchor.set(0.5);
       next.scale.set(0.42);
+      next.tint = this.difficultyTint;
       next.position.set(0, 0);
       this.sprite = next;
       this.container.addChild(next);
@@ -129,6 +139,7 @@ export class Boss {
       const sprite = new PIXI.Sprite(tex);
       sprite.anchor.set(0.5);
       sprite.scale.set(0.42);
+      sprite.tint = this.difficultyTint;
       sprite.position.set(0, 0);
       this.sprite = sprite;
       this.container.addChild(sprite);
@@ -230,10 +241,15 @@ export class Boss {
     if (this.isRefilling) {
       const progress = this.displayHpPercent / 100;
       this.renderRefillAura(animTimer, progress);
+      if (this.sprite instanceof PIXI.Sprite) this.sprite.tint = this.difficultyTint;
     } else if (this.bossId === 'mo' && this.moIntroActive) {
-      this.renderRefillAura(animTimer, this.moIntroProgress);
+      this.renderMoIntroAura(animTimer, this.moIntroProgress);
+      if (this.sprite instanceof PIXI.Sprite) {
+        this.sprite.tint = this.moIntroProgress >= 0.7 && this.moIntroProgress <= 0.84 ? 0xfef08a : this.difficultyTint;
+      }
     } else {
       this.auraGraphics.clear();
+      if (this.sprite instanceof PIXI.Sprite) this.sprite.tint = this.difficultyTint;
     }
 
     if (this.bossId === 'mo' && this.moDashLines.length > 0) {
@@ -617,6 +633,83 @@ export class Boss {
     this.isInvulnerable = false;
     this.isRefilling = false;
     this.takeDamage(this.hp + 999);
+  }
+
+  private renderMoIntroAura(animTimer: number, progress: number): void {
+    const g = this.auraGraphics;
+    g.clear();
+    const p = Math.max(0, Math.min(1, progress));
+    const fade = p < 0.12 ? p / 0.12 : p > 0.9 ? Math.max(0, (1 - p) / 0.1) : 1;
+
+    // 1. Deep Seraphic Crimson-Gold Core Glow
+    const baseRad = 68 + p * 66 + Math.sin(animTimer * 18) * 7;
+    g.beginFill(0x991b1b, 0.28 * fade);
+    g.drawCircle(0, 0, baseRad * 1.25);
+    g.endFill();
+    g.beginFill(0xfde047, 0.22 * fade);
+    g.drawCircle(0, 0, baseRad * 0.72);
+    g.endFill();
+
+    // 2. Six radiating Seraph Light Rays
+    const raySpin = animTimer * 1.65;
+    const lockFlare = p >= 0.7 ? Math.sin(Math.min(1, (p - 0.7) / 0.3) * Math.PI) : 0;
+    const rayLen = baseRad * (1.55 + lockFlare * 1.2);
+    for (let k = 0; k < 6; k++) {
+      const a = raySpin + (Math.PI * 2 * k) / 6;
+      const spread = 0.12 + lockFlare * 0.08;
+      g.beginFill(k % 2 === 0 ? 0xfde047 : 0xff2b5b, (0.16 + lockFlare * 0.28) * fade);
+      g.moveTo(0, 0);
+      g.lineTo(Math.cos(a - spread) * rayLen, Math.sin(a - spread) * rayLen);
+      g.lineTo(Math.cos(a + spread) * rayLen, Math.sin(a + spread) * rayLen);
+      g.closePath();
+      g.endFill();
+    }
+
+    // 3. Outer rotating Ophanim Wheel & 8 Sacred Eye Sigils
+    const wheelR = 88 + p * 44;
+    g.lineStyle(2.8, 0xff2b5b, 0.85 * fade);
+    g.drawCircle(0, 0, wheelR);
+    g.lineStyle(1.4, 0xfde047, 0.75 * fade);
+    g.drawCircle(0, 0, wheelR * 0.86);
+    g.lineStyle(0);
+
+    for (let e = 0; e < 8; e++) {
+      const ea = animTimer * 2.1 + (Math.PI * 2 * e) / 8;
+      const ex = Math.cos(ea) * wheelR;
+      const ey = Math.sin(ea) * wheelR;
+      g.beginFill(0xfef08a, 0.9 * fade);
+      g.drawCircle(ex, ey, 4.5 + Math.sin(animTimer * 12 + e) * 1.5);
+      g.endFill();
+    }
+
+    // 4. Counter-rotating Inner 6-Point Star Polygon
+    const starR = wheelR * 0.72;
+    const cRot = -animTimer * 2.8;
+    g.lineStyle(2, 0xfacc15, 0.82 * fade);
+    for (let tri = 0; tri < 2; tri++) {
+      const offset = (tri * Math.PI) / 3;
+      for (let v = 0; v < 3; v++) {
+        const a1 = cRot + offset + (Math.PI * 2 * v) / 3;
+        const a2 = cRot + offset + (Math.PI * 2 * ((v + 1) % 3)) / 3;
+        g.moveTo(Math.cos(a1) * starR, Math.sin(a1) * starR);
+        g.lineTo(Math.cos(a2) * starR, Math.sin(a2) * starR);
+      }
+    }
+
+    // 5. Imploding Compression Ring (0.42..0.70) -> Exploding Lock Shockwave (0.70..0.98)
+    if (p >= 0.42 && p < 0.7) {
+      const imp = (p - 0.42) / 0.28;
+      g.lineStyle(3, 0xffffff, 0.85 * imp);
+      g.drawCircle(0, 0, (1 - imp) * 210 + 36);
+    } else if (p >= 0.7) {
+      const exp = (p - 0.7) / 0.28;
+      const shockFade = Math.max(0, 1 - exp);
+      g.lineStyle(Math.max(1.5, 6 * shockFade), 0xfef08a, 0.95 * shockFade);
+      g.drawCircle(0, 0, 42 + exp * 220);
+      g.lineStyle(Math.max(1, 3.5 * shockFade), 0xff2b5b, 0.85 * shockFade);
+      g.drawCircle(0, 0, 24 + exp * 165);
+    }
+    g.lineStyle(0);
   }
 
   private renderRefillAura(animTimer: number, progress: number): void {

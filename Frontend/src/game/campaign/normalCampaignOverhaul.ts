@@ -5,6 +5,12 @@ export const ENABLE_NORMAL_OVERHAUL = true;
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
 
+export function getDifficultyStatScale(difficulty?: string): number {
+  if (difficulty === 'difficult') return 1.1;
+  if (difficulty === 'no_mercy') return 1.25;
+  return 1.0;
+}
+
 export interface NormalMinibossDef extends WaveEnemySpec {
   isMiniboss: true;
   sprite: string;
@@ -29,7 +35,7 @@ export const MINIBOSS_DEFS: Record<string, NormalMinibossDef> = {
     shootInterval: 1.05,
     shootDelay: 0.4,
     bulletColor: 0x3b82f6,
-    customParams: { hoverX: 590, ampY: 115, freqY: 1.1 },
+    customParams: { hoverX: 590, ampY: 115, freqY: 1.1, moveStyle: 'vertical_sine' },
   },
   '1-2': {
     type: 'fb_mini1',
@@ -48,7 +54,7 @@ export const MINIBOSS_DEFS: Record<string, NormalMinibossDef> = {
     shootInterval: 0.92,
     shootDelay: 0.35,
     bulletColor: 0xfacc15,
-    customParams: { hoverX: 585, ampY: 135, freqY: 1.45 },
+    customParams: { hoverX: 585, ampY: 135, freqY: 1.35, moveStyle: 'figure8' },
   },
   '2-1': {
     type: 'gfg_mini1',
@@ -67,7 +73,7 @@ export const MINIBOSS_DEFS: Record<string, NormalMinibossDef> = {
     shootInterval: 1.05,
     shootDelay: 0.4,
     bulletColor: 0xff3b30,
-    customParams: { hoverX: 595, ampY: 140, freqY: 1.35 },
+    customParams: { hoverX: 595, ampY: 140, freqY: 1.25, moveStyle: 'diamond_drift' },
   },
   '2-2': {
     type: 'gfg_mini2',
@@ -86,7 +92,7 @@ export const MINIBOSS_DEFS: Record<string, NormalMinibossDef> = {
     shootInterval: 0.1,
     shootDelay: 0.4,
     bulletColor: 0xef4444,
-    customParams: { hoverX: 590, ampY: 150, freqY: 1.5 },
+    customParams: { hoverX: 605, ampY: 150, freqY: 1.4, moveStyle: 'arc_sway' },
   },
   '3-1': {
     type: 'mo_mini1',
@@ -105,7 +111,7 @@ export const MINIBOSS_DEFS: Record<string, NormalMinibossDef> = {
     shootInterval: 1.45,
     shootDelay: 0.5,
     bulletColor: 0x9ca3af,
-    customParams: { hoverX: 590, ampY: 110, freqY: 1.05 },
+    customParams: { hoverX: 590, ampY: 115, freqY: 1.05, moveStyle: 'pendulum_guard' },
   },
   '3-2': {
     type: 'mo_mini2',
@@ -124,9 +130,22 @@ export const MINIBOSS_DEFS: Record<string, NormalMinibossDef> = {
     shootInterval: 1.25,
     shootDelay: 0.45,
     bulletColor: 0x818cf8,
-    customParams: { hoverX: 585, ampY: 135, freqY: 1.25 },
+    customParams: { hoverX: 585, ampY: 130, freqY: 1.2, moveStyle: 'orbital_patrol' },
   },
 };
+
+export function getScaledMinibossDef(world: number, stage: number, difficulty: string = 'normal'): NormalMinibossDef | null {
+  const base = MINIBOSS_DEFS[`${world}-${stage}`];
+  if (!base) return null;
+  const scale = getDifficultyStatScale(difficulty);
+  return {
+    ...base,
+    hp: Math.round(base.hp * scale),
+    speed: Math.round(base.speed * scale),
+    shootInterval: Number(Math.max(0.045, base.shootInterval / scale).toFixed(3)),
+    customParams: { ...(base.customParams || {}), statScale: scale },
+  };
+}
 
 function makeWaveEnemySpec(overrides: Partial<WaveEnemySpec> & { type: string }): WaveEnemySpec {
   return {
@@ -150,6 +169,7 @@ function makeWaveEnemySpec(overrides: Partial<WaveEnemySpec> & { type: string })
 function buildWorld1NormalWave(
   idx: number,
   variant: number,
+  stage: number,
   palette: [number, number, number],
   baseWave?: SpaceWaveEvent
 ): WaveEnemySpec[] {
@@ -182,49 +202,60 @@ function buildWorld1NormalWave(
   if (mode === 0) {
     const baseY = variant % 2 === 0 ? 180 : 300;
     for (let i = 0; i < 5; i++) {
+      const isTop = i % 2 === 0;
+      const trajectory = stage === 2 ? 'swoop_arc' : stage === 3 ? (isTop ? 'cross_top' : 'cross_bottom') : 'v_formation';
+      const startY = stage === 3 ? (isTop ? 52 : WORLD_HEIGHT - 52) : Math.max(70, Math.min(530, baseY + (i - 2) * 58));
       out.push(
         makeWaveEnemySpec({
           type: 'first_enemy',
-          trajectory: 'v_formation',
+          trajectory,
           attackPattern: 'w1_first_normal',
           startX: WORLD_WIDTH + 45 + i * 48,
-          startY: Math.max(70, Math.min(530, baseY + (i - 2) * 58)),
-          speed: 136,
+          startY,
+          speed: stage === 3 ? 148 : 136,
           hp: 16,
           itemDrop: i === 2 ? 'power' : 'point',
           shootInterval: 1.45,
           shootDelay: 0.3 + i * 0.16,
           bulletColor: palette[0],
-          customParams: { driftY: (variant % 2 === 0 ? 1 : -1) * 18 },
+          customParams:
+            stage === 2
+              ? { apexX: 525 - i * 18, targetY: Math.max(95, Math.min(505, 140 + i * 78)) }
+              : { driftY: (variant % 2 === 0 ? 1 : -1) * 18 },
         })
       );
     }
   } else if (mode === 1) {
+    const trajectory = stage === 2 ? 'pendulum' : stage === 3 ? 'spiral' : 'sine';
     for (let i = 0; i < 4; i++) {
       const isTop = i % 2 === 0;
       out.push(
         makeWaveEnemySpec({
           type: 'second_enemy',
-          trajectory: 'sine',
+          trajectory,
           attackPattern: 'w1_second_homing',
           startX: WORLD_WIDTH + 50 + i * 62,
-          startY: isTop ? 155 : 445,
+          startY: stage === 2 ? 300 : isTop ? 155 : 445,
           speed: 126,
           hp: 20,
           itemDrop: i % 2 === 0 ? 'power' : 'point',
           shootInterval: 1.7,
           shootDelay: 0.35 + i * 0.22,
           bulletColor: 0xfacc15,
-          customParams: { amp: 60, freq: 2.6, phase: i * 0.5 },
+          customParams:
+            stage === 2
+              ? { freq: 1.9, ampY: 155, phase: i * 0.85 }
+              : { amp: 60, freq: 2.6, phase: i * 0.5 },
         })
       );
     }
   } else {
-    for (const sy of [190, 410]) {
+    [190, 410].forEach((sy, ti) => {
+      const useOrbit = stage === 2;
       out.push(
         makeWaveEnemySpec({
           type: 'third_enemy',
-          trajectory: 'hover_retreat',
+          trajectory: useOrbit ? 'orbit_anchor' : 'hover_retreat',
           attackPattern: 'w1_third_slow',
           startX: WORLD_WIDTH + 55,
           startY: sy,
@@ -236,24 +267,27 @@ function buildWorld1NormalWave(
           shootInterval: 1.75,
           shootDelay: 0.45,
           bulletColor: 0x3b82f6,
-          customParams: { hoverX: 585, hoverTime: 5.0 },
+          customParams: useOrbit
+            ? { anchorX: 560, anchorY: sy, orbitR: 62, phase: ti * Math.PI }
+            : { hoverX: stage === 3 ? 545 + ti * 50 : 585, hoverTime: 5.0 },
         })
       );
-    }
+    });
     for (let k = 0; k < 2; k++) {
+      const escortTraj = stage === 2 ? 'perimeter_skimmer' : stage === 3 ? 'zigzag' : 'double_helix';
       out.push(
         makeWaveEnemySpec({
           type: 'first_enemy',
-          trajectory: 'double_helix',
+          trajectory: escortTraj,
           attackPattern: 'w1_first_normal',
           startX: WORLD_WIDTH + 110 + k * 56,
-          startY: 300,
+          startY: stage === 2 ? (k === 0 ? 78 : 522) : stage === 3 ? (k === 0 ? 150 : 450) : 300,
           speed: 132,
           hp: 16,
           itemDrop: 'point',
           shootInterval: 1.55,
           shootDelay: 0.4 + k * 0.25,
-          customParams: { amp: 70, freq: 3.0, phase: k * Math.PI },
+          customParams: stage === 2 ? { bobAmp: 16 } : { amp: 70, freq: 3.0, phase: k * Math.PI },
         })
       );
     }
@@ -264,6 +298,7 @@ function buildWorld1NormalWave(
 function buildWorld2NormalWave(
   idx: number,
   variant: number,
+  stage: number,
   baseWave?: SpaceWaveEvent
 ): WaveEnemySpec[] {
   const mode = idx % 4;
@@ -277,37 +312,42 @@ function buildWorld2NormalWave(
         type,
         attackPattern,
         hp: Math.max(18, Math.round((e.hp || 20) * 1.1)),
-        shootInterval: m === 1 ? 0.055 : m === 0 ? 1.25 : 1.55,
+        shootInterval: m === 1 ? 0.055 : m === 0 ? 0.56 : 1.55,
       };
     });
   }
 
   const out: WaveEnemySpec[] = [];
   if (mode === 0) {
+    const trajectory = stage === 2 ? 'zigzag' : stage === 3 ? 'double_helix' : 'perimeter_skimmer';
     for (let i = 0; i < 5; i++) {
       out.push(
         makeWaveEnemySpec({
           type: 'gfg_enemy1',
-          trajectory: 'sine',
+          trajectory,
           attackPattern: 'w2_gfg1_fast',
           startX: WORLD_WIDTH + 45 + i * 54,
-          startY: 110 + i * 95,
+          startY: stage === 3 ? (i % 2 === 0 ? 200 : 400) : 110 + i * 95,
           speed: 142,
           hp: 22,
           itemDrop: i % 2 === 0 ? 'power' : 'point',
-          shootInterval: 1.18,
+          shootInterval: 0.56,
           shootDelay: 0.25 + i * 0.14,
           bulletColor: 0xef4444,
-          customParams: { amp: 32, freq: 2.5, phase: i * 0.6 },
+          customParams:
+            stage === 3
+              ? { amp: 65, freq: 2.9, phase: i * 0.9 }
+              : { bobAmp: 18, amp: 32, freq: 2.5, phase: i * 0.6 },
         })
       );
     }
   } else if (mode === 1) {
     [115, 485].forEach((sy, k) => {
+      const sniperTraj = stage === 2 ? 'orbit_anchor' : stage === 3 ? 'swoop_arc' : 'hover_retreat';
       out.push(
         makeWaveEnemySpec({
           type: 'gfg_enemy2',
-          trajectory: 'hover_retreat',
+          trajectory: sniperTraj,
           attackPattern: 'w2_gfg2_sniper022',
           startX: WORLD_WIDTH + 50 + k * 45,
           startY: sy,
@@ -319,36 +359,44 @@ function buildWorld2NormalWave(
           shootInterval: 0.055,
           shootDelay: 0.5 + k * 0.3,
           bulletColor: 0xff2b5b,
-          customParams: { hoverX: 615, hoverTime: 5.5, burstLeft: 0, burstCooldown: 0.4 + k * 0.45 },
+          customParams:
+            stage === 2
+              ? { anchorX: 600, anchorY: sy < 300 ? 155 : 445, orbitR: 48, phase: k * Math.PI, burstLeft: 0, burstCooldown: 0.4 + k * 0.45 }
+              : stage === 3
+                ? { apexX: 565, targetY: sy < 300 ? 140 : 460, burstLeft: 0, burstCooldown: 0.4 + k * 0.45 }
+                : { hoverX: 615, hoverTime: 5.5, burstLeft: 0, burstCooldown: 0.4 + k * 0.45 },
         })
       );
     });
     for (let j = 0; j < 3; j++) {
+      const escortTraj = stage === 2 ? 'sine' : stage === 3 ? (j % 2 === 0 ? 'cross_top' : 'cross_bottom') : 'v_formation';
       out.push(
         makeWaveEnemySpec({
           type: 'gfg_enemy1',
-          trajectory: 'v_formation',
+          trajectory: escortTraj,
           attackPattern: 'w2_gfg1_fast',
           startX: WORLD_WIDTH + 90 + j * 45,
-          startY: 240 + j * 60,
+          startY: stage === 3 ? (j % 2 === 0 ? 50 : WORLD_HEIGHT - 50) : 240 + j * 60,
           speed: 145,
           hp: 20,
           itemDrop: 'point',
-          shootInterval: 1.25,
+          shootInterval: 0.62,
           shootDelay: 0.35 + j * 0.2,
+          customParams: { amp: 48, freq: 2.6, phase: j * 0.7 },
         })
       );
     }
   } else {
     const ys = variant % 2 === 0 ? [150, 300, 450] : [180, 300, 420];
+    const traj = stage === 2 ? 'pendulum' : stage === 3 ? 'orbit_anchor' : 'swoop_arc';
     ys.forEach((sy, idxY) => {
       out.push(
         makeWaveEnemySpec({
           type: 'gfg_enemy3',
-          trajectory: 'hover_retreat',
+          trajectory: traj,
           attackPattern: 'w2_gfg3_linear_accel',
           startX: WORLD_WIDTH + 48 + idxY * 36,
-          startY: sy,
+          startY: stage === 2 ? 300 : sy,
           speed: 120,
           hp: 32,
           radius: 20,
@@ -356,7 +404,12 @@ function buildWorld2NormalWave(
           shootInterval: 1.4,
           shootDelay: 0.3 + idxY * 0.2,
           bulletColor: 0xf97316,
-          customParams: { hoverX: 590 - idxY * 22, hoverTime: 4.8 },
+          customParams:
+            stage === 2
+              ? { freq: 1.85, ampY: 145, phase: idxY * 1.1 }
+              : stage === 3
+                ? { anchorX: 560, anchorY: sy, orbitR: 54, phase: idxY * 2.1 }
+                : { apexX: 540 - idxY * 24, targetY: sy },
         })
       );
     });
@@ -367,6 +420,7 @@ function buildWorld2NormalWave(
 function buildWorld3NormalWave(
   idx: number,
   variant: number,
+  stage: number,
   baseWave?: SpaceWaveEvent
 ): WaveEnemySpec[] {
   const mode = idx % 4;
@@ -385,21 +439,28 @@ function buildWorld3NormalWave(
 
   const out: WaveEnemySpec[] = [];
   if (mode === 0) {
+    const traj = stage === 2 ? 'swoop_arc' : stage === 3 ? 'perimeter_skimmer' : 'hover_retreat';
     for (let i = 0; i < 4; i++) {
+      const sy = stage === 3 ? (i % 2 === 0 ? 85 + i * 22 : 515 - i * 22) : 105 + i * 125;
       out.push(
         makeWaveEnemySpec({
           type: 'mo_enemy1',
-          trajectory: 'hover_retreat',
+          trajectory: traj,
           attackPattern: 'w3_mo1_laser',
           startX: WORLD_WIDTH + 45 + i * 38,
-          startY: 105 + i * 125,
+          startY: sy,
           speed: 138,
           hp: 26,
           itemDrop: i % 2 === 0 ? 'power' : 'point',
           shootInterval: 0.08,
           shootDelay: 0.4 + i * 0.2,
           bulletColor: 0xff2b5b,
-          customParams: { hoverX: 605 - (i % 2) * 35, hoverTime: 4.5, laserBurstLeft: 0, laserCooldown: 0.4 + i * 0.25 },
+          customParams:
+            stage === 2
+              ? { apexX: 550 - (i % 2) * 35, targetY: sy, laserBurstLeft: 0, laserCooldown: 0.4 + i * 0.25 }
+              : stage === 3
+                ? { bobAmp: 20, laserBurstLeft: 0, laserCooldown: 0.4 + i * 0.25 }
+                : { hoverX: 605 - (i % 2) * 35, hoverTime: 4.5, laserBurstLeft: 0, laserCooldown: 0.4 + i * 0.25 },
         })
       );
     }
@@ -421,32 +482,35 @@ function buildWorld3NormalWave(
         })
       );
     }
-    for (const sy of [170, 430]) {
+    const backupTraj = stage === 2 ? 'zigzag' : stage === 3 ? 'double_helix' : 'sine';
+    [170, 430].forEach((sy, k) => {
       out.push(
         makeWaveEnemySpec({
           type: 'mo_enemy1',
-          trajectory: 'sine',
+          trajectory: backupTraj,
           attackPattern: 'w3_mo1_laser',
           startX: WORLD_WIDTH + 120,
-          startY: sy,
+          startY: stage === 3 ? 300 : sy,
           speed: 130,
           hp: 24,
           itemDrop: 'point',
           shootInterval: 0.08,
           shootDelay: 0.5,
-          customParams: { amp: 45, freq: 2.2, laserBurstLeft: 0, laserCooldown: 0.7 },
+          customParams: { amp: 65, freq: 2.6, phase: k * Math.PI, laserBurstLeft: 0, laserCooldown: 0.7 },
         })
       );
-    }
+    });
   } else {
+    const sparkTraj = stage === 2 ? 'pendulum' : stage === 3 ? 'spiral' : 'orbit_anchor';
     for (let i = 0; i < 3; i++) {
+      const sy = 140 + i * 160;
       out.push(
         makeWaveEnemySpec({
           type: 'mo_enemy3',
-          trajectory: 'hover_retreat',
+          trajectory: sparkTraj,
           attackPattern: 'w3_mo3_sparks',
           startX: WORLD_WIDTH + 50 + i * 48,
-          startY: 140 + i * 160,
+          startY: stage === 2 ? 300 : sy,
           speed: 128,
           hp: 30,
           radius: 20,
@@ -454,7 +518,12 @@ function buildWorld3NormalWave(
           shootInterval: 0.22,
           shootDelay: 0.35 + i * 0.15,
           bulletColor: 0xfef08a,
-          customParams: { hoverX: 515 + (variant % 2) * 35, hoverTime: 5.2 },
+          customParams:
+            stage === 2
+              ? { freq: 1.9, ampY: 150, phase: i * 1.1 }
+              : stage === 3
+                ? { phase: i * 1.2 }
+                : { anchorX: 520 + (variant % 2) * 30, anchorY: sy, orbitR: 52, phase: i * 2.1 },
         })
       );
     }
@@ -480,13 +549,14 @@ function buildWorld3NormalWave(
 
 export function buildNormalWorldWaves(
   world: number,
-  _stage: number,
+  stage: number,
   bossSpawnAt: number,
   baseWaves: SpaceWaveEvent[],
-  meta: { palette?: [number, number, number]; levelSeed?: number } = {}
+  meta: { palette?: [number, number, number]; levelSeed?: number; difficulty?: string } = {}
 ): SpaceWaveEvent[] {
   const palette = meta.palette || [0x00f2fe, 0xff2b5b, 0xffdd00];
   const seed = meta.levelSeed || 1;
+  const statScale = getDifficultyStatScale(meta.difficulty);
   const firstWaveAt = 0.6;
   const lastWaveAt = Math.max(24, bossSpawnAt - 9.5);
   const count = Array.isArray(baseWaves) && baseWaves.length > 0 ? baseWaves.length : 10;
@@ -498,12 +568,20 @@ export function buildNormalWorldWaves(
     const v = i + seed;
     const baseWave = baseWaves?.[i];
 
-    const enemies =
+    const rawEnemies =
       world === 1
-        ? buildWorld1NormalWave(i, v, palette, baseWave)
+        ? buildWorld1NormalWave(i, v, stage, palette, baseWave)
         : world === 2
-          ? buildWorld2NormalWave(i, v, baseWave)
-          : buildWorld3NormalWave(i, v, baseWave);
+          ? buildWorld2NormalWave(i, v, stage, baseWave)
+          : buildWorld3NormalWave(i, v, stage, baseWave);
+
+    const enemies = rawEnemies.map((e) => ({
+      ...e,
+      hp: Math.max(8, Math.round((e.hp || 18) * statScale)),
+      speed: Math.round((e.speed || 130) * statScale),
+      shootInterval: e.shootInterval ? Number(Math.max(0.045, e.shootInterval / statScale).toFixed(3)) : e.shootInterval,
+      customParams: { ...(e.customParams || {}), statScale },
+    }));
 
     waves.push({
       key: `w_${i + 1}`,
@@ -515,12 +593,18 @@ export function buildNormalWorldWaves(
   return waves;
 }
 
-export function getNormalWorldBossProfile(world: number, palette: [number, number, number]): SpaceBossProfile & {
+export function getNormalWorldBossProfile(
+  world: number,
+  palette: [number, number, number],
+  difficulty: string = 'normal'
+): SpaceBossProfile & {
   bossId: string;
   fullBossName: string;
   introDuration: number;
+  statScale: number;
 } {
   const hpMults = [1.0, 1.22, 1.15, 1.35, 1.55];
+  const statScale = getDifficultyStatScale(difficulty);
   if (world === 1) {
     const baseHp = 118;
     const raw = [
@@ -538,12 +622,14 @@ export function getNormalWorldBossProfile(world: number, palette: [number, numbe
       introDuration: 0,
       moveArchetype: 'orbital_lissajous',
       palette,
-      speedScale: 0.94,
+      speedScale: Number((0.94 * statScale).toFixed(3)),
+      statScale,
       phases: raw.map((p, idx): BossPhaseProfile => ({
         phase: idx + 1,
         isSpellCard: idx === 1 || idx === 3 || idx === 4,
-        maxHp: Math.round(baseHp * hpMults[idx]),
+        maxHp: Math.round(baseHp * hpMults[idx] * statScale),
         ...p,
+        shootInterval: Number(Math.max(0.045, p.shootInterval / statScale).toFixed(3)),
       })),
     };
   }
@@ -565,12 +651,14 @@ export function getNormalWorldBossProfile(world: number, palette: [number, numbe
       introDuration: 0,
       moveArchetype: 'diamond_tactical',
       palette,
-      speedScale: 1.0,
+      speedScale: Number((1.0 * statScale).toFixed(3)),
+      statScale,
       phases: raw.map((p, idx): BossPhaseProfile => ({
         phase: idx + 1,
         isSpellCard: idx === 1 || idx === 3 || idx === 4,
-        maxHp: Math.round(baseHp * hpMults[idx]),
+        maxHp: Math.round(baseHp * hpMults[idx] * statScale),
         ...p,
+        shootInterval: Number(Math.max(0.045, p.shootInterval / statScale).toFixed(3)),
       })),
     };
   }
@@ -591,12 +679,14 @@ export function getNormalWorldBossProfile(world: number, palette: [number, numbe
     introDuration: 3.8,
     moveArchetype: 'mo_ophanim_dash',
     palette,
-    speedScale: 1.06,
+    speedScale: Number((1.06 * statScale).toFixed(3)),
+    statScale,
     phases: raw.map((p, idx): BossPhaseProfile => ({
       phase: idx + 1,
       isSpellCard: idx === 1 || idx === 3 || idx === 4,
-      maxHp: Math.round(baseHp * hpMults[idx]),
+      maxHp: Math.round(baseHp * hpMults[idx] * statScale),
       ...p,
+      shootInterval: Number(Math.max(0.045, p.shootInterval / statScale).toFixed(3)),
     })),
   };
 }
@@ -614,10 +704,30 @@ export interface BulletSpawnOpts {
 
 export function fireNormalBossPattern(
   patternId: string,
-  ctx: { bossX: number; bossY: number; playerX: number; playerY: number; animTimer: number; shotIndex: number; phase: number },
-  emitBullet: (x: number, y: number, angle: number, speed: number, radius: number, color: number, damage: number, opts?: BulletSpawnOpts) => void
+  ctx: { bossX: number; bossY: number; playerX: number; playerY: number; animTimer: number; shotIndex: number; phase: number; statScale?: number },
+  rawEmitBullet: (x: number, y: number, angle: number, speed: number, radius: number, color: number, damage: number, opts?: BulletSpawnOpts) => void
 ): boolean {
   const { bossX, bossY, playerX, playerY, animTimer, shotIndex } = ctx;
+  const statScale = Number(ctx.statScale) > 0 ? Number(ctx.statScale) : 1.0;
+  const emitBullet = (
+    x: number,
+    y: number,
+    angle: number,
+    speed: number,
+    radius: number,
+    color: number,
+    damage: number,
+    opts?: BulletSpawnOpts
+  ) => {
+    const scaledOpts = opts
+      ? {
+          ...opts,
+          accel: opts.accel ? opts.accel * statScale : opts.accel,
+          maxSpeed: opts.maxSpeed ? opts.maxSpeed * statScale : opts.maxSpeed,
+        }
+      : undefined;
+    rawEmitBullet(x, y, angle, speed * statScale, radius, color, Math.max(1, Math.round(damage * statScale)), scaledOpts);
+  };
   const aim = Math.atan2(playerY - bossY, playerX - bossX);
 
   switch (patternId) {
