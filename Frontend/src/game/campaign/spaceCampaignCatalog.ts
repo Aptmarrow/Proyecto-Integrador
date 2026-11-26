@@ -4,6 +4,16 @@
  * so CharacterSelection, Local Simulation Worker, HUD, and BackgroundRenderer stay 100% synchronized.
  */
 
+import {
+  ENABLE_NORMAL_OVERHAUL,
+  MINIBOSS_DEFS,
+  buildNormalWorldWaves,
+  fireNormalBossPattern,
+  getNormalWorldBossProfile,
+  type BulletSpawnOpts,
+  type NormalMinibossDef,
+} from './normalCampaignOverhaul';
+
 export interface SpaceThemeSpec {
   id: string;
   skyTop: number;
@@ -30,8 +40,11 @@ export interface BossPhaseProfile {
 }
 
 export interface SpaceBossProfile {
+  bossId?: string;
   bossName: string;
+  fullBossName?: string;
   sprite: string;
+  introDuration?: number;
   moveArchetype: string;
   palette: [number, number, number];
   speedScale: number;
@@ -69,6 +82,8 @@ export interface SpaceStageConfig {
   worldName: string;
   stageTitle: string;
   palette: [number, number, number];
+  hasBoss?: boolean;
+  miniboss?: NormalMinibossDef | null;
   spaceTheme: SpaceThemeSpec;
   waves: SpaceWaveEvent[];
   bossWarningAt: number;
@@ -766,8 +781,11 @@ export function fireBossPattern(
     speedScale: number;
     phase: number;
   },
-  emitBullet: (x: number, y: number, angle: number, speed: number, radius: number, color: number, damage: number) => void
+  emitBullet: (x: number, y: number, angle: number, speed: number, radius: number, color: number, damage: number, opts?: BulletSpawnOpts) => void
 ): void {
+  if (fireNormalBossPattern(patternId, ctx, emitBullet)) {
+    return;
+  }
   const { bossX, bossY, playerX, playerY, animTimer, shotIndex, palette, speedScale = 1.0, phase = 1 } = ctx;
   const [c0, c1, c2] = palette;
   const aim = Math.atan2(playerY - bossY, playerX - bossX);
@@ -961,6 +979,34 @@ function createSpaceStage(spec: {
     };
   });
 
+  const baseWaves = buildLevelWaveScript(spec.waveArchetypes, spec.bossSpawnAt, {
+    hpScale: spec.waveHpScale,
+    speedScale: spec.waveSpeedScale,
+    palette: spec.palette,
+    levelSeed: seed,
+  });
+
+  const useNormalOverhaul = ENABLE_NORMAL_OVERHAUL && spec.difficulty === 'normal';
+  const hasBoss = useNormalOverhaul ? spec.stage === 3 : true;
+  const miniboss = useNormalOverhaul && !hasBoss ? (MINIBOSS_DEFS[`${spec.world}-${spec.stage}`] || null) : null;
+  const waves = useNormalOverhaul
+    ? buildNormalWorldWaves(spec.world, spec.stage, spec.bossSpawnAt, baseWaves, { palette: spec.palette, levelSeed: seed })
+    : baseWaves;
+  const bossProfile: SpaceBossProfile =
+    useNormalOverhaul && hasBoss
+      ? getNormalWorldBossProfile(spec.world, spec.palette)
+      : {
+          bossId: 'first_boss',
+          bossName: spec.boss.bossName,
+          fullBossName: spec.boss.bossName,
+          sprite: '/assets/sprites/FirstBoss.png',
+          introDuration: 0,
+          moveArchetype: spec.boss.moveArchetype,
+          palette: spec.palette,
+          speedScale: spec.boss.speedScale,
+          phases,
+        };
+
   return {
     difficulty: spec.difficulty,
     world: spec.world,
@@ -968,27 +1014,17 @@ function createSpaceStage(spec: {
     worldName: spec.worldName,
     stageTitle: spec.stageTitle,
     palette: spec.palette,
+    hasBoss,
+    miniboss,
     spaceTheme: {
       id: `${spec.difficulty}-${spec.world}-${spec.stage}`,
       ...spec.theme,
       starColors: spec.theme.starColors || [spec.palette[0], spec.palette[1], spec.palette[2], 0xffffff],
     },
-    waves: buildLevelWaveScript(spec.waveArchetypes, spec.bossSpawnAt, {
-      hpScale: spec.waveHpScale,
-      speedScale: spec.waveSpeedScale,
-      palette: spec.palette,
-      levelSeed: seed,
-    }),
+    waves,
     bossWarningAt: Number((spec.bossSpawnAt - 3.5).toFixed(1)),
     bossSpawnAt: spec.bossSpawnAt,
-    bossProfile: {
-      bossName: spec.boss.bossName,
-      sprite: '/assets/sprites/FirstBoss.png',
-      moveArchetype: spec.boss.moveArchetype,
-      palette: spec.palette,
-      speedScale: spec.boss.speedScale,
-      phases,
-    },
+    bossProfile,
   };
 }
 

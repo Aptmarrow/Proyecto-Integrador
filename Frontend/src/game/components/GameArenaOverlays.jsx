@@ -4,6 +4,8 @@ function GameArenaOverlays({
   stageBanner,
   bossWarningActive,
   spellcardBanner,
+  moIntroActive = false,
+  moIntroProgress = 0,
   isStruggleAligning,
   isBeamStruggle,
   struggleProgress,
@@ -53,6 +55,50 @@ function GameArenaOverlays({
           <span className="dk-spellcard-title">{spellcardBanner.name}</span>
         </div>
       )}
+
+      {moIntroActive && (() => {
+        const p = Math.max(0, Math.min(1, moIntroProgress));
+        const enterOpacity = p < 0.14 ? p / 0.14 : (p > 0.88 ? Math.max(0, (1 - p) / 0.12) : 1);
+        const compress = p <= 0.44 ? 0 : Math.min(1, (p - 0.44) / 0.26);
+        const finalBurst = p >= 0.7 ? Math.min(1, (p - 0.7) / 0.15) : 0;
+        const collapseStyle = {
+          maxWidth: `${(1 - compress) * 11}em`,
+          opacity: Math.max(0, 1 - compress * 1.35),
+          transform: `scaleX(${Math.max(0.01, 1 - compress)})`,
+        };
+        const titleScale = 1 + finalBurst * 0.34;
+        return (
+          <div className="dk-mo-intro-overlay" style={{ opacity: enterOpacity }}>
+            <div className="dk-mo-halo-ring outer" />
+            <div className="dk-mo-halo-ring inner" />
+            <div className="dk-mo-intro-badge">
+              {compress < 0.75 ? 'OMEGA SERAPH UNIT // FINAL SECTOR 3-3' : 'DESIGNATION LOCKED'}
+            </div>
+            <div
+              className={`dk-mo-morph-title ${finalBurst > 0.2 ? 'locked' : ''}`}
+              style={{ transform: `scale(${titleScale})` }}
+            >
+              <span className="dk-mo-keep">M</span>
+              <span className="dk-mo-collapse" style={collapseStyle}>ECANICAL&nbsp;</span>
+              <span
+                className="dk-mo-dot"
+                style={{
+                  maxWidth: `${compress * 0.6}em`,
+                  opacity: compress,
+                  transform: `scale(${0.4 + compress * 0.6})`,
+                }}
+              >
+                .
+              </span>
+              <span className="dk-mo-keep">O</span>
+              <span className="dk-mo-collapse" style={collapseStyle}>PHANIM</span>
+            </div>
+            <div className="dk-mo-intro-sub">
+              {finalBurst > 0.3 ? '⚠ PROTOCOLO DE ASALTO LINEAL ACTIVO ⚠' : 'MECANICAL OPHANIM · PREPARANDO VECTORES'}
+            </div>
+          </div>
+        );
+      })()}
 
       {isStruggleAligning && (
         <div className="dk-beam-clash-intro-banner">

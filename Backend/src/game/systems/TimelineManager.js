@@ -42,6 +42,8 @@ class TimelineManager {
           payload: { wave },
         }));
 
+    const endAction = config.hasBoss === false && config.miniboss ? 'spawn_miniboss' : 'spawn_boss';
+
     this.loadScript([
       {
         time: 0.1,
@@ -52,12 +54,12 @@ class TimelineManager {
       {
         time: config.bossWarningAt,
         action: 'boss_warning',
-        payload: {},
+        payload: { isMiniboss: endAction === 'spawn_miniboss' },
       },
       {
         time: config.bossSpawnAt,
-        action: 'spawn_boss',
-        payload: {},
+        action: endAction,
+        payload: config.miniboss ? { miniboss: config.miniboss } : {},
       },
     ]);
   }

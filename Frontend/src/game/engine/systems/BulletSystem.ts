@@ -68,6 +68,7 @@ export class BulletSystem {
   private enemyCoreContainer = new PIXI.Container();
 
   private spritePool: PIXI.Sprite[] = [];
+  private enemySpritePool: PIXI.Sprite[] = [];
   private enemyAuraPool: PIXI.Sprite[] = [];
   private enemyCorePool: PIXI.Sprite[] = [];
   private bulletObjPool: Bullet[] = [];
@@ -79,6 +80,19 @@ export class BulletSystem {
     special_attack: PIXI.Texture.from('/assets/sprites/SpeAttackBulletpng.png'),
     tank: PIXI.Texture.from('/assets/sprites/tankbulletpng.png'),
     support: PIXI.Texture.from('/assets/sprites/healerBulletpng.png'),
+  };
+  private enemyBulletTextures: Record<string, PIXI.Texture> = {
+    '1EnemyBulletpng': PIXI.Texture.from('/assets/sprites/1EnemyBulletpng.png'),
+    '2EnemyBulletpng': PIXI.Texture.from('/assets/sprites/2EnemyBulletpng.png'),
+    '3EnemyBulletpng': PIXI.Texture.from('/assets/sprites/3EnemyBulletpng.png'),
+    'GFGbullet1png': PIXI.Texture.from('/assets/sprites/GFGbullet1png.png'),
+    'GFGbullet2png': PIXI.Texture.from('/assets/sprites/GFGbullet2png.png'),
+    'GFGbullet3png': PIXI.Texture.from('/assets/sprites/GFGbullet3png.png'),
+    'GFGbullet4png': PIXI.Texture.from('/assets/sprites/GFGbullet4png.png'),
+    'GFGbullet5png': PIXI.Texture.from('/assets/sprites/GFGbullet5png.png'),
+    'MObullet1png': PIXI.Texture.from('/assets/sprites/MObullet1png.png'),
+    'MObullet3png': PIXI.Texture.from('/assets/sprites/MObullet3png.png'),
+    'MObullet4png': PIXI.Texture.from('/assets/sprites/MObullet4png.png'),
   };
 
   constructor() {
@@ -123,6 +137,8 @@ export class BulletSystem {
     b.damage = damage;
     b.isPlayerBullet = true;
     b.bulletType = normalizeBulletTypeKey(bulletType);
+    b.spriteType = undefined;
+    b.angle = undefined;
     this.playerBullets.push(b);
     return b;
   }
@@ -133,7 +149,9 @@ export class BulletSystem {
     vx: number,
     vy: number,
     radius: number = 6,
-    color: number = 0xff2b5b
+    color: number = 0xff2b5b,
+    spriteType?: string,
+    angle?: number
   ): Bullet {
     const b = this.acquireBulletObj();
     b.x = x;
@@ -145,6 +163,8 @@ export class BulletSystem {
     b.damage = undefined;
     b.isPlayerBullet = false;
     b.bulletType = undefined;
+    b.spriteType = spriteType;
+    b.angle = angle;
     this.bullets.push(b);
     return b;
   }
@@ -231,7 +251,7 @@ export class BulletSystem {
     }
   }
 
-  public render(graphics: PIXI.Graphics): void {
+  public render(graphics: PIXI.Graphics, animTimer: number = 0): void {
     // Attach GPU-batched sprite containers once (ZERO per-frame PIXI.Graphics tessellation!)
     if (this.spriteContainer.parent !== graphics) {
       graphics.clear();
@@ -275,14 +295,49 @@ export class BulletSystem {
       s.visible = false;
     }
 
-    // 2. Touhou-style Space Danmaku Orbs rendered as 2 pooled GPU sprite batches (10x-20x faster than Graphics.drawCircle!)
+    // 2. Enemy bullets: custom sprite pool when spriteType is set, otherwise GPU-batched Touhou orbs
     let eIdx = 0;
+    let enemySpriteIdx = 0;
     const eLen = this.bullets.length;
     for (let i = 0; i < eLen; i++) {
       const b = this.bullets[i];
-      if (b.x < -28 || b.x > CANVAS_WIDTH + 28 || b.y < -28 || b.y > CANVAS_HEIGHT + 28) {
+      if (b.x < -36 || b.x > CANVAS_WIDTH + 36 || b.y < -36 || b.y > CANVAS_HEIGHT + 36) {
         continue;
       }
+
+      const customTex = b.spriteType ? this.enemyBulletTextures[b.spriteType] : undefined;
+      if (customTex) {
+        let es = this.enemySpritePool[enemySpriteIdx];
+        if (!es) {
+          es = new PIXI.Sprite(customTex);
+          es.anchor.set(0.5);
+          this.enemySpritePool.push(es);
+          this.spriteContainer.addChild(es);
+        } else if (es.texture !== customTex) {
+          es.texture = customTex;
+        }
+        es.position.set(b.x, b.y);
+
+        const baseAngle = b.angle !== undefined ? b.angle : Math.atan2(b.vy, b.vx);
+        if (b.spriteType === 'MObullet4png') {
+          es.rotation = baseAngle + animTimer * 3.8;
+          es.scale.set(b.radius >= 10 ? 1.25 : 0.58);
+        } else {
+          // Sprite art faces left by default in PNGs, so + Math.PI aligns left-facing tip to flight vector
+          es.rotation = baseAngle + Math.PI;
+          if (b.spriteType === 'GFGbullet2png' || b.spriteType === 'MObullet1png') {
+            es.scale.set(0.95);
+          } else if (b.spriteType === '3EnemyBulletpng') {
+            es.scale.set(0.9);
+          } else {
+            es.scale.set(0.82);
+          }
+        }
+        es.visible = true;
+        enemySpriteIdx++;
+        continue;
+      }
+
       let auraSprite = this.enemyAuraPool[eIdx];
       let coreSprite = this.enemyCorePool[eIdx];
       if (!auraSprite) {
@@ -318,6 +373,12 @@ export class BulletSystem {
       a.visible = false;
       this.enemyCorePool[i].visible = false;
     }
+
+    for (let i = enemySpriteIdx; i < this.enemySpritePool.length; i++) {
+      const es = this.enemySpritePool[i];
+      if (!es.visible) break;
+      es.visible = false;
+    }
   }
 
   public clear(): void {
@@ -328,6 +389,9 @@ export class BulletSystem {
     for (let i = 0; i < this.enemyAuraPool.length; i++) {
       this.enemyAuraPool[i].visible = false;
       this.enemyCorePool[i].visible = false;
+    }
+    for (const es of this.enemySpritePool) {
+      es.visible = false;
     }
   }
 

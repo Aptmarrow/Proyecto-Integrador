@@ -1,7 +1,12 @@
 'use strict';
 
-const { WORLD_WIDTH, WORLD_HEIGHT } = require('../physics');
+const { WORLD_WIDTH, WORLD_HEIGHT, PLAYER_RADIUS } = require('../physics');
 const { releaseBullet } = require('../entities/Bullet');
+const {
+  ENABLE_NORMAL_OVERHAUL,
+  updateSpecialEnemyTrajectory,
+  fireSpecialEnemyPattern,
+} = require('../campaign/normalCampaignOverhaul');
 
 let _nextEnemyId = 0;
 
@@ -30,16 +35,21 @@ class EnemySystem {
       scoreValue: config.scoreValue || 220,
       itemDrop: config.itemDrop || 'point',
       isDead: false,
+      isMiniboss: Boolean(config.isMiniboss),
+      minibossName: config.minibossName || null,
+      sprite: config.sprite || null,
       trajectory: config.trajectory || 'straight',
       attackPattern: config.attackPattern || 'none',
       shootInterval: config.shootInterval || 1.6,
       shootTimer: -(config.shootDelay || 0.25),
       bulletColor: config.bulletColor ?? null,
-      customParams: config.customParams || {},
+      customParams: config.customParams ? { ...config.customParams } : {},
       spawnTime: 0,
       speed: config.speed || 140,
       startX: config.startX ?? WORLD_WIDTH + 40,
       startY: config.startY ?? WORLD_HEIGHT / 2,
+      angle: Math.PI,
+      _fuseProgress: null,
     };
     this.active.push(enemy);
     return enemy;
@@ -140,7 +150,23 @@ class EnemySystem {
     }
   }
 
-  update(dt, bulletSystem, playerPos) {
+  _findNearestPlayer(e, fallbackPos, players) {
+    if (!players || players.size === 0) return fallbackPos;
+    let best = fallbackPos;
+    let bestD2 = Infinity;
+    for (const [, p] of players) {
+      if (!p.active || p.hp <= 0) continue;
+      const pos = p.body.getPosition();
+      const d2 = (pos.x - e.x) * (pos.x - e.x) + (pos.y - e.y) * (pos.y - e.y);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = pos;
+      }
+    }
+    return best;
+  }
+
+  update(dt, bulletSystem, playerPos, context = {}) {
     const defeated = [];
 
     for (let i = this.active.length - 1; i >= 0; i--) {
@@ -148,9 +174,37 @@ class EnemySystem {
       if (e.isDead) continue;
 
       e.spawnTime += dt;
-      this._moveEnemy(e, dt);
+      const nearestPlayerPos = this._findNearestPlayer(e, playerPos, context.players);
+      this._moveEnemy(e, dt, playerPos, nearestPlayerPos);
 
-      if (e.x < -70 || (e.spawnTime > 6.0 && e.x > WORLD_WIDTH + 220) || e.y < -90 || e.y > WORLD_HEIGHT + 90) {
+      // Smoothly orient enemy toward nearest player when chasing or preparing to fire
+      if (nearestPlayerPos && e.type !== 'mo_enemy2') {
+        e.angle = Math.atan2(nearestPlayerPos.y - e.y, nearestPlayerPos.x - e.x);
+      }
+
+      // Kamikaze enemy (MOenemy2): proximity arms fuse countdown; explodes on contact OR armed countdown end
+      if (e.type === 'mo_enemy2') {
+        const fuseTime = e.customParams?.fuseTime || 1.75;
+        const armed = Boolean(e.customParams?._fuseActive);
+        const fuseElapsed = e.customParams?._fuseElapsed || 0;
+        const dx = nearestPlayerPos.x - e.x;
+        const dy = nearestPlayerPos.y - e.y;
+        const touchDist = e.radius + PLAYER_RADIUS + 6;
+        if (dx * dx + dy * dy <= touchDist * touchDist || (armed && fuseElapsed >= fuseTime)) {
+          e.isDead = true;
+          for (let k = 0; k < 8; k++) {
+            const a = (Math.PI * 2 * k) / 8;
+            bulletSystem.spawn('boss', e.x, e.y, a, 145, 4.5, 0.36, 'normal', 4, 0xfef08a, {
+              spriteType: 'MObullet3png',
+            });
+          }
+          context.onKamikazeExplode?.(e.x, e.y, 58, 16);
+          this.active.splice(i, 1);
+          continue;
+        }
+      }
+
+      if (!e.isMiniboss && (e.x < -70 || (e.spawnTime > 6.0 && e.x > WORLD_WIDTH + 220) || e.y < -90 || e.y > WORLD_HEIGHT + 90)) {
         this.active.splice(i, 1);
         continue;
       }
@@ -158,7 +212,7 @@ class EnemySystem {
       e.shootTimer += dt;
       if (e.x < WORLD_WIDTH - 8 && e.x > 40 && e.shootTimer >= e.shootInterval && e.attackPattern !== 'none') {
         e.shootTimer = 0;
-        this._enemyShoot(e, bulletSystem, playerPos);
+        this._enemyShoot(e, bulletSystem, nearestPlayerPos || playerPos, dt);
       }
     }
 
@@ -186,6 +240,8 @@ class EnemySystem {
               y: e.y,
               score: e.scoreValue,
               itemDrop: e.itemDrop,
+              isMiniboss: Boolean(e.isMiniboss),
+              minibossName: e.minibossName || null,
             });
             this.active.splice(j, 1);
           }
@@ -197,7 +253,11 @@ class EnemySystem {
     return defeated;
   }
 
-  _moveEnemy(e, dt) {
+  _moveEnemy(e, dt, playerPos, nearestPlayerPos) {
+    if (ENABLE_NORMAL_OVERHAUL && updateSpecialEnemyTrajectory(e, dt, playerPos, nearestPlayerPos)) {
+      return;
+    }
+
     const t = e.spawnTime;
     const p = e.customParams || {};
 
@@ -298,7 +358,12 @@ class EnemySystem {
     return 0x00f2fe;
   }
 
-  _enemyShoot(e, bulletSystem, playerPos) {
+  _enemyShoot(e, bulletSystem, playerPos, dt = 1 / 60) {
+    e.angle = Math.atan2(playerPos.y - e.y, playerPos.x - e.x);
+    if (ENABLE_NORMAL_OVERHAUL && fireSpecialEnemyPattern(e, bulletSystem, playerPos, dt)) {
+      return;
+    }
+
     const angle = Math.atan2(playerPos.y - e.y, playerPos.x - e.x);
     const col = this._defaultColorForEnemy(e);
     const ttl = 4.2;
@@ -405,15 +470,27 @@ class EnemySystem {
   }
 
   getState() {
-    return this.active.map((e) => ({
-      id: e.id,
-      type: e.type,
-      x: e.x,
-      y: e.y,
-      hp: e.hp,
-      maxHp: e.maxHp,
-      radius: e.radius,
-    }));
+    return this.active.map((e) => {
+      const item = {
+        id: e.id,
+        type: e.type,
+        x: e.x,
+        y: e.y,
+        hp: e.hp,
+        maxHp: e.maxHp,
+        radius: e.radius,
+        angle: Number((e.angle ?? Math.PI).toFixed(3)),
+      };
+      if (e.isMiniboss) {
+        item.isMiniboss = true;
+        item.sprite = e.sprite;
+        item.minibossName = e.minibossName;
+      }
+      if (typeof e._fuseProgress === 'number') {
+        item.fuseProgress = e._fuseProgress;
+      }
+      return item;
+    });
   }
 }
 

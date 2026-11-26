@@ -98,7 +98,10 @@ class CampaignManager {
     if (this.campaignComplete) {
       return `Conquistaste los ${WORLDS_PER_DIFFICULTY * STAGES_PER_WORLD} sectores espaciales de ${label}.`;
     }
-    return `${config.bossProfile?.bossName || 'Jefe'} derrotado en ${config.stageTitle}.`;
+    const endFoeName = config.hasBoss === false && config.miniboss
+      ? (config.miniboss.minibossName || 'Minijefe')
+      : (config.bossProfile?.bossName || 'Jefe');
+    return `${endFoeName} derrotado en ${config.stageTitle}.`;
   }
 
   toSnapshot() {
@@ -116,6 +119,8 @@ class CampaignManager {
       clearSubtext: this.clearSubtext,
       worldName: config.worldName,
       stageTitle: config.stageTitle,
+      hasBoss: config.hasBoss !== false,
+      minibossName: config.miniboss?.minibossName || null,
       bossSpawnAt: config.bossSpawnAt,
       bossWarningAt: config.bossWarningAt,
       spaceTheme: config.spaceTheme,

@@ -5,22 +5,60 @@ import type { LaserSystem } from './LaserSystem';
 import type { ItemType } from '../types';
 import type { ServerEnemy } from '../../network/wsClient';
 
+const ENEMY_SPRITE_URLS: Record<string, string> = {
+  first_enemy: '/assets/sprites/FirstEnemypng.png',
+  second_enemy: '/assets/sprites/SecondEnemypng.png',
+  third_enemy: '/assets/sprites/ThirdEnemypng.png',
+  fb_mini1: '/assets/sprites/FBmini1png.png',
+  fb_mini2: '/assets/sprites/FBmini2png.png',
+  gfg_enemy1: '/assets/sprites/GFGEnemy1png.png',
+  gfg_enemy2: '/assets/sprites/GFGEnemy2png.png',
+  gfg_enemy3: '/assets/sprites/GFGEnemy3png.png',
+  gfg_mini1: '/assets/sprites/GFGMini1png.png',
+  gfg_mini2: '/assets/sprites/GFGMini2png.png',
+  mo_enemy1: '/assets/sprites/MOenemy1png.png',
+  mo_enemy2: '/assets/sprites/MOenemy2png.png',
+  mo_enemy3: '/assets/sprites/MOenemy3png.png',
+  mo_mini1: '/assets/sprites/MOmini1png.png',
+  mo_mini2: '/assets/sprites/MOmini2png.png',
+};
+
 export class EnemySystem {
   public enemies: Enemy[] = [];
   public container: PIXI.Container;
   private textures: Record<string, PIXI.Texture> = {};
   private enemyMap = new Map<string, Enemy>();
   private activeIds = new Set<string>();
+  private customTextures: Record<string, PIXI.Texture> = {};
+  private enemyFuseMap = new Map<string, number>();
+  private enemyAngleMap = new Map<string, number>();
 
   constructor(parentContainer?: PIXI.Container) {
     this.container = new PIXI.Container();
     if (parentContainer) {
       parentContainer.addChild(this.container);
     }
+    for (const [key, url] of Object.entries(ENEMY_SPRITE_URLS)) {
+      this.customTextures[key] = PIXI.Texture.from(url);
+    }
   }
 
   public setTextures(textures: Record<string, PIXI.Texture>): void {
     this.textures = textures;
+  }
+
+  private resolveTextureForType(type: string, spriteOverride?: string): PIXI.Texture | undefined {
+    if (spriteOverride) {
+      if (!this.customTextures[spriteOverride]) {
+        this.customTextures[spriteOverride] = PIXI.Texture.from(spriteOverride);
+      }
+      return this.customTextures[spriteOverride];
+    }
+    if (this.customTextures[type]) return this.customTextures[type];
+    if (type === 'green_fairy') return this.textures.fairyGreen;
+    if (type === 'red_fairy') return this.textures.fairyRed;
+    if (type === 'big_fairy') return this.textures.fairyBig;
+    return undefined;
   }
 
   public applyBackendEnemies(serverEnemies: ServerEnemy[], scaleX: number, scaleY: number): void {
@@ -33,6 +71,8 @@ export class EnemySystem {
       const e = this.enemies[i];
       if (!this.activeIds.has(e.id)) {
         this.enemyMap.delete(e.id);
+        this.enemyFuseMap.delete(e.id);
+        this.enemyAngleMap.delete(e.id);
         e.destroy();
         const last = this.enemies.pop()!;
         if (i < this.enemies.length) this.enemies[i] = last;
@@ -45,10 +85,7 @@ export class EnemySystem {
       const targetX = se.x * scaleX;
       const targetY = se.y * scaleY;
       if (!existing) {
-        let tex = undefined;
-        if (se.type === 'green_fairy') tex = this.textures.fairyGreen;
-        else if (se.type === 'red_fairy') tex = this.textures.fairyRed;
-        else if (se.type === 'big_fairy') tex = this.textures.fairyBig;
+        const tex = this.resolveTextureForType(se.type, se.sprite);
 
         existing = new Enemy(this.container, {
           id: se.id,
@@ -57,16 +94,29 @@ export class EnemySystem {
           startY: targetY,
           hp: se.hp,
           radius: se.radius * scaleX,
+          isMiniboss: Boolean(se.isMiniboss),
           texture: tex,
         });
         this.enemies.push(existing);
         this.enemyMap.set(se.id, existing);
       }
-      existing.pos.x += (targetX - existing.pos.x) * 0.4;
-      existing.pos.y += (targetY - existing.pos.y) * 0.4;
+      existing.pos.x += (targetX - existing.pos.x) * 0.45;
+      existing.pos.y += (targetY - existing.pos.y) * 0.45;
       existing.hp = se.hp;
       existing.maxHp = se.maxHp;
+      if (typeof se.fuseProgress === 'number') {
+        this.enemyFuseMap.set(se.id, se.fuseProgress);
+      }
+      if (typeof se.angle === 'number') {
+        this.enemyAngleMap.set(se.id, se.angle);
+      }
       existing.container.position.set(existing.pos.x, existing.pos.y);
+    }
+  }
+
+  public syncRemoteVisuals(animTimer: number, playerPos?: { x: number; y: number }): void {
+    for (const enemy of this.enemies) {
+      enemy.syncRemoteVisuals(animTimer, this.enemyFuseMap.get(enemy.id), this.enemyAngleMap.get(enemy.id), playerPos);
     }
   }
 
@@ -259,6 +309,8 @@ export class EnemySystem {
     }
     this.enemies = [];
     this.enemyMap.clear();
+    this.enemyFuseMap.clear();
+    this.enemyAngleMap.clear();
   }
 
   public update(

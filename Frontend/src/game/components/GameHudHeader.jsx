@@ -10,6 +10,8 @@ function GameHudHeader({
   showBossHpBar,
   bossRemainingStocks,
   spellcardName,
+  bossAvatarSrc = '/assets/sprites/FirstBoss.png',
+  isMiniboss = false,
   isBossRefilling,
   bossDisplayHpPercent,
   workerModeLabel,
@@ -201,8 +203,8 @@ function GameHudHeader({
                   ))}
                 </div>
                 <div className="dk-boss-title-badge">
-                  <span className="dk-boss-name">{spellcardName || 'STAGE BOSS'}</span>
-                  <span className="dk-boss-tag">BOSS</span>
+                  <span className="dk-boss-name">{spellcardName || (isMiniboss ? 'MINIBOSS' : 'STAGE BOSS')}</span>
+                  <span className="dk-boss-tag">{isMiniboss ? 'MINIBOSS' : 'BOSS'}</span>
                 </div>
               </div>
 
@@ -212,7 +214,7 @@ function GameHudHeader({
                   style={{ width: `${bossDisplayHpPercent}%` }}
                 />
                 <div className="dk-capsule-bar-content">
-                  <span className="dk-bar-name">BOSS HP</span>
+                  <span className="dk-bar-name">{isMiniboss ? 'MINIBOSS HP' : 'BOSS HP'}</span>
                   <span className="dk-bar-percent">
                     {isBossRefilling ? 'CHARGING...' : `${Math.round(bossDisplayHpPercent)}%`}
                   </span>
@@ -221,7 +223,12 @@ function GameHudHeader({
             </div>
 
             <div className="dk-avatar-box dk-boss-avatar-box">
-              <img src="/assets/sprites/FirstBoss.png" alt="Jefe" decoding="async" className="dk-avatar-img dk-boss-img" />
+              <img
+                src={bossAvatarSrc || '/assets/sprites/FirstBoss.png'}
+                alt={isMiniboss ? 'Minijefe' : 'Jefe'}
+                decoding="async"
+                className="dk-avatar-img dk-boss-img"
+              />
               <span className="dk-boss-active-pulse" />
             </div>
           </div>

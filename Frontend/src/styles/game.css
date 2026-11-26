@@ -1101,3 +1101,117 @@
   .dk-floating-controls-bar { bottom: 64px; transform: translateX(-50%) scale(0.9); }
 }
 
+/* ── M.O (Mecanical Ophanim) Boss Intro Cinematic ─────────────────────────── */
+
+.dk-mo-intro-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(127, 29, 29, 0.42) 0%, rgba(5, 4, 12, 0.86) 72%);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.dk-mo-halo-ring {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.dk-mo-halo-ring.outer {
+  width: 340px;
+  height: 340px;
+  border: 2px dashed rgba(248, 113, 113, 0.6);
+  box-shadow: 0 0 40px rgba(239, 68, 68, 0.4), inset 0 0 30px rgba(250, 204, 21, 0.25);
+  animation: dkMoSpin 7s linear infinite;
+}
+
+.dk-mo-halo-ring.inner {
+  width: 240px;
+  height: 240px;
+  border: 2px solid rgba(253, 224, 71, 0.55);
+  box-shadow: 0 0 24px rgba(250, 204, 21, 0.4);
+  animation: dkMoSpinReverse 5s linear infinite;
+}
+
+.dk-mo-intro-badge {
+  position: relative;
+  z-index: 2;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  color: #fde047;
+  padding: 5px 14px;
+  border: 1px solid rgba(253, 224, 71, 0.65);
+  background: rgba(15, 6, 10, 0.85);
+  border-radius: 4px;
+  margin-bottom: 14px;
+  text-shadow: 0 0 10px rgba(250, 204, 21, 0.85);
+}
+
+.dk-mo-morph-title {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  font-family: 'Press Start 2P', 'Outfit', monospace;
+  font-size: clamp(1.4rem, 3.2vw, 2.5rem);
+  font-weight: 900;
+  color: #ffffff;
+  text-shadow: 0 0 18px rgba(239, 68, 68, 0.95), 0 0 38px rgba(250, 204, 21, 0.6);
+  white-space: nowrap;
+  transition: text-shadow 0.2s ease;
+}
+
+.dk-mo-morph-title.locked {
+  color: #fef08a;
+  text-shadow: 0 0 28px #ff2b5b, 0 0 55px #facc15, 0 0 80px rgba(239, 68, 68, 0.95);
+}
+
+.dk-mo-keep {
+  display: inline-block;
+  color: #ffffff;
+}
+
+.dk-mo-collapse {
+  display: inline-block;
+  overflow: hidden;
+  transform-origin: left center;
+  white-space: nowrap;
+  color: #fca5a5;
+}
+
+.dk-mo-dot {
+  display: inline-block;
+  overflow: hidden;
+  color: #ef4444;
+  text-shadow: 0 0 16px #ef4444;
+}
+
+.dk-mo-intro-sub {
+  position: relative;
+  z-index: 2;
+  margin-top: 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: #fca5a5;
+  text-shadow: 0 0 12px rgba(239, 68, 68, 0.8);
+}
+
+@keyframes dkMoSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes dkMoSpinReverse {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+

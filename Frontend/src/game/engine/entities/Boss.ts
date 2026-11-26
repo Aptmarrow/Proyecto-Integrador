@@ -37,6 +37,19 @@ export class Boss {
   public refillTimer: number = 0;
   public displayHpPercent: number = 100;
 
+  // Extensiones de Campaña Normal (Boss Dinámico, Minijefe HUD y M.O)
+  public bossId: string = 'first_boss';
+  public currentSpriteUrl: string = '/assets/sprites/FirstBoss.png';
+  public angle: number = Math.PI;
+  private displayAngle: number = Math.PI;
+  public renderHudOnly: boolean = false;
+  public isMinibossHud: boolean = false;
+  public moIntroActive: boolean = false;
+  public moIntroProgress: number = 0;
+  public moDashState: string = 'idle';
+  public moDashLines: Array<{ x1: number; y1: number; x2: number; y2: number; progress: number; active: boolean; completed?: boolean; isReturn?: boolean }> = [];
+  public moLineGraphics = new PIXI.Graphics();
+
   public get x(): number {
     return this.pos.x;
   }
@@ -72,6 +85,7 @@ export class Boss {
   private animTimer = 0;
   private introProgress = 0;
   private cachedCirclePhase: number = -1;
+  private hadMoLines: boolean = false;
 
   public onPhaseChange?: (newPhase: BossPhase, spellName: string, isSpellCard: boolean) => void;
   public onDefeated?: () => void;
@@ -83,6 +97,8 @@ export class Boss {
   ) {
     this.hp = initialHp;
     this.maxHp = initialHp;
+    this.currentSpriteUrl = spriteUrl;
+    parentContainer.addChild(this.moLineGraphics);
     parentContainer.addChild(this.container);
     this.initStaticAura();
     this.auraGraphics.visible = false;
@@ -101,6 +117,26 @@ export class Boss {
     this.auraGraphics.lineStyle(2, 0xffffff, 0.9);
     this.auraGraphics.drawCircle(0, 0, 42.5);
     this.auraGraphics.lineStyle(0);
+  }
+
+  public setSpriteUrl(spriteUrl: string): void {
+    if (!spriteUrl || spriteUrl === this.currentSpriteUrl) return;
+    this.currentSpriteUrl = spriteUrl;
+    const tex = PIXI.Texture.from(spriteUrl);
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.texture = tex;
+      this.sprite.scale.set(0.42);
+    } else {
+      if (this.sprite && this.sprite.parent) {
+        this.sprite.parent.removeChild(this.sprite);
+      }
+      const next = new PIXI.Sprite(tex);
+      next.anchor.set(0.5);
+      next.scale.set(0.42);
+      next.position.set(0, 0);
+      this.sprite = next;
+      this.container.addChild(next);
+    }
   }
 
   private initSprite(spriteUrl: string): void {
@@ -156,15 +192,37 @@ export class Boss {
     this.isDefeated = false;
     this.isInvulnerable = false;
     this.isRefilling = false;
+    this.renderHudOnly = false;
+    this.isMinibossHud = false;
+    this.moIntroActive = false;
+    this.moIntroProgress = 0;
+    this.moDashState = 'idle';
+    this.moDashLines = [];
+    this.angle = Math.PI;
+    this.displayAngle = Math.PI;
+    if (this.sprite instanceof PIXI.Sprite) {
+      this.sprite.rotation = 0;
+      this.sprite.scale.set(0.42, 0.42);
+    }
     this.container.visible = false;
     this.pos = { x: 1100, y: 288 };
     this.magicCircleGraphics.visible = false;
     this.auraGraphics.visible = false;
+    if (this.hadMoLines) {
+      this.moLineGraphics.clear();
+      this.hadMoLines = false;
+    }
   }
 
-  public syncVisuals(dt: number, animTimer: number): void {
-    const visible = this.isActive && !this.isDefeated;
+  public syncVisuals(dt: number, animTimer: number, scaleX: number = 1.28, scaleY: number = 0.96): void {
+    if (this.hadMoLines) {
+      this.moLineGraphics.clear();
+      this.hadMoLines = false;
+    }
+    const visible = this.isActive && !this.isDefeated && !this.renderHudOnly;
     this.container.visible = visible;
+    this.displayHpPercent = this.maxHp > 0 ? Math.max(0, Math.min(100, (this.hp / this.maxHp) * 100)) : 0;
+
     if (!visible) {
       this.magicCircleGraphics.visible = false;
       this.auraGraphics.visible = false;
@@ -172,16 +230,91 @@ export class Boss {
     }
 
     this.container.position.set(this.pos.x, this.pos.y);
-    this.displayHpPercent = this.maxHp > 0 ? Math.max(0, Math.min(100, (this.hp / this.maxHp) * 100)) : 0;
+
+    // Smooth orientation tracking (M.O follows dash line angle; bosses otherwise track players)
+    const angleDiff = Math.atan2(Math.sin(this.angle - this.displayAngle), Math.cos(this.angle - this.displayAngle));
+    const turnSpeed = this.moDashState === 'dashing' ? 28 : 14;
+    this.displayAngle += angleDiff * Math.min(1, dt * turnSpeed);
+    if (this.sprite instanceof PIXI.Sprite) {
+      if (Math.cos(this.displayAngle) > 0) {
+        this.sprite.scale.set(-0.42, 0.42);
+        this.sprite.rotation = this.displayAngle;
+      } else {
+        this.sprite.scale.set(0.42, 0.42);
+        this.sprite.rotation = Math.atan2(
+          Math.sin(this.displayAngle - Math.PI),
+          Math.cos(this.displayAngle - Math.PI)
+        );
+      }
+    }
 
     if (this.isRefilling) {
       const progress = this.displayHpPercent / 100;
       this.renderRefillAura(animTimer, progress);
+    } else if (this.bossId === 'mo' && this.moIntroActive) {
+      this.renderRefillAura(animTimer, this.moIntroProgress);
     } else {
       this.auraGraphics.visible = false;
     }
 
+    if (this.bossId === 'mo' && this.moDashLines.length > 0) {
+      this.renderMoDashLines(animTimer, scaleX, scaleY);
+      this.hadMoLines = true;
+    }
+
     this.renderMagicCircle(animTimer);
+  }
+
+  private renderMoDashLines(animTimer: number, scaleX: number, scaleY: number): void {
+    const g = this.moLineGraphics;
+    const isDash = this.moDashState === 'dashing';
+    const pulse = 0.65 + Math.sin(animTimer * 28) * 0.35;
+
+    for (let idx = 0; idx < this.moDashLines.length; idx++) {
+      const line = this.moDashLines[idx];
+      if (line.completed) continue;
+      const x1 = line.x1 * scaleX;
+      const y1 = line.y1 * scaleY;
+      const x2 = line.x2 * scaleX;
+      const y2 = line.y2 * scaleY;
+
+      const isActiveLine = isDash && line.active;
+      const isReturn = Boolean(line.isReturn);
+      const outerColor = isReturn ? 0x00f2fe : 0xff2b5b;
+      const outerAlpha = isActiveLine ? 0.5 : isReturn ? 0.16 * pulse : 0.24 * pulse;
+      const outerWidth = isActiveLine ? 22 : isReturn ? 7 : 11 + line.progress * 6;
+      const coreAlpha = isActiveLine ? 0.96 : isReturn ? 0.48 * pulse : 0.68 * pulse;
+      const coreWidth = isActiveLine ? 5 : isReturn ? 1.8 : 2.5;
+
+      g.lineStyle(outerWidth, outerColor, outerAlpha);
+      g.moveTo(x1, y1);
+      g.lineTo(x2, y2);
+
+      g.lineStyle(coreWidth, isReturn ? 0xfef08a : 0xffffff, coreAlpha);
+      g.moveTo(x1, y1);
+      g.lineTo(x2, y2);
+
+      if (isReturn) {
+        g.lineStyle(2, 0x00f2fe, 0.85);
+        g.drawCircle(x2, y2, 16 * (0.85 + Math.sin(animTimer * 8) * 0.15));
+      }
+    }
+    g.lineStyle(0);
+
+    // High-speed afterimage trail while M.O dashes along the active line
+    const activeLine = this.moDashLines.find((l) => l.active);
+    if (isDash && activeLine) {
+      const sx = activeLine.x1 * scaleX;
+      const sy = activeLine.y1 * scaleY;
+      for (let i = 1; i <= 4; i++) {
+        const t = i / 5;
+        const ax = sx + (this.pos.x - sx) * t;
+        const ay = sy + (this.pos.y - sy) * t;
+        g.beginFill(activeLine.isReturn ? 0x00f2fe : 0xff2b5b, 0.18 * t);
+        g.drawCircle(ax, ay, 24 * t);
+        g.endFill();
+      }
+    }
   }
 
   public update(

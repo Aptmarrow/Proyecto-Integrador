@@ -23,6 +23,34 @@ function serializePlayers(players, fallbackStats) {
   return result;
 }
 
+function serializeBossHud(room) {
+  if (!room.boss.isActive && !room.boss.isDefeated) {
+    const mb = room.enemySystem.active.find((e) => e.isMiniboss && !e.isDead);
+    if (mb) {
+      return {
+        x: mb.x,
+        y: mb.y,
+        hp: mb.hp,
+        maxHp: mb.maxHp,
+        phase: 1,
+        remainingStocks: 0,
+        spellcardName: mb.minibossName || 'MINIBOSS',
+        isSpellCard: false,
+        isActive: false,
+        renderHudOnly: true,
+        isMiniboss: true,
+        bossId: mb.type,
+        sprite: mb.sprite,
+        angle: Number((mb.angle ?? Math.PI).toFixed(3)),
+        isDefeated: false,
+        isRefilling: false,
+        isLockedForBeam: false,
+      };
+    }
+  }
+  return room.boss.toSnapshot();
+}
+
 function buildRoomSnapshot(room, options) {
   const { fallbackStats } = options;
   return {
@@ -37,7 +65,7 @@ function buildRoomSnapshot(room, options) {
     walls: room.wallSystem.getState(),
     enemies: room.enemySystem.getState(),
     items: room.itemSystem.getState(),
-    boss: room.boss.toSnapshot(),
+    boss: serializeBossHud(room),
     campaign: room.campaign.toSnapshot(),
     struggle: room._beamStruggleController.toSnapshot(),
   };
