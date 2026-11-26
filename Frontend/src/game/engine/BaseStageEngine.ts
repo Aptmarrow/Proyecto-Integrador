@@ -222,13 +222,16 @@ export class BaseStageEngine {
 
         this.bulletSystem.spawnPlayerBullet(scaledX, scaledY, 0, 0, scaledRadius, bulletColor, 0.5, bulletType);
       } else {
+        const ang = b.angle;
         this.bulletSystem.spawnEnemyBullet(
           scaledX,
           scaledY,
-          0,
-          0,
+          ang !== undefined ? Math.cos(ang) : 0,
+          ang !== undefined ? Math.sin(ang) : 0,
           scaledRadius,
-          typeof b.color === 'number' ? b.color : 0xff2b5b
+          typeof b.color === 'number' ? b.color : 0xff2b5b,
+          b.spriteType,
+          ang
         );
       }
     }

@@ -16,6 +16,12 @@
  */
 
 const { buildLevelWaveScript } = require('./spaceThemesAndWaves');
+const {
+  ENABLE_NORMAL_OVERHAUL,
+  MINIBOSS_DEFS,
+  buildNormalWorldWaves,
+  getNormalWorldBossConfig,
+} = require('./normalCampaignOverhaul');
 
 const WORLDS_PER_DIFFICULTY = 3;
 const STAGES_PER_WORLD = 3;
@@ -53,7 +59,7 @@ function makeBossProfile(def) {
       isSpellCard: phaseNum === 2 || phaseNum === 4 || phaseNum === 5,
       maxHp: Math.round(baseHp * hpMultipliers[idx]),
       pattern: p.pattern,
-      shootInterval: Number(((PATTERN_INTERVALS[p.pattern] || 0.36) / (0.94 + speedScale * 0.06)).toFixed(3)),
+      shootInterval: p.shootInterval ?? Number(((PATTERN_INTERVALS[p.pattern] || 0.36) / (0.94 + speedScale * 0.06)).toFixed(3)),
       laserMode: p.laserMode || (phaseNum >= 4 ? 'both' : (phaseNum <= 2 ? 'targeted' : 'none')),
       laserInterval: p.laserInterval || (phaseNum >= 4 ? 3.8 : 4.8),
       megaLaserInterval: p.megaLaserInterval ?? (phaseNum === 2 ? 7.2 : phaseNum === 4 ? 6.6 : phaseNum === 5 ? 6.0 : 0),
@@ -61,8 +67,11 @@ function makeBossProfile(def) {
   });
 
   return {
+    bossId: def.bossId || 'first_boss',
     bossName: def.bossName,
-    sprite: '/assets/sprites/FirstBoss.png',
+    fullBossName: def.fullBossName || def.bossName,
+    sprite: def.sprite || '/assets/sprites/FirstBoss.png',
+    introDuration: def.introDuration || 0,
     moveArchetype: def.moveArchetype || 'orbital_lissajous',
     palette: def.palette || [0x00f2fe, 0xff2b5b, 0xffdd00],
     speedScale,
@@ -78,12 +87,27 @@ function createSpaceStage(spec) {
   const bossWarningAt = Number((bossSpawnAt - 3.5).toFixed(1));
   const palette = spec.palette || [0x00f2fe, 0xff2b5b, 0xffdd00];
 
-  const waves = buildLevelWaveScript(spec.waveArchetypes, bossSpawnAt, {
+  const baseWaves = buildLevelWaveScript(spec.waveArchetypes, bossSpawnAt, {
     hpScale: spec.waveHpScale || 1.0,
     speedScale: spec.waveSpeedScale || 1.0,
     palette,
     levelSeed: seed,
   });
+
+  const useNormalOverhaul = ENABLE_NORMAL_OVERHAUL && spec.difficulty === 'normal';
+  const hasBoss = useNormalOverhaul ? spec.stage === 3 : true;
+  const miniboss = useNormalOverhaul && !hasBoss
+    ? (MINIBOSS_DEFS[`${spec.world}-${spec.stage}`] || null)
+    : null;
+  const waves = useNormalOverhaul
+    ? buildNormalWorldWaves(spec.world, spec.stage, bossSpawnAt, baseWaves, {
+        hpScale: spec.waveHpScale || 1.0,
+        speedScale: spec.waveSpeedScale || 1.0,
+        palette,
+        levelSeed: seed,
+      })
+    : baseWaves;
+  const normalBossCfg = useNormalOverhaul && hasBoss ? getNormalWorldBossConfig(spec.world) : null;
 
   return {
     difficulty: spec.difficulty,
@@ -92,6 +116,8 @@ function createSpaceStage(spec) {
     worldName: spec.worldName,
     stageTitle: spec.stageTitle,
     palette,
+    hasBoss,
+    miniboss,
     spaceTheme: {
       id: `${spec.difficulty}-${spec.world}-${spec.stage}`,
       skyTop: spec.theme.skyTop,
@@ -110,12 +136,16 @@ function createSpaceStage(spec) {
     bossWarningAt,
     bossSpawnAt,
     bossProfile: makeBossProfile({
-      bossName: spec.boss.bossName,
-      baseHp: spec.boss.baseHp,
-      speedScale: spec.boss.speedScale,
-      moveArchetype: spec.boss.moveArchetype,
+      bossId: normalBossCfg?.bossId || 'first_boss',
+      bossName: normalBossCfg?.bossName || spec.boss.bossName,
+      fullBossName: normalBossCfg?.fullBossName || normalBossCfg?.bossName || spec.boss.bossName,
+      sprite: normalBossCfg?.sprite || '/assets/sprites/FirstBoss.png',
+      introDuration: normalBossCfg?.introDuration || 0,
+      baseHp: normalBossCfg?.baseHp || spec.boss.baseHp,
+      speedScale: normalBossCfg?.speedScale || spec.boss.speedScale,
+      moveArchetype: normalBossCfg?.moveArchetype || spec.boss.moveArchetype,
       palette,
-      phases: spec.boss.phases,
+      phases: normalBossCfg?.phases || spec.boss.phases,
     }),
   };
 }

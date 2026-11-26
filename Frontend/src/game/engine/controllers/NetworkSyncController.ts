@@ -34,10 +34,21 @@ export class NetworkSyncController {
 
   public applyBossSnapshot(boss: ServerBoss, bossEntity: Boss, scaleX: number, scaleY: number): void {
     if (!boss) return;
-    if (boss.isActive && !bossEntity.isActive) {
+    const hudVisible = Boolean(boss.isActive || boss.renderHudOnly);
+    if (hudVisible && !bossEntity.isActive) {
       bossEntity.spawn(boss.x * scaleX, boss.y * scaleY);
     }
-    if (boss.isActive !== undefined) bossEntity.isActive = boss.isActive;
+    bossEntity.isActive = hudVisible;
+    bossEntity.renderHudOnly = Boolean(boss.renderHudOnly);
+    bossEntity.isMinibossHud = Boolean(boss.isMiniboss);
+    if (boss.bossId !== undefined) bossEntity.bossId = boss.bossId;
+    if (boss.sprite) bossEntity.setSpriteUrl(boss.sprite);
+    if (typeof boss.angle === 'number') bossEntity.angle = boss.angle;
+    bossEntity.moIntroActive = Boolean(boss.moIntroActive);
+    bossEntity.moIntroProgress = boss.moIntroProgress ?? 0;
+    bossEntity.moDashState = boss.moDashState || 'idle';
+    bossEntity.moDashLines = Array.isArray(boss.moDashLines) ? boss.moDashLines : [];
+
     bossEntity.setPosition(boss.x * scaleX, boss.y * scaleY);
     bossEntity.hp = boss.hp;
     bossEntity.maxHp = boss.maxHp;

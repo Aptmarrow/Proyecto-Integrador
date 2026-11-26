@@ -113,6 +113,10 @@ export default function Game({ isDevMode = false }) {
   const [isBossRefilling, setIsBossRefilling] = useState(false);
   const [bossDisplayHpPercent, setBossDisplayHpPercent] = useState(100);
   const [spellcardName, setSpellcardName] = useState('Phase 1 "Vanguard Barrage"');
+  const [bossAvatarSrc, setBossAvatarSrc] = useState('/assets/sprites/FirstBoss.png');
+  const [isMinibossEncounter, setIsMinibossEncounter] = useState(false);
+  const [moIntroActive, setMoIntroActive] = useState(false);
+  const [moIntroProgress, setMoIntroProgress] = useState(0);
 
   const [stageBanner, setStageBanner] = useState(null);
   const [bossWarningActive, setBossWarningActive] = useState(false);
@@ -229,8 +233,8 @@ export default function Game({ isDevMode = false }) {
       },
       onEngineFrame: (engine) => {
         const now = performance.now();
-        // Sync React HUD at ~20Hz (60Hz during struggle, stage clear, or cinematic transitions)
-        const isTransitioning = engine.stageTransitionBlackAlpha > 0.005 || engine.stageRevealFlashAlpha > 0.005;
+        // Sync React HUD at ~20Hz (60Hz during struggle, stage clear, M.O intro, or cinematic transitions)
+        const isTransitioning = engine.stageTransitionBlackAlpha > 0.005 || engine.stageRevealFlashAlpha > 0.005 || engine.moIntroActive;
         if (now - lastHudSync < 48 && !engine.isBeamStruggle && !engine.isStageClear && !isTransitioning) {
           return;
         }
@@ -245,6 +249,10 @@ export default function Game({ isDevMode = false }) {
         setBossDisplayHpPercent(engine.displayHpPercent);
         setSpellcardName(engine.spellcardName);
         setShowBossHpBar(engine.showBossHpBar);
+        setBossAvatarSrc(engine.bossAvatarSrc);
+        setIsMinibossEncounter(engine.isMinibossEncounter);
+        setMoIntroActive(engine.moIntroActive);
+        setMoIntroProgress(engine.moIntroProgress);
         setStageBanner(
           engine.stageBanner ? { text: engine.stageBanner.text, subtext: engine.stageBanner.subtext } : null
         );
@@ -408,6 +416,8 @@ export default function Game({ isDevMode = false }) {
           showBossHpBar={showBossHpBar}
           bossRemainingStocks={bossRemainingStocks}
           spellcardName={spellcardName}
+          bossAvatarSrc={bossAvatarSrc}
+          isMiniboss={isMinibossEncounter}
           isBossRefilling={isBossRefilling}
           bossDisplayHpPercent={bossDisplayHpPercent}
           workerModeLabel={workerModeLabel}
@@ -429,6 +439,8 @@ export default function Game({ isDevMode = false }) {
               stageBanner={stageBanner}
               bossWarningActive={bossWarningActive}
               spellcardBanner={spellcardBanner}
+              moIntroActive={moIntroActive}
+              moIntroProgress={moIntroProgress}
               isStruggleAligning={isStruggleAligning}
               isBeamStruggle={isBeamStruggle}
               struggleProgress={struggleProgress}

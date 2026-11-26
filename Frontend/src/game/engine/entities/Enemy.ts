@@ -4,9 +4,9 @@ import type { BulletSystem } from '../systems/BulletSystem';
 
 export interface EnemyConfig {
   id?: string;
-  type?: EnemyType;
-  trajectory?: TrajectoryType;
-  attackPattern?: AttackPatternType;
+  type?: EnemyType | string;
+  trajectory?: TrajectoryType | string;
+  attackPattern?: AttackPatternType | string;
   startX: number;
   startY: number;
   hp?: number;
@@ -17,6 +17,7 @@ export interface EnemyConfig {
   shootInterval?: number;
   shootDelay?: number;
   texture?: PIXI.Texture;
+  isMiniboss?: boolean;
   customParams?: Record<string, any>;
 }
 
@@ -26,9 +27,9 @@ export class Enemy {
   public initialPos: { x: number; y: number };
   public hp: number;
   public maxHp: number;
-  public type: EnemyType;
-  public trajectory: TrajectoryType;
-  public attackPattern: AttackPatternType;
+  public type: EnemyType | string;
+  public trajectory: TrajectoryType | string;
+  public attackPattern: AttackPatternType | string;
   public speed: number;
   public radius: number;
   public scoreValue: number;
@@ -39,6 +40,9 @@ export class Enemy {
   public isDead: boolean = false;
   public isOffscreen: boolean = false;
   public flashTimer: number = 0;
+  public isMiniboss: boolean = false;
+  public fuseProgress: number = 0;
+  public facingAngle: number = Math.PI;
   public customParams: Record<string, any>;
 
   public container = new PIXI.Container();
@@ -53,6 +57,7 @@ export class Enemy {
     this.attackPattern = config.attackPattern || 'aimed_single';
     this.pos = { x: config.startX, y: config.startY };
     this.initialPos = { x: config.startX, y: config.startY };
+    this.isMiniboss = Boolean(config.isMiniboss);
     this.speed = config.speed ?? (this.type === 'big_fairy' ? 90 : 160);
     this.hp = config.hp ?? (this.type === 'big_fairy' ? 80 : (this.type === 'red_fairy' ? 25 : 12));
     this.maxHp = this.hp;
@@ -68,9 +73,15 @@ export class Enemy {
     if (config.texture) {
       const sprite = new PIXI.Sprite(config.texture);
       sprite.anchor.set(0.5);
-      this.baseScale = this.type === 'big_fairy' ? 1.0 : 0.8;
+      this.baseScale = this.isMiniboss ? 0.84 : (this.type === 'third_enemy' ? 0.54 : (this.type === 'big_fairy' ? 0.9 : 0.44));
       sprite.scale.set(this.baseScale);
       this.sprite = sprite;
+      if (this.isMiniboss) {
+        const ring = this.wingGlow;
+        ring.lineStyle(2.5, 0x00f2fe, 0.55);
+        ring.drawCircle(0, 0, 56);
+        this.container.addChild(ring);
+      }
       this.container.addChild(sprite);
     } else {
       this.sprite = this.createProceduralGraphics();
@@ -79,6 +90,53 @@ export class Enemy {
     }
 
     this.container.position.set(this.pos.x, this.pos.y);
+  }
+
+  private applySpriteOrientation(sprite: PIXI.Sprite, sx: number, sy: number, worldAngle: number): void {
+    // Textures face LEFT by default (angle = PI). When aiming right, flip horizontally to avoid rendering upside-down.
+    if (Math.cos(worldAngle) > 0) {
+      sprite.scale.set(-sx, sy);
+      sprite.rotation = worldAngle;
+    } else {
+      sprite.scale.set(sx, sy);
+      sprite.rotation = Math.atan2(Math.sin(worldAngle - Math.PI), Math.cos(worldAngle - Math.PI));
+    }
+  }
+
+  public syncRemoteVisuals(
+    animTimer: number,
+    fuseProgress?: number,
+    angle?: number,
+    playerPos?: { x: number; y: number }
+  ): void {
+    if (typeof fuseProgress === 'number') {
+      this.fuseProgress = fuseProgress;
+    }
+
+    const desiredAngle =
+      typeof angle === 'number'
+        ? angle
+        : playerPos
+          ? Math.atan2(playerPos.y - this.pos.y, playerPos.x - this.pos.x)
+          : this.facingAngle;
+    const diff = Math.atan2(Math.sin(desiredAngle - this.facingAngle), Math.cos(desiredAngle - this.facingAngle));
+    this.facingAngle += diff * 0.4;
+
+    if (this.sprite instanceof PIXI.Sprite) {
+      const pulseSpeed = this.type === 'mo_enemy2' ? 8 + this.fuseProgress * 28 : 7;
+      const pulseAmp = this.type === 'mo_enemy2' ? 0.04 + this.fuseProgress * 0.14 : 0.025;
+      const breath = Math.sin(animTimer * pulseSpeed) * pulseAmp;
+      this.applySpriteOrientation(this.sprite, this.baseScale + breath, this.baseScale - breath * 0.6, this.facingAngle);
+      if (this.type === 'mo_enemy2' && this.fuseProgress > 0.03) {
+        const warnFlash = Math.sin(animTimer * (12 + this.fuseProgress * 30)) > 0;
+        this.sprite.tint = warnFlash ? 0xff4444 : 0xffffff;
+      } else {
+        this.sprite.tint = 0xffffff;
+      }
+    }
+    if (this.isMiniboss) {
+      this.wingGlow.rotation = animTimer * 1.4;
+    }
   }
 
   private createProceduralGraphics(): PIXI.Graphics {
@@ -164,8 +222,11 @@ export class Enemy {
     this.renderWings(animTimer);
 
     if (this.sprite instanceof PIXI.Sprite) {
+      const desired = Math.atan2(playerPos.y - this.pos.y, playerPos.x - this.pos.x);
+      const diff = Math.atan2(Math.sin(desired - this.facingAngle), Math.cos(desired - this.facingAngle));
+      this.facingAngle += diff * Math.min(1, dt * 12);
       const breath = Math.sin(animTimer * 12) * 0.05;
-      this.sprite.scale.set(this.baseScale + breath, this.baseScale - breath);
+      this.applySpriteOrientation(this.sprite, this.baseScale + breath, this.baseScale - breath, this.facingAngle);
       this.sprite.tint = this.flashTimer > 0 ? 0xffffff : 0xffffff;
     }
   }

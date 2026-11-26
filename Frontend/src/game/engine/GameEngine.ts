@@ -156,6 +156,22 @@ export class GameEngine extends BaseStageEngine {
     return this.boss.isSpellCard;
   }
 
+  public get bossAvatarSrc(): string {
+    return this.boss.currentSpriteUrl || '/assets/sprites/FirstBoss.png';
+  }
+
+  public get isMinibossEncounter(): boolean {
+    return Boolean(this.boss.isMinibossHud);
+  }
+
+  public get moIntroActive(): boolean {
+    return Boolean(this.boss.moIntroActive);
+  }
+
+  public get moIntroProgress(): number {
+    return this.boss.moIntroProgress || 0;
+  }
+
   public get playerPos() {
     return this.player.pos;
   }
@@ -437,7 +453,8 @@ export class GameEngine extends BaseStageEngine {
 
   public applyBackendBoss(boss: ServerBoss): void {
     this.networkSync.applyBossSnapshot(boss, this.boss, this.SCALE_X, this.SCALE_Y);
-    if (boss.isActive && !boss.isDefeated) {
+    const hudBossActive = Boolean(boss.isActive || boss.renderHudOnly);
+    if (hudBossActive && !boss.isDefeated) {
       this.showBossHpBar = true;
       this.isStageClear = false;
       const nextSpell = boss.spellcardName || boss.spellcard || '';
@@ -449,7 +466,7 @@ export class GameEngine extends BaseStageEngine {
           this.shakeTimer = Math.max(this.shakeTimer, 0.35);
         }
       }
-    } else if (!boss.isActive && !boss.isDefeated) {
+    } else if (!hudBossActive && !boss.isDefeated) {
       this.showBossHpBar = false;
       this.boss.isActive = false;
       this.lastSyncedSpellcard = '';
@@ -624,8 +641,9 @@ export class GameEngine extends BaseStageEngine {
       if (this.spellcardBanner.timer <= 0) this.spellcardBanner.active = false;
     }
 
-    // 5. Boss & Item visual sync (render magic circles, refilling aura, dropped items)
-    this.boss.syncVisuals(dt, this.animTimer);
+    // 5. Boss, Enemy & Item visual sync
+    this.boss.syncVisuals(dt, this.animTimer, this.SCALE_X, this.SCALE_Y);
+    this.enemySystem.syncRemoteVisuals(this.animTimer, this.player.pos);
     this.itemSystem.render(this.animTimer);
 
     // 6. Actualizar Láseres y Renderizado de Choque
@@ -673,7 +691,7 @@ export class GameEngine extends BaseStageEngine {
     this.wallSystem.render(this.wallGraphics, this.animTimer);
 
     // 9. Renderizar Balas
-    this.bulletSystem.render(this.bulletGraphics);
+    this.bulletSystem.render(this.bulletGraphics, this.animTimer);
 
     // 10. Aplicar Temblor de Pantalla
     this.applyScreenShake(dt, 8);

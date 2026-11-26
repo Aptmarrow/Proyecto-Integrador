@@ -7,6 +7,7 @@
  */
 
 const { computeBossMovement, fireBossPattern } = require('../campaign/spaceThemesAndWaves');
+const { updateMechanicalOphanim } = require('../campaign/normalCampaignOverhaul');
 
 const BOSS_PHASES = [
   { phase: 1, name: 'Fase 1 "Patrulla Lagrange"', isSpellCard: false, maxHp: 112, pattern: 'crescent_fan', shootInterval: 0.44, laserMode: 'targeted', laserInterval: 4.8, megaLaserInterval: 0 },
@@ -27,6 +28,17 @@ class BossController {
     this._moveArchetype = 'orbital_lissajous';
     this._speedScale = 1.0;
     this._squadScale = 1.0;
+
+    this.bossId = 'first_boss';
+    this.fullBossName = 'FirstBoss';
+    this.sprite = '/assets/sprites/FirstBoss.png';
+    this.angle = Math.PI;
+    this._introDuration = 0;
+    this.moIntroActive = false;
+    this.moIntroProgress = 0;
+    this.moDashState = 'idle';
+    this.moDashLines = [];
+    this._moState = null;
 
     this.hp = this._phases[0].maxHp;
     this.maxHp = this._phases[0].maxHp;
@@ -64,11 +76,19 @@ class BossController {
       this._palette = bossProfile.palette || [0x00f2fe, 0xff2b5b, 0xffdd00];
       this._moveArchetype = bossProfile.moveArchetype || 'orbital_lissajous';
       this._speedScale = bossProfile.speedScale || 1.0;
+      this.bossId = bossProfile.bossId || 'first_boss';
+      this.fullBossName = bossProfile.fullBossName || bossProfile.bossName || 'FirstBoss';
+      this.sprite = bossProfile.sprite || '/assets/sprites/FirstBoss.png';
+      this._introDuration = bossProfile.introDuration || 0;
     } else {
       this._phases = BOSS_PHASES;
       this._palette = [0x00f2fe, 0xff2b5b, 0xffdd00];
       this._moveArchetype = 'orbital_lissajous';
       this._speedScale = 1.0;
+      this.bossId = 'first_boss';
+      this.fullBossName = 'FirstBoss';
+      this.sprite = '/assets/sprites/FirstBoss.png';
+      this._introDuration = 0;
     }
     const p0Hp = Math.round(this._phases[0].maxHp * this._squadScale);
     this.hp = p0Hp;
@@ -99,29 +119,66 @@ class BossController {
     this._shotIndex = 0;
     this._laserTimer = 1.5;
     this._megaLaserTimer = 0;
+    this.angle = Math.PI;
+    this.moDashState = 'idle';
+    this.moDashLines = [];
+
+    if (this.bossId === 'mo') {
+      this._introProgress = 1.0;
+      this.x = 670;
+      this.isRefilling = false;
+      this.moIntroActive = true;
+      this.moIntroProgress = 0;
+      this._moState = {
+        mode: 'intro',
+        timer: 0,
+        introDuration: this._introDuration || 3.8,
+        lineIndex: 0,
+        segIndex: 0,
+        dashChain: [],
+        dashHitPlayers: new Set(),
+        sparkAccum: 0,
+        restShotAccum: 0,
+      };
+    } else {
+      this.moIntroActive = false;
+      this.moIntroProgress = 0;
+      this._moState = null;
+    }
   }
 
-  update(dt, playerPos, bulletSystem, laserSystem) {
+  update(dt, playerPos, bulletSystem, laserSystem, onMoContactDamage = null) {
     if (!this.isActive || this.isDefeated) return;
 
     this._animTimer += dt;
 
-    // 1. Intro animation
+    // 1. Refill transition (between phases 2..5)
+    if (this.isRefilling) {
+      this.refillTimer -= dt;
+      if (this.bossId === 'mo') {
+        this.x += (400 - this.x) * Math.min(1, dt * 6);
+        this.y += (300 - this.y) * Math.min(1, dt * 6);
+        this.angle = Math.PI;
+      }
+      if (this.refillTimer <= 0) {
+        this.isRefilling = false;
+        this.isInvulnerable = false;
+      }
+      return;
+    }
+
+    // 2. Special Mecanical Ophanim (M.O) state machine
+    if (this.bossId === 'mo' && this._moState && !this.isLockedForBeam) {
+      updateMechanicalOphanim(this, dt, playerPos, bulletSystem, onMoContactDamage);
+      return;
+    }
+
+    // 3. Standard Intro animation
     if (this._introProgress < 1.0) {
       this._introProgress = Math.min(1.0, this._introProgress + dt * 0.9);
       const ease = 1 - Math.pow(1 - this._introProgress, 3);
       this.x = 820 + (this.targetX - 820) * ease;
       this.y = this.targetY;
-      return;
-    }
-
-    // 2. Refill transition
-    if (this.isRefilling) {
-      this.refillTimer -= dt;
-      if (this.refillTimer <= 0) {
-        this.isRefilling = false;
-        this.isInvulnerable = false;
-      }
       return;
     }
 
@@ -137,6 +194,9 @@ class BossController {
     const nextPos = computeBossMovement(this._moveArchetype, this.targetX, this.targetY, this._animTimer, this.phase);
     this.x = Math.max(540, Math.min(755, nextPos.x));
     this.y = Math.max(85, Math.min(515, nextPos.y));
+    if (playerPos) {
+      this.angle = Math.atan2(playerPos.y - this.y, playerPos.x - this.x);
+    }
 
     // 4. Execute level-specific phase pattern
     const phaseDef = this._phases[this.phase - 1] || this._phases[0];
@@ -159,8 +219,8 @@ class BossController {
           speedScale: this._speedScale,
           phase: this.phase,
         },
-        (bx, by, angle, speed, radius, color, damage) => {
-          bulletSystem.spawn('boss', bx, by, angle, speed, radius, 4.4, 'normal', damage || 5, color);
+        (bx, by, angle, speed, radius, color, damage, opts = null) => {
+          bulletSystem.spawn('boss', bx, by, angle, speed, radius, 4.4, 'normal', damage || 5, color, opts);
         }
       );
     }
@@ -243,6 +303,11 @@ class BossController {
         this._shootTimer = 0;
         this._laserTimer = 0;
         this._megaLaserTimer = 0;
+        if (this._moState && this._moState.mode !== 'intro') {
+          this._moState.mode = 'resting';
+          this._moState.timer = 1.2;
+          this.moDashLines = [];
+        }
 
         if (this.onPhaseChange) {
           this.onPhaseChange(this.phase, this.spellcardName, this.isSpellCard);
@@ -277,6 +342,12 @@ class BossController {
     this.isInvulnerable = false;
     this.isRefilling = false;
     this.isLockedForBeam = false;
+    this.angle = Math.PI;
+    this.moIntroActive = false;
+    this.moIntroProgress = 0;
+    this.moDashState = 'idle';
+    this.moDashLines = [];
+    this._moState = null;
     this.x = 800;
     this.y = 300;
   }
@@ -295,6 +366,14 @@ class BossController {
       isDefeated: this.isDefeated,
       isRefilling: this.isRefilling,
       isLockedForBeam: this.isLockedForBeam,
+      bossId: this.bossId,
+      fullBossName: this.fullBossName,
+      sprite: this.sprite,
+      angle: Number((this.angle ?? Math.PI).toFixed(3)),
+      moIntroActive: Boolean(this.moIntroActive),
+      moIntroProgress: Number((this.moIntroProgress || 0).toFixed(3)),
+      moDashState: this.moDashState || 'idle',
+      moDashLines: this.moDashLines || [],
     };
   }
 }

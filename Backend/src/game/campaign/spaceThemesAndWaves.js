@@ -730,6 +730,11 @@ function computeBossMovement(moveArchetype, targetX, targetY, t, phase) {
  * Backend (`Boss.js`) and Frontend Worker (`gameSimulation.worker.ts`) share identical patterns!
  */
 function fireBossPattern(patternId, ctx, emitBullet) {
+  const { fireNormalBossPattern } = require('./normalCampaignOverhaul');
+  if (fireNormalBossPattern(patternId, ctx, emitBullet)) {
+    return;
+  }
+
   const { bossX, bossY, playerX, playerY, animTimer, shotIndex, palette, speedScale = 1.0, phase = 1 } = ctx;
   const c0 = palette[0] || 0x00f2fe;
   const c1 = palette[1] || 0xff2b5b;

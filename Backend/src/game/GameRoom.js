@@ -81,18 +81,47 @@ class GameRoom {
     return 1 + (n - 1) * 0.42;
   }
 
+  _spawnEndMiniboss(minibossConfig) {
+    if (!minibossConfig) return;
+    if (this.enemySystem.active.some((e) => e.isMiniboss && !e.isDead)) return;
+    this.enemySystem.spawn({
+      ...minibossConfig,
+      isMiniboss: true,
+      hp: Math.round((minibossConfig.hp || 450) * this._getSquadHpScale()),
+    });
+  }
+
+  _handleMinibossDefeated(x, y) {
+    if (this.campaign.stageState === 'stage_clear') return;
+    this.campaign.markStageCleared();
+    this.bulletSystem.clearByOwner('boss');
+    this.laserSystem.lasers = [];
+    this.itemSystem.spawnItemFountain(x, y, 16);
+    if (this.campaign.hasNextStage()) {
+      this._autoAdvanceTimer = AUTO_ADVANCE_DURATION;
+    }
+  }
+
   spawnBossNow() {
     const config = this.campaign.getStageConfig();
     this.enemySystem.clear();
     this.bulletSystem.clearByOwner('boss');
     this.campaign.stageState = 'boss_battle';
-    this.boss.configure(config.bossProfile, this._getSquadHpScale());
-    this.boss.spawn(685, 300);
-    this.boss._introProgress = 1.0;
-    this.boss.x = 685;
-    this.boss.y = 300;
-    this.boss.isRefilling = false;
-    this.boss.isInvulnerable = false;
+
+    if (config.hasBoss === false && config.miniboss) {
+      this._spawnEndMiniboss(config.miniboss);
+    } else {
+      this.boss.configure(config.bossProfile, this._getSquadHpScale());
+      this.boss.spawn(685, 300);
+      this.boss._introProgress = 1.0;
+      if (this.boss.bossId !== 'mo') {
+        this.boss.x = 685;
+        this.boss.y = 300;
+        this.boss.isRefilling = false;
+        this.boss.isInvulnerable = false;
+      }
+    }
+
     for (const ev of this.timeline.events) {
       ev.executed = true;
     }
@@ -158,6 +187,10 @@ class GameRoom {
       })
       .on('boss_warning', () => {
         this.campaign.stageState = 'boss_warning';
+      })
+      .on('spawn_miniboss', (payload) => {
+        this.campaign.stageState = 'boss_battle';
+        this._spawnEndMiniboss(payload?.miniboss || config.miniboss);
       })
       .on('spawn_boss', () => {
         this.campaign.stageState = 'boss_battle';
@@ -299,7 +332,19 @@ class GameRoom {
     // 3. Update boss AI and patterns
     if (this.boss.isActive && !this.boss.isDefeated) {
       const playerPos = this._getAveragePlayerPos();
-      this.boss.update(deltaTime, playerPos, this.bulletSystem, this.laserSystem);
+      this.boss.update(deltaTime, playerPos, this.bulletSystem, this.laserSystem, (bx, by, radius, damage, hitSet) => {
+        const r2 = (radius + 10) * (radius + 10);
+        for (const [pid, player] of this.players) {
+          if (!player.active || player.hp <= 0 || hitSet.has(pid)) continue;
+          const pos = player.body.getPosition();
+          const dx = pos.x - bx;
+          const dy = pos.y - by;
+          if (dx * dx + dy * dy <= r2) {
+            hitSet.add(pid);
+            this.applyDamageToPlayer(player, damage);
+          }
+        }
+      });
     }
 
     // 4. Unlock boss beam if mega laser finished
@@ -310,11 +355,28 @@ class GameRoom {
 
     // 5. Update enemy system
     const playerPos = this._getAveragePlayerPos();
-    const enemyDefeats = this.enemySystem.update(deltaTime, this.bulletSystem, playerPos);
+    const enemyDefeats = this.enemySystem.update(deltaTime, this.bulletSystem, playerPos, {
+      players: this.players,
+      onKamikazeExplode: (ex, ey, radius, damage) => {
+        const r2 = radius * radius;
+        for (const [, p] of this.players) {
+          if (!p.active || p.hp <= 0) continue;
+          const pos = p.body.getPosition();
+          const dx = pos.x - ex;
+          const dy = pos.y - ey;
+          if (dx * dx + dy * dy <= r2) {
+            this.applyDamageToPlayer(p, damage);
+          }
+        }
+      },
+    });
 
     // 6. Spawn items from defeated enemies and grant squad SP
     for (const defeat of enemyDefeats) {
       this.itemSystem.spawnItem(defeat.x, defeat.y, defeat.itemDrop);
+      if (defeat.isMiniboss) {
+        this._handleMinibossDefeated(defeat.x, defeat.y);
+      }
       for (const [, p] of this.players) {
         if (p.active && p.hp > 0) {
           const stats = p.stats || DEFAULT_PLAYER_STATS;
@@ -384,6 +446,9 @@ class GameRoom {
               e.isDead = true;
               this.itemSystem.spawnItem(e.x, e.y, e.itemDrop);
               this.enemySystem.active.splice(i, 1);
+              if (e.isMiniboss) {
+                this._handleMinibossDefeated(e.x, e.y);
+              }
             }
           }
         }
