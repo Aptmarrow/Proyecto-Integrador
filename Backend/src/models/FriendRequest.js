@@ -29,7 +29,7 @@ const FriendRequest = {
         `SELECT fr.id, fr.sender_id, fr.receiver_id, fr.status, fr.created_at,
                 u.username AS sender_username
          FROM friend_request fr
-         JOIN user u ON u.id = fr.sender_id
+         JOIN users u ON u.id = fr.sender_id
          WHERE fr.receiver_id = ? AND fr.status = 0`
       )
       .all(receiverId);

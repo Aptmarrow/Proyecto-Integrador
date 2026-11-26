@@ -9,9 +9,18 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+// ---- Migration: rename reserved table name `user` -> `users` ----
+{
+  const hasOldUser = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='user'").get();
+  const hasNewUsers = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'").get();
+  if (hasOldUser && !hasNewUsers) {
+    db.exec('ALTER TABLE "user" RENAME TO users;');
+  }
+}
+
 // ---- Schema ----
 db.exec(`
-  CREATE TABLE IF NOT EXISTS user (
+  CREATE TABLE IF NOT EXISTS users (
     id          TEXT    NOT NULL PRIMARY KEY,
     username    TEXT    NOT NULL,
     email       TEXT    NOT NULL UNIQUE,
@@ -23,29 +32,29 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS user_session (
     id         TEXT    NOT NULL PRIMARY KEY,
-    user_id    TEXT    NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    user_id    TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at INTEGER NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS friend (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id        TEXT    NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-    friend_user_id TEXT    NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    user_id        TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    friend_user_id TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(user_id, friend_user_id)
   );
 
   CREATE TABLE IF NOT EXISTS friend_request (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    sender_id   TEXT    NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-    receiver_id TEXT    NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    sender_id   TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    receiver_id TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status      INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS inventory (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    owner_id TEXT    NOT NULL UNIQUE REFERENCES user(id) ON DELETE CASCADE,
+    owner_id TEXT    NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
     scraps   INTEGER NOT NULL DEFAULT 0
   );
 
@@ -89,7 +98,7 @@ db.exec(`
 // ---- Migrations (columns added after initial schema) ----
 // SQLite does not support IF NOT EXISTS in ALTER TABLE, so we catch the error.
 const migrations = [
-  'ALTER TABLE user ADD COLUMN danmas INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE users ADD COLUMN danmas INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE chip DROP COLUMN chip_stats_id',
 ];
 for (const sql of migrations) {
@@ -100,13 +109,13 @@ for (const sql of migrations) {
   }
 }
 
-// Migration: remove user.inventory_id if it exists (avoids circular FK deadlock)
+// Migration: remove users.inventory_id if it exists (avoids circular FK deadlock)
 {
-  const cols = db.prepare('PRAGMA table_info(user)').all();
+  const cols = db.prepare('PRAGMA table_info(users)').all();
   if (cols.some(c => c.name === 'inventory_id')) {
     db.pragma('foreign_keys = OFF');
     db.exec(`
-      CREATE TABLE IF NOT EXISTS user_migrated (
+      CREATE TABLE IF NOT EXISTS users_migrated (
         id          TEXT    NOT NULL PRIMARY KEY,
         username    TEXT    NOT NULL,
         email       TEXT    NOT NULL UNIQUE,
@@ -115,11 +124,11 @@ for (const sql of migrations) {
         verification_token TEXT,
         danmas      INTEGER NOT NULL DEFAULT 0
       );
-      INSERT INTO user_migrated (id, username, email, password, is_verified, verification_token, danmas)
+      INSERT INTO users_migrated (id, username, email, password, is_verified, verification_token, danmas)
         SELECT id, username, email, password, is_verified, verification_token, danmas
-        FROM user;
-      DROP TABLE user;
-      ALTER TABLE user_migrated RENAME TO user;
+        FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_migrated RENAME TO users;
     `);
     db.pragma('foreign_keys = ON');
   }

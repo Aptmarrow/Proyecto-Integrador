@@ -58,7 +58,7 @@ async function tryRegister(email, password, username) {
 
 function forceVerify(email) {
   const db = new Database(DB_PATH);
-  const result = db.prepare('UPDATE user SET is_verified = 1, verification_token = NULL WHERE email = ?').run(email);
+  const result = db.prepare('UPDATE users SET is_verified = 1, verification_token = NULL WHERE email = ?').run(email);
   db.close();
   if (result.changes > 0) log('setup', `${email} verificado en DB`);
 }
