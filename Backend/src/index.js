@@ -24,7 +24,7 @@ async function start() {
       if (
         !origin ||
         allowedOrigins.includes(origin) ||
-        /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+        /^http:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin) ||
         /\.ngrok(-free)?\.(app|dev|io)$/.test(origin)
       ) {
         cb(null, true);
@@ -34,14 +34,25 @@ async function start() {
     },
   });
 
-  // Rate limiting backed by Redis
+  // Rate limiting (built-in in-memory cache)
   await fastify.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute',
-    redis,
     keyGenerator: (req) =>
       req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip,
   });
+
+  fastify.get('/', async () => ({
+    name: 'Danmakrew API',
+    status: 'ok',
+    frontendUrl: allowedOrigins[0] || 'http://localhost:3000',
+    message: 'Este puerto (8080) es solo la API REST. Abre la web y el juego en http://localhost:3000',
+  }));
+
+  fastify.get('/api/health', async () => ({
+    status: 'ok',
+    wsPort: parseInt(process.env.WS_PORT || '9001', 10),
+  }));
 
   fastify.register(userRoutes, { prefix: '/api/auth' });
   fastify.register(roomRoutes, { prefix: '/api' });

@@ -71,7 +71,6 @@ async function userRoutes(fastify) {
       } catch (err) {
         fastify.log.warn({ err }, 'No se pudo reenviar el email de verificación.');
       }
-
       return reply.send({
         message: 'Ese email ya está registrado, pero no verificado. Te reenviamos el correo de verificación.',
       });
