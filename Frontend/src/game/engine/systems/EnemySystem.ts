@@ -9,6 +9,8 @@ export class EnemySystem {
   public enemies: Enemy[] = [];
   public container: PIXI.Container;
   private textures: Record<string, PIXI.Texture> = {};
+  private enemyMap = new Map<string, Enemy>();
+  private activeIds = new Set<string>();
 
   constructor(parentContainer?: PIXI.Container) {
     this.container = new PIXI.Container();
@@ -22,17 +24,24 @@ export class EnemySystem {
   }
 
   public applyBackendEnemies(serverEnemies: ServerEnemy[], scaleX: number, scaleY: number): void {
-    const currentIds = new Set(serverEnemies.map(e => e.id));
+    this.activeIds.clear();
+    for (let i = 0; i < serverEnemies.length; i++) {
+      this.activeIds.add(serverEnemies[i].id);
+    }
+
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
-      if (!currentIds.has(e.id)) {
+      if (!this.activeIds.has(e.id)) {
+        this.enemyMap.delete(e.id);
         e.destroy();
-        this.enemies.splice(i, 1);
+        const last = this.enemies.pop()!;
+        if (i < this.enemies.length) this.enemies[i] = last;
       }
     }
 
-    for (const se of serverEnemies) {
-      let existing = this.enemies.find(e => e.id === se.id);
+    for (let i = 0; i < serverEnemies.length; i++) {
+      const se = serverEnemies[i];
+      let existing = this.enemyMap.get(se.id);
       const targetX = se.x * scaleX;
       const targetY = se.y * scaleY;
       if (!existing) {
@@ -51,6 +60,7 @@ export class EnemySystem {
           texture: tex,
         });
         this.enemies.push(existing);
+        this.enemyMap.set(se.id, existing);
       }
       existing.pos.x += (targetX - existing.pos.x) * 0.4;
       existing.pos.y += (targetY - existing.pos.y) * 0.4;
@@ -248,6 +258,7 @@ export class EnemySystem {
       enemy.destroy();
     }
     this.enemies = [];
+    this.enemyMap.clear();
   }
 
   public update(

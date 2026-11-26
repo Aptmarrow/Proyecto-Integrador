@@ -33,6 +33,30 @@ export class GameEngine extends BaseStageEngine {
   public stageRevealFlashAlpha: number = 0;
   private revealCurtainTimer: number = 0;
   private revealFlashTimer: number = 0;
+  private hadSpellcardOverlay: boolean = false;
+  private readonly reusableStruggleState = {
+    active: false,
+    isAligning: false,
+    balance: 50,
+    clashX: 400,
+    clashY: 300,
+    playerTipX: undefined as number | undefined,
+    bossTipX: undefined as number | undefined,
+    vortexX: undefined as number | undefined,
+    vortexY: undefined as number | undefined,
+    winner: null as 'player' | 'boss' | null,
+    resolutionTimer: 0,
+  };
+  private readonly laserCallbacks = {
+    onPlayerHit: () => {},
+    onBossHit: () => {},
+    onShake: (mag: number) => {
+      this.shakeTimer = mag;
+    },
+    onSound: (path: string, vol: number) => {
+      this.playSound(path, vol);
+    },
+  };
 
   public get showBossHpBar(): boolean {
     return this._showBossHpBar || (!!this.boss && this.boss.isActive && !this.boss.isDefeated);
@@ -562,11 +586,10 @@ export class GameEngine extends BaseStageEngine {
       true
     );
 
-    // 3. Efecto de Micro-Pausa & Spotlight al Acumular Poder
-    this.spellcardOverlayGraphics.clear();
+    // 3. Efecto de Micro-Pausa & Spotlight al Acumular Poder (solo limpia/redibuja si está activo)
     if (isMasterSparkCharging) {
-      const progress = masterSpark.timer / masterSpark.chargeDuration;
-
+      this.hadSpellcardOverlay = true;
+      this.spellcardOverlayGraphics.clear();
       this.spellcardOverlayGraphics.beginFill(0x020108, 0.65);
       this.spellcardOverlayGraphics.drawRect(0, 0, 1024, 576);
       this.spellcardOverlayGraphics.endFill();
@@ -594,6 +617,9 @@ export class GameEngine extends BaseStageEngine {
         this.spellcardOverlayGraphics.lineTo(x2, y2);
       }
       this.spellcardOverlayGraphics.lineStyle(0);
+    } else if (this.hadSpellcardOverlay) {
+      this.spellcardOverlayGraphics.clear();
+      this.hadSpellcardOverlay = false;
     }
 
     // 4. Actualizar Banners de Texto y Transición Automática (Negro -> Mini Destello)
@@ -628,21 +654,20 @@ export class GameEngine extends BaseStageEngine {
     this.boss.syncVisuals(dt, this.animTimer);
     this.itemSystem.render(this.animTimer);
 
-    // 6. Actualizar Láseres y Renderizado de Choque
+    // 6. Actualizar Láseres y Renderizado de Choque (reutilizando objetos sin asignaciones por frame)
     const authoritativeStruggleState = this.networkSync.getStruggleState();
-    const renderStruggleState = {
-      active: !!authoritativeStruggleState?.active,
-      isAligning: !!authoritativeStruggleState?.isAligning,
-      balance: authoritativeStruggleState?.balance ?? 50,
-      clashX: (authoritativeStruggleState?.clashX ?? 400) * this.SCALE_X,
-      clashY: (authoritativeStruggleState?.clashY ?? 300) * this.SCALE_Y,
-      playerTipX: authoritativeStruggleState?.playerTipX !== undefined ? authoritativeStruggleState.playerTipX * this.SCALE_X : undefined,
-      bossTipX: authoritativeStruggleState?.bossTipX !== undefined ? authoritativeStruggleState.bossTipX * this.SCALE_X : undefined,
-      vortexX: authoritativeStruggleState?.vortexX !== undefined ? authoritativeStruggleState.vortexX * this.SCALE_X : undefined,
-      vortexY: authoritativeStruggleState?.vortexY !== undefined ? authoritativeStruggleState.vortexY * this.SCALE_Y : undefined,
-      winner: authoritativeStruggleState?.winner ?? null,
-      resolutionTimer: authoritativeStruggleState?.resolutionTimer ?? 0,
-    };
+    const rs = this.reusableStruggleState;
+    rs.active = !!authoritativeStruggleState?.active;
+    rs.isAligning = !!authoritativeStruggleState?.isAligning;
+    rs.balance = authoritativeStruggleState?.balance ?? 50;
+    rs.clashX = (authoritativeStruggleState?.clashX ?? 400) * this.SCALE_X;
+    rs.clashY = (authoritativeStruggleState?.clashY ?? 300) * this.SCALE_Y;
+    rs.playerTipX = authoritativeStruggleState?.playerTipX !== undefined ? authoritativeStruggleState.playerTipX * this.SCALE_X : undefined;
+    rs.bossTipX = authoritativeStruggleState?.bossTipX !== undefined ? authoritativeStruggleState.bossTipX * this.SCALE_X : undefined;
+    rs.vortexX = authoritativeStruggleState?.vortexX !== undefined ? authoritativeStruggleState.vortexX * this.SCALE_X : undefined;
+    rs.vortexY = authoritativeStruggleState?.vortexY !== undefined ? authoritativeStruggleState.vortexY * this.SCALE_Y : undefined;
+    rs.winner = authoritativeStruggleState?.winner ?? null;
+    rs.resolutionTimer = authoritativeStruggleState?.resolutionTimer ?? 0;
 
     this.laserSystem.update(
       dt,
@@ -653,17 +678,8 @@ export class GameEngine extends BaseStageEngine {
       this.player.pos,
       this.boss,
       this.particleSystem,
-      {
-        onPlayerHit: () => {},
-        onBossHit: () => {},
-        onShake: (mag) => {
-          this.shakeTimer = mag;
-        },
-        onSound: (path, vol) => {
-          this.playSound(path, vol);
-        },
-      },
-      renderStruggleState
+      this.laserCallbacks,
+      rs
     );
 
     // 7. Renderizar Partículas FX
@@ -677,6 +693,11 @@ export class GameEngine extends BaseStageEngine {
 
     // 10. Aplicar Temblor de Pantalla
     this.applyScreenShake(dt, 8);
+  }
+
+  public override destroy(): void {
+    this.itemSystem.destroy();
+    super.destroy();
   }
 }
 

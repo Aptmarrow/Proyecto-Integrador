@@ -6,6 +6,7 @@ import { clearEnemyBulletsInPlayerBeam, getBossHitDamage, shouldHitPlayer } from
 
 export class LaserSystem {
   public lasers: LaserBeam[] = [];
+  private wasEmpty: boolean = true;
 
   public spawnLaser(
     sourceX: number,
@@ -65,6 +66,14 @@ export class LaserSystem {
       resolutionTimer?: number;
     }
   ): void {
+    if (this.lasers.length === 0) {
+      if (!this.wasEmpty) {
+        graphics.clear();
+        this.wasEmpty = true;
+      }
+      return;
+    }
+    this.wasEmpty = false;
     graphics.clear();
 
     // 1. Detectar si hay Choque de Rayos (Beam Struggle)

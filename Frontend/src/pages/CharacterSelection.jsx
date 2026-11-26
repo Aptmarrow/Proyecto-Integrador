@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import BulletBackground from '../components/BulletBackground';
 import { createRoom, deleteRoom, getRoom, getRoomByCode, getUsersList, joinRoom, leaveRoom, roomCodeFromRoomId, updateRoom, getCurrentUser, getIdToken, setIdToken, setCharacterColor, setPlayerReady, getStoredUserId, setStoredUserId } from '../services/api';
@@ -129,7 +129,7 @@ const TANK_EMBERS = [
   { left: '90%', delay: '1.0s', duration: '2.9s', size: '8px' },
 ];
 
-function RoleBackgroundEffects({ roleKey }) {
+const RoleBackgroundEffects = memo(function RoleBackgroundEffects({ roleKey }) {
   if (roleKey === 'DPS') {
     return (
       <div className="cs-role-fx-layer cs-fx-dps" aria-hidden="true">
@@ -228,9 +228,9 @@ function RoleBackgroundEffects({ roleKey }) {
   }
 
   return null;
-}
+});
 
-function CharacterRoleDisplay({ roleKey }) {
+const CharacterRoleDisplay = memo(function CharacterRoleDisplay({ roleKey }) {
   const theme = ROLE_THEMES[roleKey] || ROLE_THEMES.DPS;
   return (
     <div
@@ -251,6 +251,7 @@ function CharacterRoleDisplay({ roleKey }) {
         <img
           src={ROLE_PORTRAITS[roleKey] || ROLE_PORTRAITS.DPS}
           alt={roleKey}
+          decoding="async"
           className="cs-character-sprite-standalone"
           style={{
             objectPosition: theme.imgPosition,
@@ -271,7 +272,7 @@ function CharacterRoleDisplay({ roleKey }) {
       </div>
     </div>
   );
-}
+});
 
 const DIFFICULTY_META = DIFFICULTY_UI_META;
 
@@ -430,6 +431,15 @@ export default function CharacterSelection() {
   const refreshTimerRef = useRef(null);
   const launchTimerRef = useRef(null);
   const roomClosedRef = useRef(false);
+
+  useEffect(() => {
+    const urls = [...Object.values(ROLE_PORTRAITS), ...Object.values(ROLE_BACKGROUNDS)];
+    for (const url of urls) {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = url;
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;

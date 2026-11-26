@@ -1,4 +1,6 @@
-export default function GameHudHeader({
+import { memo } from 'react';
+
+function GameHudHeader({
   selectedClass,
   playerAvatarSrc,
   playerHpPercent,
@@ -219,7 +221,7 @@ export default function GameHudHeader({
             </div>
 
             <div className="dk-avatar-box dk-boss-avatar-box">
-              <img src="/assets/sprites/FirstBoss.png" alt="Jefe" className="dk-avatar-img dk-boss-img" />
+              <img src="/assets/sprites/FirstBoss.png" alt="Jefe" decoding="async" className="dk-avatar-img dk-boss-img" />
               <span className="dk-boss-active-pulse" />
             </div>
           </div>
@@ -228,4 +230,6 @@ export default function GameHudHeader({
     </header>
   );
 }
+
+export default memo(GameHudHeader);
 
