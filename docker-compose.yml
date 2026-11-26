@@ -23,11 +23,8 @@ services:
       - NODE_ENV=production
       - PORT=8080
       - HOST=0.0.0.0
-      - DB_PATH=/app/data/danmakrew.db
       - REDIS_URL=redis://redis:6379
       - WS_PORT=9001
-    volumes:
-      - sqlite_data:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -36,10 +33,13 @@ services:
   frontend:
     build:
       context: ./Frontend
+      args:
+        VITE_API_URL: /api
     ports:
       - "3000:3000"
+    depends_on:
+      - api
     restart: unless-stopped
 
 volumes:
-  sqlite_data:
   redis_data:

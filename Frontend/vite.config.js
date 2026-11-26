@@ -74,17 +74,38 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/signal': {
+        target: 'ws://localhost:9001',
+        ws: true,
+        changeOrigin: true,
+      },
+      '/game': {
+        target: 'ws://localhost:9001',
+        ws: true,
+        changeOrigin: true,
+      },
     },
   },
   preview: {
     port: 3000,
     host: true,
+    allowedHosts: true,
     // En Docker, el backend es alcanzable por el nombre del servicio "api"
     proxy: {
       '/api': {
         target: 'http://api:8080',
         changeOrigin: true,
         secure: false,
+      },
+      '/signal': {
+        target: 'ws://api:9001',
+        ws: true,
+        changeOrigin: true,
+      },
+      '/game': {
+        target: 'ws://api:9001',
+        ws: true,
+        changeOrigin: true,
       },
     },
   },

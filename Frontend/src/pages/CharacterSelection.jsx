@@ -393,8 +393,10 @@ function getWsSignalUrl() {
     }
   }
 
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${window.location.hostname}:9001/signal`;
+  if (window.location.protocol === 'https:') {
+    return `wss://${window.location.host}/signal`;
+  }
+  return `ws://${window.location.hostname}:9001/signal`;
 }
 
 export default function CharacterSelection() {

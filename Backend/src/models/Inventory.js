@@ -3,53 +3,62 @@ const Chip = require('./Chips');
 
 const Inventory = {
   // Crea el inventario para un usuario recién registrado
-  create(ownerId) {
-    db.prepare('INSERT INTO inventory (owner_id) VALUES (?)').run(ownerId);
+  async create(ownerId) {
+    await db.query(
+      'INSERT INTO inventory (owner_id) VALUES ($1) ON CONFLICT (owner_id) DO NOTHING',
+      [ownerId]
+    );
     return this.findByOwner(ownerId);
   },
 
-  findByOwner(ownerId) {
-    const inventory = db.prepare('SELECT * FROM inventory WHERE owner_id = ?').get(ownerId);
+  async findByOwner(ownerId) {
+    const { rows } = await db.query('SELECT * FROM inventory WHERE owner_id = $1', [ownerId]);
+    const inventory = rows[0];
     if (!inventory) return null;
 
-    inventory.character_skins = db
-      .prepare('SELECT skin_id FROM inventory_character_skin WHERE inventory_id = ?')
-      .all(inventory.id)
-      .map(r => r.skin_id);
+    const [charSkins, effSkins, chips] = await Promise.all([
+      db.query('SELECT skin_id FROM inventory_character_skin WHERE inventory_id = $1', [inventory.id]),
+      db.query('SELECT skin_id FROM inventory_effect_skin WHERE inventory_id = $1', [inventory.id]),
+      Chip.findByInventory(inventory.id),
+    ]);
 
-    inventory.effect_skins = db
-      .prepare('SELECT skin_id FROM inventory_effect_skin WHERE inventory_id = ?')
-      .all(inventory.id)
-      .map(r => r.skin_id);
-
-    inventory.chips = Chip.findByInventory(inventory.id);
+    inventory.character_skins = charSkins.rows.map((r) => r.skin_id);
+    inventory.effect_skins = effSkins.rows.map((r) => r.skin_id);
+    inventory.chips = chips;
 
     return inventory;
   },
 
   // Scraps
-  addScraps(ownerId, amount) {
-    db.prepare('UPDATE inventory SET scraps = scraps + ? WHERE owner_id = ?').run(amount, ownerId);
+  async addScraps(ownerId, amount) {
+    await db.query('UPDATE inventory SET scraps = scraps + $1 WHERE owner_id = $2', [amount, ownerId]);
   },
 
-  removeScraps(ownerId, amount) {
-    db.prepare('UPDATE inventory SET scraps = MAX(0, scraps - ?) WHERE owner_id = ?').run(amount, ownerId);
+  async removeScraps(ownerId, amount) {
+    await db.query(
+      'UPDATE inventory SET scraps = GREATEST(0, scraps - $1) WHERE owner_id = $2',
+      [amount, ownerId]
+    );
   },
 
   // Character skins (por ahora sólo IDs)
-  addCharacterSkin(ownerId, skinId) {
-    const inv = db.prepare('SELECT id FROM inventory WHERE owner_id = ?').get(ownerId);
-    db.prepare(
-      'INSERT OR IGNORE INTO inventory_character_skin (inventory_id, skin_id) VALUES (?, ?)'
-    ).run(inv.id, skinId);
+  async addCharacterSkin(ownerId, skinId) {
+    const { rows } = await db.query('SELECT id FROM inventory WHERE owner_id = $1', [ownerId]);
+    if (!rows[0]) return;
+    await db.query(
+      'INSERT INTO inventory_character_skin (inventory_id, skin_id) VALUES ($1, $2) ON CONFLICT (inventory_id, skin_id) DO NOTHING',
+      [rows[0].id, skinId]
+    );
   },
 
   // Effect skins (por ahora sólo IDs)
-  addEffectSkin(ownerId, skinId) {
-    const inv = db.prepare('SELECT id FROM inventory WHERE owner_id = ?').get(ownerId);
-    db.prepare(
-      'INSERT OR IGNORE INTO inventory_effect_skin (inventory_id, skin_id) VALUES (?, ?)'
-    ).run(inv.id, skinId);
+  async addEffectSkin(ownerId, skinId) {
+    const { rows } = await db.query('SELECT id FROM inventory WHERE owner_id = $1', [ownerId]);
+    if (!rows[0]) return;
+    await db.query(
+      'INSERT INTO inventory_effect_skin (inventory_id, skin_id) VALUES ($1, $2) ON CONFLICT (inventory_id, skin_id) DO NOTHING',
+      [rows[0].id, skinId]
+    );
   },
 };
 

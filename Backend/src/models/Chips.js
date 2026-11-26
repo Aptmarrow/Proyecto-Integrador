@@ -11,24 +11,10 @@ const STAT_KEYS = [
   'Crit_Damage',
 ];
 
-const STATS_COLS = STAT_KEYS.join(', ');
-const SELECT_STATS_COLS = STAT_KEYS.map((key) => `s.${key}`).join(', ');
-const STATS_PLACEHOLDERS = STAT_KEYS.map(() => '?').join(', ');
-const STATS_UPSERT_SET = STAT_KEYS.map((key) => `${key} = excluded.${key}`).join(', ');
-
-const chipWithStatsQuery = db.prepare(`
-  SELECT c.*, ${SELECT_STATS_COLS}
-  FROM chip c
-  LEFT JOIN chip_stats s ON s.chip_id = c.id
-  WHERE c.id = ?
-`);
-
-const chipsByInventoryQuery = db.prepare(`
-  SELECT c.*, ${SELECT_STATS_COLS}
-  FROM chip c
-  LEFT JOIN chip_stats s ON s.chip_id = c.id
-  WHERE c.inventory_id = ?
-`);
+const QUOTED_STATS_COLS = STAT_KEYS.map((key) => `"${key}"`).join(', ');
+const SELECT_STATS_COLS = STAT_KEYS.map((key) => `s."${key}"`).join(', ');
+const STATS_PLACEHOLDERS = STAT_KEYS.map((_, idx) => `$${idx + 2}`).join(', ');
+const STATS_UPSERT_SET = STAT_KEYS.map((key) => `"${key}" = EXCLUDED."${key}"`).join(', ');
 
 function rowToChip(row) {
   if (!row) return null;
@@ -39,8 +25,9 @@ function rowToChip(row) {
 
   for (const [key, value] of Object.entries(row)) {
     if (STAT_KEYS.includes(key)) {
-      stats[key] = value;
-      if (value !== null && value !== undefined) {
+      const normalized = value === null || value === undefined ? null : Number(value);
+      stats[key] = normalized;
+      if (normalized !== null) {
         hasStats = true;
       }
     } else {
@@ -55,44 +42,70 @@ function rowToChip(row) {
 const Chip = {
   STAT_KEYS,
 
-  findById(id) {
-    return rowToChip(chipWithStatsQuery.get(id));
+  async findById(id) {
+    const { rows } = await db.query(
+      `SELECT c.*, ${SELECT_STATS_COLS}
+       FROM chip c
+       LEFT JOIN chip_stats s ON s.chip_id = c.id
+       WHERE c.id = $1`,
+      [id]
+    );
+    return rowToChip(rows[0] || null);
   },
 
-  findByInventory(inventoryId) {
-    return chipsByInventoryQuery.all(inventoryId).map(rowToChip);
+  async findByInventory(inventoryId) {
+    const { rows } = await db.query(
+      `SELECT c.*, ${SELECT_STATS_COLS}
+       FROM chip c
+       LEFT JOIN chip_stats s ON s.chip_id = c.id
+       WHERE c.inventory_id = $1
+       ORDER BY c.id ASC`,
+      [inventoryId]
+    );
+    return rows.map(rowToChip);
   },
 
-  create({ inventoryId, name, rarity = 1, level = 1, image = null, stats = null }) {
-    const insertChip = db.transaction(() => {
-      const chipId = db.prepare(
-        'INSERT INTO chip (inventory_id, name, rarity, level, image) VALUES (?, ?, ?, ?, ?)'
-      ).run(inventoryId, name, rarity, level, image).lastInsertRowid;
+  async create({ inventoryId, name, rarity = 1, level = 1, image = null, stats = null }) {
+    const client = await db.pool.connect();
+    let chipId;
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        'INSERT INTO chip (inventory_id, name, rarity, level, image) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [inventoryId, name, rarity, level, image]
+      );
+      chipId = rows[0].id;
 
       if (stats && STAT_KEYS.some((key) => stats[key] !== undefined && stats[key] !== null)) {
         const values = STAT_KEYS.map((key) => stats[key] ?? null);
-        db.prepare(
-          `INSERT INTO chip_stats (chip_id, ${STATS_COLS}) VALUES (?, ${STATS_PLACEHOLDERS})`
-        ).run(chipId, ...values);
+        await client.query(
+          `INSERT INTO chip_stats (chip_id, ${QUOTED_STATS_COLS}) VALUES ($1, ${STATS_PLACEHOLDERS})`,
+          [chipId, ...values]
+        );
       }
 
-      return chipId;
-    });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
 
-    const chipId = insertChip();
     return this.findById(chipId);
   },
 
-  updateLevel(id, level) {
-    db.prepare('UPDATE chip SET level = ? WHERE id = ?').run(level, id);
+  async updateLevel(id, level) {
+    await db.query('UPDATE chip SET level = $1 WHERE id = $2', [level, id]);
   },
 
-  updateStats(chipId, stats = {}) {
+  async updateStats(chipId, stats = {}) {
     const values = STAT_KEYS.map((key) => stats[key] ?? null);
-    db.prepare(`
-      INSERT INTO chip_stats (chip_id, ${STATS_COLS}) VALUES (?, ${STATS_PLACEHOLDERS})
-      ON CONFLICT(chip_id) DO UPDATE SET ${STATS_UPSERT_SET}
-    `).run(chipId, ...values);
+    await db.query(
+      `INSERT INTO chip_stats (chip_id, ${QUOTED_STATS_COLS}) VALUES ($1, ${STATS_PLACEHOLDERS})
+       ON CONFLICT (chip_id) DO UPDATE SET ${STATS_UPSERT_SET}`,
+      [chipId, ...values]
+    );
   },
 };
 

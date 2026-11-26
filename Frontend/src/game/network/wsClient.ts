@@ -235,9 +235,12 @@ export class GameWSClient {
       if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL) {
         url = `${import.meta.env.VITE_WS_URL}/game?token=${encodeURIComponent(this.token)}`;
       } else if (typeof window !== 'undefined') {
-        const hostname = window.location.hostname || 'localhost';
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        url = `${protocol}//${hostname}:${this.defaultPort}/game?token=${encodeURIComponent(this.token)}`;
+        if (window.location.protocol === 'https:') {
+          url = `wss://${window.location.host}/game?token=${encodeURIComponent(this.token)}`;
+        } else {
+          const hostname = window.location.hostname || 'localhost';
+          url = `ws://${hostname}:${this.defaultPort}/game?token=${encodeURIComponent(this.token)}`;
+        }
       } else {
         url = `ws://localhost:${this.defaultPort}/game?token=${encodeURIComponent(this.token)}`;
       }

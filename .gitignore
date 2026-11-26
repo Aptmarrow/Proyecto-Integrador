@@ -31,6 +31,12 @@ specialHellData.json
 .env.*
 !.env.example
 
+# Certificados SSL / Claves privadas
+*.key
+*.pem
+*.crt
+HttpsNmg-*
+
 # ========================
 # Logs y temporales
 # ========================

@@ -261,3 +261,14 @@ export async function joinRoomByCode(code, password = '') {
   await joinRoom(room.id, password);
   return room;
 }
+
+// ==========================================
+// INVENTORY API
+// ==========================================
+
+export async function getUserInventory() {
+  const res = await fetch(`${API_BASE}/auth/user/inventory`, {
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
