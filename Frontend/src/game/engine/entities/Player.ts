@@ -116,7 +116,8 @@ export class Player {
     this.shootTimer = 0;
     const spritePath = this.getSpriteUrl(classId);
 
-    PIXI.Texture.fromURL(spritePath).then((texture) => {
+    try {
+      const texture = PIXI.Texture.from(spritePath);
       this.container.removeChildren();
 
       const sprite = new PIXI.Sprite(texture);
@@ -127,9 +128,9 @@ export class Player {
       this.sprite = sprite;
       this.container.addChild(sprite);
       this.container.addChild(this.hitbox);
-    }).catch(() => {
+    } catch {
       // Fallback a gráficos vectoriales si no carga
-    });
+    }
   }
 
   private getSpriteUrl(classId: string): string {
@@ -229,7 +230,8 @@ export class Player {
         Math.sin(angle) * 1100,
         6,
         0xff00ff,
-        this.stats.bulletDamage
+        this.stats.bulletDamage,
+        'support'
       );
     } else if (normClass === 'tank' || normClass === 'defense') {
       // Tank: Disparo pesado
@@ -240,11 +242,33 @@ export class Player {
         0,
         7,
         0x00ff88,
-        this.stats.bulletDamage
+        this.stats.bulletDamage,
+        'tank'
+      );
+    } else if (normClass === 'special_attack' || normClass === 'attack') {
+      // SP.ATK: Disparo mágico místico
+      bulletSystem.spawnPlayerBullet(
+        this.pos.x + 20,
+        this.pos.y,
+        1200,
+        0,
+        6,
+        0xa855f7,
+        this.stats.bulletDamage,
+        'special_attack'
       );
     } else {
-      // DPS / SP.ATK base: 5 balas por segundo de 5 de dano cada una (placeholder).
-      bulletSystem.spawnPlayerBullet(this.pos.x + 20, this.pos.y, 1200, 0, 5, 0x00f2fe, this.stats.bulletDamage);
+      // DPS: Fuego rápido físico
+      bulletSystem.spawnPlayerBullet(
+        this.pos.x + 20,
+        this.pos.y,
+        1200,
+        0,
+        5,
+        0xef4444,
+        this.stats.bulletDamage,
+        'dps'
+      );
     }
   }
 
@@ -296,7 +320,9 @@ export class Player {
           Math.cos(angle) * 1100,
           Math.sin(angle) * 1100,
           6,
-          0xff00ff
+          0xff00ff,
+          undefined,
+          'support'
         );
       }
       if (onSound) onSound('/assets/sounds/powerup.wav', 0.5);
@@ -311,7 +337,9 @@ export class Player {
         1300,
         0,
         5,
-        0x00f2fe
+        0x00f2fe,
+        undefined,
+        'dps'
       );
     }
     if (onSound) onSound('/assets/sounds/powerup.wav', 0.5);
