@@ -123,6 +123,19 @@ export async function verifyEmail({ userId, token, email }) {
   return handleResponse(res);
 }
 
+// ==========================================
+// ASSISTANT / CHATBOT API
+// ==========================================
+
+export async function askAssistant(question) {
+  const res = await fetch(`${API_BASE}/assistant/ask`, {
+    method: 'POST',
+    headers: HEADERS_JSON,
+    body: JSON.stringify({ question }),
+  });
+  return handleResponse(res);
+}
+
 export async function resendVerificationEmail(email) {
   const res = await fetch(`${API_BASE}/auth/resend-verification`, {
     method: 'POST',

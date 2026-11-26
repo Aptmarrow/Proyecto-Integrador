@@ -11,6 +11,7 @@ import LobbyBrowser from './pages/LobbyBrowser'
 import Game from './pages/Game'
 import OrientationGuard from './components/OrientationGuard'
 import ProtectedRoute from './components/ProtectedRoute'
+import DanmaBot from './components/DanmaBot'
 
 function App() {
   useEffect(() => {
@@ -40,6 +41,7 @@ function App() {
   return (
     <>
       <OrientationGuard />
+      <DanmaBot />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
