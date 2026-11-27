@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getIdToken, getStoredUserId } from '../services/api';
+import { clearLutCache } from '../game/engine/SpriteLutCache';
 import {
   GameRuntimeSession,
   clampLevelPart,
@@ -551,6 +552,7 @@ export default function Game({ isDevMode = false }) {
   }, []);
 
   const handleExitLobby = useCallback(() => {
+    clearLutCache();
     if (isSandboxRoute) {
       navigate('/dashboard');
       return;

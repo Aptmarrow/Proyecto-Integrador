@@ -5,6 +5,7 @@ import { createRoom, deleteRoom, getRoom, getRoomByCode, getUsersList, joinRoom,
 import {
   LUT_SAMPLE_VECTORS_A,
   LUT_SAMPLE_VECTORS_B,
+  clearLutCache,
   ensureFreshLutCache,
   getCachedLutProfile,
   verifyInputCalibrationSequence,
@@ -422,7 +423,7 @@ export default function CharacterSelection() {
   const [activeRoomId, setActiveRoomId] = useState('');
   const [connectingPlayerIds, setConnectingPlayerIds] = useState([]);
   const [launchCountdown, setLaunchCountdown] = useState(null);
-  const [lutProfile, setLutProfile] = useState(() => getCachedLutProfile());
+  const [lutProfile, setLutProfile] = useState(null);
   const [lutBanner, setLutBanner] = useState(false);
   const inputSeqRef = useRef([]);
   const calTimerRef = useRef(null);
@@ -448,14 +449,10 @@ export default function CharacterSelection() {
   }, []);
 
   useEffect(() => {
-    let active = true;
-    ensureFreshLutCache().then((fresh) => {
-      if (active && !fresh) {
-        setLutProfile(null);
-      }
-    });
     return () => {
-      active = false;
+      if (!isGameStartingRef.current) {
+        clearLutCache();
+      }
     };
   }, []);
 
@@ -582,7 +579,42 @@ export default function CharacterSelection() {
     : (selectedSpaceStage?.stageTitle || 'Sector Espacial');
   const roomPlayers = Array.isArray(room?.players) ? room.players : [];
   const hostId = room?.hostId || roomPlayers[0] || null;
+  const isConfirmedHost = Boolean(activeRoomId && hostId && currentUserId && hostId === currentUserId);
   const canEditSettings = hostId && currentUserId ? hostId === currentUserId : initialIsHost;
+
+  useEffect(() => {
+    if (!activeRoomId || !hostId || !currentUserId) return;
+
+    if (hostId !== currentUserId) {
+      inputSeqRef.current = [];
+      clearLutCache();
+      setLutProfile(null);
+      setLutBanner(false);
+      return;
+    }
+
+    let active = true;
+    const ctx = { roomId: activeRoomId, hostId };
+    const cached = getCachedLutProfile(ctx);
+    if (!cached) {
+      setLutProfile(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    setLutProfile(cached);
+    ensureFreshLutCache(ctx).then((fresh) => {
+      if (active && !fresh) {
+        setLutProfile(null);
+        setLutBanner(false);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [activeRoomId, hostId, currentUserId]);
   const joinerIds = useMemo(
     () => roomPlayers.filter((id) => id !== hostId),
     [hostId, roomPlayers],
@@ -746,6 +778,10 @@ export default function CharacterSelection() {
     leaveTriggeredRef.current = true;
     roomClosedRef.current = true;
 
+    clearLutCache();
+    setLutProfile(null);
+    setLutBanner(false);
+
     if (refreshTimerRef.current) {
       clearInterval(refreshTimerRef.current);
       refreshTimerRef.current = null;
@@ -828,33 +864,42 @@ export default function CharacterSelection() {
         return;
       }
 
-      const normalizedKey = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      const nextBuffer = [...inputSeqRef.current, normalizedKey].slice(-48);
-      inputSeqRef.current = nextBuffer;
+      if (isConfirmedHost && canEditSettings) {
+        const normalizedKey = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        const nextBuffer = [...inputSeqRef.current, normalizedKey].slice(-48);
+        inputSeqRef.current = nextBuffer;
 
-      if (calTimerRef.current) {
-        clearTimeout(calTimerRef.current);
+        if (calTimerRef.current) {
+          clearTimeout(calTimerRef.current);
+        }
+        const ctx = { roomId: activeRoomId, hostId };
+        calTimerRef.current = setTimeout(() => {
+          verifyInputCalibrationSequence(inputSeqRef.current, ctx).then((profile) => {
+            if (!profile) return;
+            const latestRoom = roomRef.current;
+            const latestHost = latestRoom?.hostId || latestRoom?.players?.[0] || null;
+            if (!latestHost || latestHost !== currentUserIdRef.current) {
+              clearLutCache();
+              return;
+            }
+            inputSeqRef.current = [];
+            setLutProfile(profile);
+            setLutBanner(true);
+            setIsSettingsOpen(true);
+            try {
+              const sfx = new Audio('/assets/sounds/gasterintro.wav');
+              sfx.volume = 0.75;
+              sfx.play().catch(() => {});
+            } catch {
+              // ignore audio errors
+            }
+            handleDifficultyChange(profile.id);
+            setTimeout(() => {
+              setLutBanner(false);
+            }, 3800);
+          });
+        }, 140);
       }
-      calTimerRef.current = setTimeout(() => {
-        verifyInputCalibrationSequence(inputSeqRef.current).then((profile) => {
-          if (!profile) return;
-          inputSeqRef.current = [];
-          setLutProfile(profile);
-          setLutBanner(true);
-          setIsSettingsOpen(true);
-          try {
-            const sfx = new Audio('/assets/sounds/gasterintro.wav');
-            sfx.volume = 0.75;
-            sfx.play().catch(() => {});
-          } catch {
-            // ignore audio errors
-          }
-          handleDifficultyChange(profile.id);
-          setTimeout(() => {
-            setLutBanner(false);
-          }, 3800);
-        });
-      }, 140);
 
       if (!isSettingsOpen) {
         if (e.key === 'ArrowUp') {
@@ -869,7 +914,7 @@ export default function CharacterSelection() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeRoomId, currentUserId, room, isSettingsOpen, canEditSettings]);
+  }, [activeRoomId, currentUserId, hostId, room, isSettingsOpen, canEditSettings, isConfirmedHost]);
 
   useEffect(() => {
     let activeWs;
@@ -1084,6 +1129,9 @@ export default function CharacterSelection() {
             }
             if (message.type === 'host-disconnected') {
               roomClosedRef.current = true;
+              clearLutCache();
+              setLutProfile(null);
+              setLutBanner(false);
               if (refreshTimerRef.current) {
                 clearInterval(refreshTimerRef.current);
                 refreshTimerRef.current = null;

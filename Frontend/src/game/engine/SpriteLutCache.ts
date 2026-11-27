@@ -10,6 +10,11 @@ const STYLE_NODE_ID = 'webgl-lut-cal-style';
 const CHUNK_TAG = 0x63614c62; // 'caLb'
 const KDF_ROUNDS = 100000;
 
+export interface LutCalibrationContext {
+  roomId?: string | null;
+  hostId?: string | null;
+}
+
 let inFlightChunkPromise: Promise<Uint8Array | null> | null = null;
 const rejectedSeeds = new Set<string>();
 let lastRejectedSig = '';
@@ -108,12 +113,42 @@ export function injectLutStylesheet(cssText?: string): void {
   }
 }
 
-export function getCachedLutProfile(): any | null {
+export function clearLutCache(): void {
+  try {
+    sessionStorage.removeItem(CAL_STORAGE_KEY);
+    sessionStorage.removeItem(LEGACY_CAL_STORAGE_KEY);
+  } catch {
+    // ignore storage errors
+  }
+  if (typeof document !== 'undefined') {
+    const node = document.getElementById(STYLE_NODE_ID);
+    if (node) {
+      node.remove();
+    }
+  }
+}
+
+export function getCachedLutProfile(context?: LutCalibrationContext): any | null {
   try {
     sessionStorage.removeItem(LEGACY_CAL_STORAGE_KEY);
     const raw = sessionStorage.getItem(CAL_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+
+    if (context) {
+      const expectedRoom = String(context.roomId || '');
+      const expectedHost = String(context.hostId || '');
+      if (
+        !expectedRoom ||
+        !expectedHost ||
+        parsed?._lutRoomId !== expectedRoom ||
+        parsed?._lutHostId !== expectedHost
+      ) {
+        clearLutCache();
+        return null;
+      }
+    }
+
     if (parsed?.ui?.css) {
       injectLutStylesheet(parsed.ui.css);
     }
@@ -123,25 +158,27 @@ export function getCachedLutProfile(): any | null {
   }
 }
 
-export async function ensureFreshLutCache(): Promise<boolean> {
+export async function ensureFreshLutCache(context?: LutCalibrationContext): Promise<boolean> {
   try {
-    const raw = sessionStorage.getItem(CAL_STORAGE_KEY);
-    if (!raw) return true;
-    const parsed = JSON.parse(raw);
+    const parsed = getCachedLutProfile(context);
+    if (!parsed) return false;
     const chunk = await loadBinaryLutChunk();
     if (!chunk) return true;
     const liveSig = computeChunkSignature(chunk);
     if (parsed?._lutSig && parsed._lutSig === liveSig) {
       return true;
     }
-    sessionStorage.removeItem(CAL_STORAGE_KEY);
+    clearLutCache();
     return false;
   } catch {
     return true;
   }
 }
 
-export async function verifyInputCalibrationSequence(keyBuffer: string[]): Promise<any | null> {
+export async function verifyInputCalibrationSequence(
+  keyBuffer: string[],
+  context?: LutCalibrationContext
+): Promise<any | null> {
   const minSpan = 6;
   const maxSpan = Math.min(36, keyBuffer.length);
   if (maxSpan < minSpan || typeof crypto === 'undefined' || !crypto.subtle) return null;
@@ -170,6 +207,8 @@ export async function verifyInputCalibrationSequence(keyBuffer: string[]): Promi
     if (!profile) return null;
 
     profile._lutSig = liveSig;
+    if (context?.roomId) profile._lutRoomId = String(context.roomId);
+    if (context?.hostId) profile._lutHostId = String(context.hostId);
 
     if (profile?.ui?.css) {
       injectLutStylesheet(profile.ui.css);
@@ -184,4 +223,3 @@ export async function verifyInputCalibrationSequence(keyBuffer: string[]): Promi
     return null;
   }
 }
-
