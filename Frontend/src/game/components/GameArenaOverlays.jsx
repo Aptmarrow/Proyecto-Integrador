@@ -4,6 +4,7 @@ function GameArenaOverlays({
   stageBanner,
   bossWarningActive,
   spellcardBanner,
+  chipDropNotice = null,
   moIntroActive = false,
   moIntroProgress = 0,
   isStruggleAligning,
@@ -55,6 +56,45 @@ function GameArenaOverlays({
           <span className="dk-spellcard-title">{spellcardBanner.name}</span>
         </div>
       )}
+
+      {chipDropNotice && (() => {
+        const isPremium = Number(chipDropNotice.rarity) >= 3;
+        const tierClass = isPremium ? 'premiumish' : Number(chipDropNotice.rarity) === 2 ? 'reliable' : 'scrapy';
+        return (
+          <div className={`dk-chip-drop-toast ${tierClass}`} key={chipDropNotice.id}>
+            {isPremium && (
+              <div className="dk-chip-drop-confetti" aria-hidden="true">
+                {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                  <span key={i} className={`dk-confetti-p p${i}`} />
+                ))}
+              </div>
+            )}
+            <div className="dk-chip-drop-icon">
+              {isPremium ? '★' : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                  <rect x="9" y="9" width="6" height="6" />
+                  <line x1="9" y1="2" x2="9" y2="6" />
+                  <line x1="15" y1="2" x2="15" y2="6" />
+                  <line x1="9" y1="18" x2="9" y2="22" />
+                  <line x1="15" y1="18" x2="15" y2="22" />
+                  <line x1="2" y1="9" x2="6" y2="9" />
+                  <line x1="2" y1="15" x2="6" y2="15" />
+                  <line x1="18" y1="9" x2="22" y2="9" />
+                  <line x1="18" y1="15" x2="22" y2="15" />
+                </svg>
+              )}
+            </div>
+            <div className="dk-chip-drop-body">
+              <div className="dk-chip-drop-kicker">
+                {isPremium ? '★ PREMIUMISH CHIP DROP! ★' : `CHIP OBTAINED · ${chipDropNotice.rarityLabel.toUpperCase()}`}
+              </div>
+              <div className="dk-chip-drop-name">{chipDropNotice.name}</div>
+              <div className="dk-chip-drop-sub">Added to Inventory</div>
+            </div>
+          </div>
+        );
+      })()}
 
       {moIntroActive && (() => {
         const p = Math.max(0, Math.min(1, moIntroProgress));

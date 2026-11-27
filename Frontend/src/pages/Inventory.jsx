@@ -86,9 +86,31 @@ function getRoleLabel(roleId) {
   return found ? found.label : String(roleId || 'DPS');
 }
 
+const CHIP_SPRITES_BY_NAME = {
+  'scrapy chips (b)': '/assets/sprites/chips/scrapy_b.png',
+  'scrapy chips (o)': '/assets/sprites/chips/scrapy_o.png',
+  'scrapy chips (v)': '/assets/sprites/chips/scrapy_v.png',
+  'scrapy chips (t)': '/assets/sprites/chips/scrapy_t.png',
+  'blood bags': '/assets/sprites/chips/blood_bags.png',
+  'excuses': '/assets/sprites/chips/excuses.png',
+  'heavy helmet': '/assets/sprites/chips/heavy_helmet.png',
+  'tasty batteries': '/assets/sprites/chips/tasty_batteries.png',
+  'sniper': '/assets/sprites/chips/sniper.png',
+  'shot da woop': '/assets/sprites/chips/shot_da_woop.png',
+  'in a hurry': '/assets/sprites/chips/in_a_hurry.png',
+  'rage potion': '/assets/sprites/chips/rage_potion.png',
+};
+
+function resolveChipSprite(chip) {
+  if (chip?.image) return chip.image;
+  const key = String(chip?.name || '').trim().toLowerCase();
+  return CHIP_SPRITES_BY_NAME[key] || null;
+}
+
 function ChipIcon({ chip }) {
-  if (chip.image) {
-    return <img src={chip.image} alt={chip.name} className="inv-chip-img" />;
+  const spriteSrc = resolveChipSprite(chip);
+  if (spriteSrc) {
+    return <img src={spriteSrc} alt={chip.name} className="inv-chip-img" />;
   }
 
   const tier = Math.max(1, Math.min(4, Number(chip.rarity) || 1));
@@ -331,7 +353,7 @@ export default function Inventory() {
                         const eq = equippedChips[slotIdx];
                         if (!eq) {
                           return (
-                            <div key={slotIdx} className="inv-slot inv-slot--empty">
+                            <div key={`slot-${slotIdx}`} className="inv-slot inv-slot--empty">
                               <span>SLOT {slotIdx + 1}</span>
                               <small>Empty</small>
                             </div>
@@ -339,7 +361,7 @@ export default function Inventory() {
                         }
                         const rMeta = getRarityMeta(eq.rarity);
                         return (
-                          <div key={eq.id} className={`inv-slot inv-slot--filled ${rMeta.className}`}>
+                          <div key={`slot-${slotIdx}`} className={`inv-slot inv-slot--filled ${rMeta.className}`}>
                             <div className="inv-slot-icon">
                               <ChipIcon chip={eq} />
                             </div>

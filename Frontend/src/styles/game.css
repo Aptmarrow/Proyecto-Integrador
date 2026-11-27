@@ -1334,3 +1334,164 @@
   to { transform: rotate(0deg); }
 }
 
+
+
+/* --- COMPACT CHIP DROP TOAST (SCRAPY / RELIABLE / PREMIUMISH CELEBRATION) --- */
+.dk-chip-drop-toast {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 65;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 235px;
+  max-width: 310px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(10, 14, 30, 0.94);
+  border: 1.5px solid #22c55e;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 16px rgba(34, 197, 94, 0.35);
+  animation: dkChipToastIn 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: visible;
+}
+
+.dk-chip-drop-toast.scrapy {
+  border-color: #22c55e;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 16px rgba(34, 197, 94, 0.38);
+}
+
+.dk-chip-drop-toast.reliable {
+  border-color: #ef4444;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 18px rgba(239, 68, 68, 0.42);
+}
+
+.dk-chip-drop-toast.premiumish {
+  border: 2px solid #fde047;
+  background: linear-gradient(135deg, rgba(16, 26, 56, 0.97), rgba(45, 18, 68, 0.97));
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.75),
+    0 0 24px rgba(56, 189, 248, 0.6),
+    0 0 36px rgba(250, 204, 21, 0.45);
+  animation: dkChipToastIn 0.35s cubic-bezier(0.22, 1, 0.36, 1), dkPremiumPulse 1.35s ease-in-out infinite;
+}
+
+@keyframes dkChipToastIn {
+  from { opacity: 0; transform: translate3d(28px, -6px, 0) scale(0.92); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes dkPremiumPulse {
+  0%, 100% {
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.75), 0 0 20px rgba(56, 189, 248, 0.55), 0 0 30px rgba(250, 204, 21, 0.45);
+  }
+  50% {
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.8), 0 0 30px rgba(56, 189, 248, 0.85), 0 0 46px rgba(250, 204, 21, 0.75);
+  }
+}
+
+.dk-chip-drop-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.06);
+  color: #4ade80;
+  font-size: 18px;
+}
+
+.dk-chip-drop-toast.reliable .dk-chip-drop-icon {
+  color: #f87171;
+}
+
+.dk-chip-drop-toast.premiumish .dk-chip-drop-icon {
+  color: #fde047;
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.35), rgba(56, 189, 248, 0.15));
+  text-shadow: 0 0 12px #fde047;
+  animation: dkStarSpin 2.2s linear infinite;
+}
+
+@keyframes dkStarSpin {
+  0% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.18) rotate(180deg); }
+  100% { transform: scale(1) rotate(360deg); }
+}
+
+.dk-chip-drop-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.dk-chip-drop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dk-chip-drop-kicker {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #4ade80;
+}
+
+.dk-chip-drop-toast.reliable .dk-chip-drop-kicker {
+  color: #f87171;
+}
+
+.dk-chip-drop-toast.premiumish .dk-chip-drop-kicker {
+  color: #fde047;
+  text-shadow: 0 0 10px rgba(253, 224, 71, 0.7);
+}
+
+.dk-chip-drop-name {
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dk-chip-drop-sub {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.dk-chip-drop-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.dk-confetti-p {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: dkConfettiBurst 1.15s ease-out forwards;
+}
+
+.dk-confetti-p.p0 { background: #fde047; --tx: -75px; --ty: -44px; }
+.dk-confetti-p.p1 { background: #38bdf8; --tx: -52px; --ty: 42px; animation-delay: 0.05s; }
+.dk-confetti-p.p2 { background: #ff2a85; --tx: 18px; --ty: -48px; animation-delay: 0.08s; }
+.dk-confetti-p.p3 { background: #a855f7; --tx: 76px; --ty: -32px; animation-delay: 0.04s; }
+.dk-confetti-p.p4 { background: #4ade80; --tx: 84px; --ty: 28px; animation-delay: 0.1s; }
+.dk-confetti-p.p5 { background: #fde047; --tx: 32px; --ty: 48px; animation-delay: 0.06s; }
+.dk-confetti-p.p6 { background: #38bdf8; --tx: -88px; --ty: 4px; animation-delay: 0.12s; }
+.dk-confetti-p.p7 { background: #ffffff; --tx: -16px; --ty: -54px; animation-delay: 0.02s; }
+
+@keyframes dkConfettiBurst {
+  0% { opacity: 1; transform: translate(0, 0) scale(1) rotate(0deg); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0.5) rotate(220deg); }
+}

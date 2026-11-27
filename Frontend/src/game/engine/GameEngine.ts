@@ -1,5 +1,5 @@
 import type { CharacterClass, RemotePlayer, Bullet, LaserBeam, WallBarrier, SparkParticle, StageState, BossPhase, ItemType, GameDifficulty } from './types';
-import type { ServerBullet, ServerLaser, ServerBoss, ServerBeamStruggle, ServerEnemy, ServerItem, ServerCampaign } from '../network/wsClient';
+import type { ServerBullet, ServerLaser, ServerBoss, ServerBeamStruggle, ServerEnemy, ServerItem, ServerCampaign, ServerChipDrop } from '../network/wsClient';
 import { BaseStageEngine } from './BaseStageEngine';
 import { Player } from './entities/Player';
 import { Boss } from './entities/Boss';
@@ -25,6 +25,8 @@ export class GameEngine extends BaseStageEngine {
   public stageBanner: { text: string; subtext: string; timer: number; maxTimer: number } | null = null;
   public bossWarningActive: boolean = false;
   public spellcardBanner: { active: boolean; name: string; timer: number } = { active: false, name: '', timer: 0 };
+  public chipDropNotice: { id: string; name: string; rarity: number; rarityLabel: string; timer: number; maxTimer: number } | null = null;
+  private seenChipDropIds = new Set<string>();
   private _showBossHpBar: boolean = false;
   private lastBannerText: string = '';
   private lastSyncedSpellcard: string = '';
@@ -531,6 +533,28 @@ export class GameEngine extends BaseStageEngine {
     this.itemSystem.applyBackendItems(items, this.SCALE_X, this.SCALE_Y);
   }
 
+  public applyBackendChipDrops(drops: ServerChipDrop[] | undefined, myPlayerId: string): void {
+    if (!drops || !drops.length || !myPlayerId) return;
+    for (const d of drops) {
+      if (d.userId !== myPlayerId || this.seenChipDropIds.has(d.dropId)) continue;
+      this.seenChipDropIds.add(d.dropId);
+      const isPremium = Number(d.rarity) >= 3;
+      const duration = isPremium ? 6.5 : 4.5;
+      this.chipDropNotice = {
+        id: d.dropId,
+        name: d.name,
+        rarity: Number(d.rarity) || 1,
+        rarityLabel: d.rarityLabel || (isPremium ? 'Premiumish' : Number(d.rarity) === 2 ? 'Reliable' : 'Scrapy'),
+        timer: duration,
+        maxTimer: duration,
+      };
+      this.playSound('/assets/sounds/powerup.wav', isPremium ? 0.85 : 0.65);
+      if (isPremium) {
+        this.playSound('/assets/sounds/gasterintro.wav', 0.65);
+      }
+    }
+  }
+
   private applyDifficultyVisuals(difficulty?: string): void {
     const norm = difficulty === 'no_mercy' ? 'no_mercy' : difficulty === 'difficult' ? 'difficult' : 'normal';
     const bulletTint = norm === 'difficult' ? 0xffb4b4 : norm === 'no_mercy' ? 0xddbfff : 0xffffff;
@@ -613,6 +637,12 @@ export class GameEngine extends BaseStageEngine {
   public update(dt: number, keys: Record<string, boolean>, moveVec?: { dx: number; dy: number }): void {
     this.animTimer += dt;
     this.difficultyGlintFilter?.advance(dt);
+    if (this.chipDropNotice) {
+      this.chipDropNotice.timer -= dt;
+      if (this.chipDropNotice.timer <= 0) {
+        this.chipDropNotice = null;
+      }
+    }
 
     // Detectar si el Master Spark está en fase de carga o de disparo
     const masterSpark = this.laserSystem.lasers.find(l => l.ownerId === 'player');

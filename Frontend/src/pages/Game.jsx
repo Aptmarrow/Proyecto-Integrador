@@ -121,6 +121,7 @@ export default function Game({ isDevMode = false }) {
   const [stageBanner, setStageBanner] = useState(null);
   const [bossWarningActive, setBossWarningActive] = useState(false);
   const [spellcardBanner, setSpellcardBanner] = useState(null);
+  const [chipDropNotice, setChipDropNotice] = useState(null);
   const [isStageClear, setIsStageClear] = useState(false);
   const [isAutoAdvancingStage, setIsAutoAdvancingStage] = useState(false);
   const [stageBlackAlpha, setStageBlackAlpha] = useState(0);
@@ -220,6 +221,7 @@ export default function Game({ isDevMode = false }) {
       stageBannerKey: null,
       bossWarning: null,
       spellBannerKey: null,
+      chipDropKey: '',
       isStageClear: null,
       isAutoAdvancing: null,
       blackAlpha: -1,
@@ -358,6 +360,21 @@ export default function Game({ isDevMode = false }) {
           hudCache.spellBannerKey = nextSpellBannerKey;
           setSpellcardBanner(
             engine.spellcardBanner.active ? { active: true, name: engine.spellcardBanner.name } : null
+          );
+        }
+
+        const nextChipDropKey = engine.chipDropNotice ? engine.chipDropNotice.id : '';
+        if (nextChipDropKey !== hudCache.chipDropKey) {
+          hudCache.chipDropKey = nextChipDropKey;
+          setChipDropNotice(
+            engine.chipDropNotice
+              ? {
+                  id: engine.chipDropNotice.id,
+                  name: engine.chipDropNotice.name,
+                  rarity: engine.chipDropNotice.rarity,
+                  rarityLabel: engine.chipDropNotice.rarityLabel,
+                }
+              : null
           );
         }
 
@@ -616,6 +633,7 @@ export default function Game({ isDevMode = false }) {
               stageBanner={stageBanner}
               bossWarningActive={bossWarningActive}
               spellcardBanner={spellcardBanner}
+              chipDropNotice={chipDropNotice}
               moIntroActive={moIntroActive}
               moIntroProgress={moIntroProgress}
               isStruggleAligning={isStruggleAligning}

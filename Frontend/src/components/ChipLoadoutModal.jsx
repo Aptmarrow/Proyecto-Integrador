@@ -19,6 +19,27 @@ const STAT_META = [
   { key: 'Crit_Damage', label: 'CDMG', kind: 'percent' },
 ];
 
+const CHIP_SPRITES_BY_NAME = {
+  'scrapy chips (b)': '/assets/sprites/chips/scrapy_b.png',
+  'scrapy chips (o)': '/assets/sprites/chips/scrapy_o.png',
+  'scrapy chips (v)': '/assets/sprites/chips/scrapy_v.png',
+  'scrapy chips (t)': '/assets/sprites/chips/scrapy_t.png',
+  'blood bags': '/assets/sprites/chips/blood_bags.png',
+  'excuses': '/assets/sprites/chips/excuses.png',
+  'heavy helmet': '/assets/sprites/chips/heavy_helmet.png',
+  'tasty batteries': '/assets/sprites/chips/tasty_batteries.png',
+  'sniper': '/assets/sprites/chips/sniper.png',
+  'shot da woop': '/assets/sprites/chips/shot_da_woop.png',
+  'in a hurry': '/assets/sprites/chips/in_a_hurry.png',
+  'rage potion': '/assets/sprites/chips/rage_potion.png',
+};
+
+function resolveChipSprite(chip) {
+  if (chip?.image) return chip.image;
+  const key = String(chip?.name || '').trim().toLowerCase();
+  return CHIP_SPRITES_BY_NAME[key] || null;
+}
+
 function getRarity(rarity) {
   const tier = Math.max(1, Math.min(3, Number(rarity) || 1));
   return RARITY_MAP[tier] || RARITY_MAP[1];
@@ -101,16 +122,17 @@ export default function ChipLoadoutModal({
             const eq = equippedChips[idx];
             if (!eq) {
               return (
-                <div key={idx} className="cs-chip-slot empty">
+                <div key={`slot-${idx}`} className="cs-chip-slot empty">
                   <span>SLOT {idx + 1}</span>
                 </div>
               );
             }
             const r = getRarity(eq.rarity);
+            const eqSprite = resolveChipSprite(eq);
             return (
-              <div key={eq.id} className="cs-chip-slot filled" style={{ borderColor: r.color }}>
+              <div key={`slot-${idx}`} className="cs-chip-slot filled" style={{ borderColor: r.color }}>
                 <div className="cs-chip-slot-badge" style={{ color: r.color, borderColor: r.color }}>
-                  {eq.image ? <img src={eq.image} alt={eq.name} /> : getInitials(eq.name)}
+                  {eqSprite ? <img src={eqSprite} alt={eq.name} /> : getInitials(eq.name)}
                 </div>
                 <div className="cs-chip-slot-text">
                   <strong>{eq.name}</strong>
@@ -176,7 +198,7 @@ export default function ChipLoadoutModal({
                       <small>Lv.{chip.level || 1}</small>
                     </div>
                     <div className="cs-chip-item-icon" style={{ borderColor: r.color, color: r.color }}>
-                      {chip.image ? <img src={chip.image} alt={chip.name} /> : getInitials(chip.name)}
+                      {resolveChipSprite(chip) ? <img src={resolveChipSprite(chip)} alt={chip.name} /> : getInitials(chip.name)}
                     </div>
                     <div className="cs-chip-item-name">{chip.name}</div>
                     <div className="cs-chip-item-stats">
