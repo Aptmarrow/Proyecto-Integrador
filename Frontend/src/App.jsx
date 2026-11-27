@@ -8,6 +8,7 @@ const Login = lazy(() => import('./pages/Login'))
 const Register = lazy(() => import('./pages/Register'))
 const VerifyEmail = lazy(() => import('./pages/VerifyEmail'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Inventory = lazy(() => import('./pages/Inventory'))
 const JoinSelection = lazy(() => import('./pages/JoinSelection'))
 const CharacterSelection = lazy(() => import('./pages/CharacterSelection'))
 const LobbyBrowser = lazy(() => import('./pages/LobbyBrowser'))
@@ -50,6 +51,7 @@ function App() {
 
           {/* Rutas protegidas (Requieren login y token válido) */}
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
           <Route path="/join" element={<ProtectedRoute><JoinSelection /></ProtectedRoute>} />
           <Route path="/character-selection" element={<ProtectedRoute><CharacterSelection /></ProtectedRoute>} />
           <Route path="/lobby-browser" element={<ProtectedRoute><LobbyBrowser /></ProtectedRoute>} />

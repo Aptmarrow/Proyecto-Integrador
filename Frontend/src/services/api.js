@@ -272,3 +272,22 @@ export async function getUserInventory() {
   });
   return handleResponse(res);
 }
+
+export async function toggleEquipChip(chipId, equipped) {
+  const res = await fetch(`${API_BASE}/auth/user/inventory/chips/${chipId}/equip`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ equipped: Boolean(equipped) }),
+  });
+  return handleResponse(res);
+}
+
+export async function getEquippedChipStats(role = 'DPS') {
+  const res = await fetch(
+    `${API_BASE}/auth/user/inventory/stats?class=${encodeURIComponent(role)}`,
+    {
+      headers: authHeadersNoBody(),
+    }
+  );
+  return handleResponse(res);
+}
