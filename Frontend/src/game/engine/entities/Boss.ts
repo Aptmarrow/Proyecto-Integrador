@@ -295,75 +295,119 @@ export class Boss {
   private renderMoDashLines(animTimer: number, scaleX: number, scaleY: number): void {
     const g = this.moLineGraphics;
     const isDash = this.moDashState === 'dashing';
-    const pulse = 0.7 + Math.sin(animTimer * 34) * 0.3;
+    const pulse = 0.72 + Math.sin(animTimer * 32) * 0.28;
 
-    // Render razor-sharp 1-2 line predator sightline + directional chevron arrows
-    for (let idx = 0; idx < this.moDashLines.length; idx++) {
-      const line = this.moDashLines[idx];
-      if (line.completed) continue;
+    const visible = this.moDashLines.filter((l) => !l.completed);
+    if (visible.length === 0) return;
+
+    const isSmoothCurve = visible.length >= 3;
+    const leadProg = visible[0]?.progress ?? 0;
+
+    // Precompute screen-space segments + cumulative arc length for seamless curves & flowing chevrons
+    const segs = visible.map((line) => {
       const x1 = line.x1 * scaleX;
       const y1 = line.y1 * scaleY;
       const x2 = line.x2 * scaleX;
       const y2 = line.y2 * scaleY;
+      const len = Math.hypot(x2 - x1, y2 - y1);
+      const ang = Math.atan2(y2 - y1, x2 - x1);
+      return { x1, y1, x2, y2, len, ang, active: line.active, progress: line.progress, isReturn: Boolean(line.isReturn) };
+    });
 
-      const isActiveLine = isDash && line.active;
-      const isReturn = Boolean(line.isReturn);
-      const outerColor = isActiveLine ? 0xff2b5b : isReturn ? 0x00f2fe : idx === 0 ? 0xff2b5b : 0xfacc15;
-      // Wide danger corridor band matching M.O.'s physical roller body during telegraph!
-      if (!isDash && !isReturn && idx === 0) {
-        g.lineStyle(38 * scaleX * 0.85, 0xff2b5b, (0.07 + line.progress * 0.14) * pulse);
-        g.moveTo(x1, y1);
-        g.lineTo(x2, y2);
+    const strokePolyline = (width: number, color: number, alpha: number) => {
+      g.lineStyle({ width, color, alpha, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+      for (let i = 0; i < segs.length; i++) {
+        const s = segs[i];
+        if (i === 0 || Math.hypot(s.x1 - segs[i - 1].x2, s.y1 - segs[i - 1].y2) > 6) {
+          g.moveTo(s.x1, s.y1);
+        }
+        g.lineTo(s.x2, s.y2);
       }
+    };
 
-      const outerAlpha = isActiveLine ? 0.56 : isReturn ? 0.18 * pulse : (idx === 0 ? 0.42 : 0.24) * pulse;
-      const outerWidth = isActiveLine ? 22 : isReturn ? 7 : 10 + line.progress * 8;
-      const coreAlpha = isActiveLine ? 0.98 : isReturn ? 0.48 * pulse : (idx === 0 ? 0.95 : 0.68) * pulse;
-      const coreWidth = isActiveLine ? 5 : isReturn ? 1.8 : 2.8;
+    // 1. Wide danger corridor ribbon matching M.O.'s physical spiked body during telegraph
+    if (!isDash) {
+      strokePolyline(36 * scaleX * 0.82, 0xff2b5b, (0.065 + leadProg * 0.13) * pulse);
+    }
 
-      g.lineStyle(outerWidth, outerColor, outerAlpha);
-      g.moveTo(x1, y1);
-      g.lineTo(x2, y2);
+    // 2. Outer neon ribbon + crisp inner core (unified continuous stroke for curves, per-segment emphasis for sharp bounces)
+    if (isSmoothCurve) {
+      const ribbonColor = isDash ? 0xff2b5b : 0xff2b5b;
+      strokePolyline(isDash ? 18 : 10 + leadProg * 7, ribbonColor, isDash ? 0.52 : 0.40 * pulse);
+      strokePolyline(isDash ? 4.4 : 2.8, isDash ? 0xfde047 : 0xffffff, isDash ? 0.96 : 0.92 * pulse);
+    } else {
+      for (let idx = 0; idx < segs.length; idx++) {
+        const s = segs[idx];
+        const isActiveLine = isDash && s.active;
+        const outerColor = isActiveLine ? 0xff2b5b : s.isReturn ? 0x00f2fe : idx === 0 ? 0xff2b5b : 0xfacc15;
+        const outerAlpha = isActiveLine ? 0.56 : s.isReturn ? 0.18 * pulse : (idx === 0 ? 0.44 : 0.26) * pulse;
+        const outerWidth = isActiveLine ? 22 : s.isReturn ? 7 : 10 + s.progress * 8;
+        const coreAlpha = isActiveLine ? 0.98 : s.isReturn ? 0.48 * pulse : (idx === 0 ? 0.96 : 0.70) * pulse;
+        const coreWidth = isActiveLine ? 5 : s.isReturn ? 1.8 : 2.8;
 
-      g.lineStyle(coreWidth, isActiveLine ? 0xfde047 : 0xffffff, coreAlpha);
-      g.moveTo(x1, y1);
-      g.lineTo(x2, y2);
+        g.lineStyle({ width: outerWidth, color: outerColor, alpha: outerAlpha, cap: PIXI.LINE_CAP.ROUND });
+        g.moveTo(s.x1, s.y1);
+        g.lineTo(s.x2, s.y2);
 
-      // Animated directional chevron arrows along the sightline so player instantly reads tackle direction!
-      const segLen = Math.hypot(x2 - x1, y2 - y1);
-      if (!isDash && segLen > 80) {
-        const ang = Math.atan2(y2 - y1, x2 - x1);
-        const chevCount = Math.min(4, Math.max(2, Math.floor(segLen / 120)));
-        const flow = (animTimer * 2.4) % 1;
-        g.lineStyle(2.4, idx === 0 ? 0xfde047 : 0x38bdf8, 0.92 * pulse);
-        for (let c = 0; c < chevCount; c++) {
-          const u = ((c + flow) / chevCount) * 0.86 + 0.07;
-          const cx = x1 + (x2 - x1) * u;
-          const cy = y1 + (y2 - y1) * u;
-          const wing = 11;
-          g.moveTo(cx - Math.cos(ang - 0.55) * wing, cy - Math.sin(ang - 0.55) * wing);
-          g.lineTo(cx, cy);
-          g.lineTo(cx - Math.cos(ang + 0.55) * wing, cy - Math.sin(ang + 0.55) * wing);
+        g.lineStyle({ width: coreWidth, color: isActiveLine ? 0xfde047 : 0xffffff, alpha: coreAlpha, cap: PIXI.LINE_CAP.ROUND });
+        g.moveTo(s.x1, s.y1);
+        g.lineTo(s.x2, s.y2);
+      }
+    }
+
+    // 3. Evenly spaced flowing directional chevron arrows along total arc length (crystal-clear on BOTH curves & lines!)
+    const totalLen = segs.reduce((sum, s) => sum + s.len, 0);
+    if (!isDash && totalLen > 90) {
+      const chevCount = Math.min(7, Math.max(3, Math.floor(totalLen / 135)));
+      const flow = (animTimer * 2.1) % 1;
+      g.lineStyle({ width: 2.6, color: 0xfde047, alpha: 0.94 * pulse, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+      for (let c = 0; c < chevCount; c++) {
+        const targetDist = (((c + flow) / chevCount) * 0.88 + 0.06) * totalLen;
+        let accum = 0;
+        for (let i = 0; i < segs.length; i++) {
+          const s = segs[i];
+          if (accum + s.len >= targetDist && s.len > 1) {
+            const u = (targetDist - accum) / s.len;
+            const cx = s.x1 + (s.x2 - s.x1) * u;
+            const cy = s.y1 + (s.y2 - s.y1) * u;
+            const wing = 11.5;
+            g.moveTo(cx - Math.cos(s.ang - 0.56) * wing, cy - Math.sin(s.ang - 0.56) * wing);
+            g.lineTo(cx, cy);
+            g.lineTo(cx - Math.cos(s.ang + 0.56) * wing, cy - Math.sin(s.ang + 0.56) * wing);
+            break;
+          }
+          accum += s.len;
         }
       }
+    }
 
-      // Glowing bounce-vertex reticle ring at the end of each slash
-      g.lineStyle(2.2, outerColor, 0.88 * pulse);
-      g.drawCircle(x2, y2, isActiveLine ? 13 : 9.5);
+    // 4. Reticle rings ONLY at genuine sharp corners (angle delta > 32°) or at the final endpoint (clean smooth curves!)
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      const isLast = i === segs.length - 1;
+      let isSharpCorner = isLast;
+      if (!isLast) {
+        const next = segs[i + 1];
+        const diff = Math.abs(Math.atan2(Math.sin(next.ang - s.ang), Math.cos(next.ang - s.ang)));
+        if (diff > 0.56) isSharpCorner = true;
+      }
+      if (isSharpCorner) {
+        const ringColor = isLast ? 0xff2b5b : 0xfacc15;
+        g.lineStyle(2.2, ringColor, 0.88 * pulse);
+        g.drawCircle(s.x2, s.y2, isDash && s.active ? 13 : 9.5);
+      }
     }
     g.lineStyle(0);
 
-    // High-speed crimson-gold afterimage trail while M.O. physically tackles along the active edge
-    const activeLine = this.moDashLines.find((l) => l.active);
-    if (isDash && activeLine) {
-      const sx = activeLine.x1 * scaleX;
-      const sy = activeLine.y1 * scaleY;
+    // 5. High-speed crimson-gold comet afterimage trail directly behind M.O.'s wheels while tackling!
+    if (isDash) {
+      const backX = -Math.cos(this.displayAngle);
+      const backY = -Math.sin(this.displayAngle);
       for (let i = 1; i <= 5; i++) {
-        const t = i / 6;
-        const ax = sx + (this.pos.x - sx) * t;
-        const ay = sy + (this.pos.y - sy) * t;
-        g.beginFill(activeLine.isReturn ? 0x00f2fe : i % 2 === 0 ? 0xfde047 : 0xff2b5b, 0.22 * t);
-        g.drawCircle(ax, ay, 26 * t);
+        const step = i * 16;
+        const fade = 1 - i / 6;
+        g.beginFill(i % 2 === 0 ? 0xfde047 : 0xff2b5b, 0.25 * fade);
+        g.drawCircle(this.pos.x + backX * step, this.pos.y + backY * step, 25 * fade);
         g.endFill();
       }
     }

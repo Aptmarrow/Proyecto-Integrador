@@ -175,7 +175,7 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     assert.ok(p2.y - 360 > 215 && p2.y - 360 < 260, `Expected p2 vertical move ~250 (clamped near wall), got ${p2.y - 360}`);
   });
 
-  it('executes M.O. (Mechanical Ophanim) Byakuren x Konngara hunting tackles with zero safespots', () => {
+  it('executes M.O. (Mechanical Ophanim) 5 distinct geometric shapes & bullet mechanics with zero safespots', () => {
     const moRoom = new GameRoom('room-mo-rework', 'p1', {
       initialPhase: 'playing',
       difficulty: 'normal',
@@ -192,30 +192,34 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     assert.equal(moRoom.boss.moIntroActive, false);
     assert.equal(moRoom.boss.moDashState, 'telegraph');
 
-    // Verify chained hunting across all 5 phases:
-    // - Only 1-2 lines telegraphed at once (never cluttered whole-phase web)
-    // - Stationary player takes damage (zero safespot!)
-    // - Held wake bullets release on next tackle and snap-bend mid-flight (`_turned`)
+    // Verify all 5 distinct geometric shapes & purpose-built bullet behaviors across P1..P5:
     const seenShapes = new Set();
     const seenStates = new Set();
-    let maxTelegraphLines = 0;
-    let sawTurnedBullet = false;
+    let sawSinglePinballLine = false;
+    let sawSmoothCurvePath = false;
+    let sawAbsFoldBullet = false;
+    let sawFreezeSnapBullet = false;
+    let sawCurvedSpiralBullet = false;
     let stationaryPlayerHit = false;
 
     for (let targetPhase = 1; targetPhase <= 5; targetPhase++) {
       moRoom.boss.phase = targetPhase;
       p1.hp = p1.stats.hpMax;
-      for (let i = 0; i < 320; i++) {
+      for (let i = 0; i < 360; i++) {
         moRoom.update(1 / 60);
         seenStates.add(moRoom.boss.moDashState);
         if (moRoom.boss.moDashState === 'telegraph') {
-          maxTelegraphLines = Math.max(maxTelegraphLines, moRoom.boss.moDashLines.length);
+          const count = moRoom.boss.moDashLines.length;
+          if (count === 1) sawSinglePinballLine = true;
+          if (count >= 8) sawSmoothCurvePath = true;
         }
         if (moRoom.boss._moState?.shapeKind) {
           seenShapes.add(moRoom.boss._moState.shapeKind);
         }
-        if (moRoom.bulletSystem.active.some((b) => b._turned)) {
-          sawTurnedBullet = true;
+        for (const b of moRoom.bulletSystem.active) {
+          if (b._turned && b.turnAbsAngle !== null) sawAbsFoldBullet = true;
+          if (b._freezePhase === 2 && b.snapToPlayer) sawFreezeSnapBullet = true;
+          if (b.angularVel !== 0) sawCurvedSpiralBullet = true;
         }
         if (p1.hp < p1.stats.hpMax) {
           stationaryPlayerHit = true;
@@ -226,13 +230,16 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
 
     assert.deepEqual(
       [...seenShapes].sort(),
-      ['byakuren_zigzag', 'final_storm', 'guillotine_scissor', 'l_hook', 'predator_star'],
-      'Expected all 5 chained hunting tackle modes'
+      ['crescent_arc', 'infinity_loop', 'ophanim_halo', 'pinball_snipe', 'sine_serpent'],
+      'Expected all 5 distinct geometric tackle shapes'
     );
-    assert.ok(maxTelegraphLines >= 1 && maxTelegraphLines <= 2, `Expected 1-2 telegraph lines at once, got ${maxTelegraphLines}`);
+    assert.equal(sawSinglePinballLine, true, 'Expected single-line Pinball telegraph in P3');
+    assert.equal(sawSmoothCurvePath, true, 'Expected smooth curved polyline telegraphs (☾, ∿, ∞, ◎)');
     assert.ok(seenStates.has('telegraph') && seenStates.has('dashing') && seenStates.has('resting'));
     assert.equal(stationaryPlayerHit, true, 'Standing still must NOT be a safespot');
-    assert.equal(sawTurnedBullet, true, 'Expected cascading wake bullets to snap-bend mid-flight');
+    assert.equal(sawAbsFoldBullet, true, 'Expected deterministic 90° grid-fold / jaw bullets (turnAbsAngle)');
+    assert.equal(sawFreezeSnapBullet, true, 'Expected Freeze -> Red Lock-On -> Snap-to-Player bullets');
+    assert.equal(sawCurvedSpiralBullet, true, 'Expected continuous curved spiral bullets (angularVel)');
   });
 });
 

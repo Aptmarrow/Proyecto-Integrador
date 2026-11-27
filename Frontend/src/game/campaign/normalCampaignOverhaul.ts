@@ -689,9 +689,16 @@ export interface BulletSpawnOpts {
   delay?: number;
   turnAfter?: number;
   turnAngle?: number;
+  turnAbsAngle?: number | null;
   turnSpeedMult?: number;
   turnColor?: number;
   holdTag?: number | null;
+  angularVel?: number;
+  freezeAfter?: number;
+  freezeDur?: number;
+  snapToPlayer?: boolean;
+  snapOffset?: number;
+  snapSpeed?: number;
 }
 
 export function fireNormalBossPattern(

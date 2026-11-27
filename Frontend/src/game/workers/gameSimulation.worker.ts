@@ -136,10 +136,19 @@ interface SimBullet {
   delay?: number;
   turnAfter?: number;
   turnAngle?: number;
+  turnAbsAngle?: number | null;
   turnSpeedMult?: number;
   turnColor?: number;
   turned?: boolean;
   holdTag?: number | null;
+  angularVel?: number;
+  freezeAfter?: number;
+  freezeDur?: number;
+  snapToPlayer?: boolean;
+  snapOffset?: number;
+  snapSpeed?: number;
+  freezePhase?: number;
+  freezeTimer?: number;
 }
 
 interface SimWall {
@@ -1692,10 +1701,19 @@ class DanmakrewSimulationWorker {
       delay: Math.max(0, Number(opts?.delay) || 0),
       turnAfter: Math.max(0, Number(opts?.turnAfter) || 0),
       turnAngle: Number(opts?.turnAngle) || 0,
+      turnAbsAngle: opts?.turnAbsAngle !== undefined && opts?.turnAbsAngle !== null ? Number(opts.turnAbsAngle) : null,
       turnSpeedMult: Number(opts?.turnSpeedMult) || 1,
       turnColor: opts?.turnColor,
       turned: false,
       holdTag: opts?.holdTag ?? null,
+      angularVel: Number(opts?.angularVel) || 0,
+      freezeAfter: Math.max(0, Number(opts?.freezeAfter) || 0),
+      freezeDur: Math.max(0, Number(opts?.freezeDur) || 0),
+      snapToPlayer: Boolean(opts?.snapToPlayer),
+      snapOffset: Number(opts?.snapOffset) || 0,
+      snapSpeed: Number(opts?.snapSpeed) || 0,
+      freezePhase: 0,
+      freezeTimer: 0,
     });
   }
 
@@ -1977,16 +1995,57 @@ class DanmakrewSimulationWorker {
         b.delay = Math.max(0, b.delay - dt);
         continue;
       }
+
+      // Sakuya/Byakuren Freeze -> Red Lock-On -> Snap directly at player's live position
+      if (b.freezeAfter && b.freezeAfter > 0 && (b.freezePhase || 0) < 2) {
+        if ((b.freezePhase || 0) === 0 && (b.age || 0) >= b.freezeAfter) {
+          b.freezePhase = 1;
+          b.freezeTimer = b.freezeDur || 0.30;
+          if (b.turnColor !== undefined) b.color = b.turnColor;
+          continue;
+        }
+        if (b.freezePhase === 1) {
+          b.freezeTimer = (b.freezeTimer || 0) - dt;
+          if (b.freezeTimer <= 0) {
+            b.freezePhase = 2;
+            b.turned = true;
+            const baseSpd = b.snapSpeed && b.snapSpeed > 0
+              ? b.snapSpeed
+              : Math.hypot(b.vx, b.vy) * (b.turnSpeedMult || 1.55);
+            const aim = b.snapToPlayer
+              ? Math.atan2(targetPos.y - b.y, targetPos.x - b.x) + (b.snapOffset || 0)
+              : b.turnAbsAngle !== null && b.turnAbsAngle !== undefined
+                ? b.turnAbsAngle
+                : Math.atan2(b.vy, b.vx) + (b.turnAngle || 0);
+            b.vx = Math.cos(aim) * baseSpd;
+            b.vy = Math.sin(aim) * baseSpd;
+          } else {
+            continue;
+          }
+        }
+      }
+
       b.age = (b.age || 0) + dt;
 
-      if (!b.turned && b.turnAfter && b.turnAfter > 0 && b.age >= b.turnAfter) {
+      if (!b.turned && (!b.freezeAfter || b.freezeAfter <= 0) && b.turnAfter && b.turnAfter > 0 && b.age >= b.turnAfter) {
         b.turned = true;
         const spd = Math.hypot(b.vx, b.vy) * (b.turnSpeedMult || 1);
-        const nextAngle = Math.atan2(b.vy, b.vx) + (b.turnAngle || 0);
+        const nextAngle = b.turnAbsAngle !== null && b.turnAbsAngle !== undefined
+          ? b.turnAbsAngle
+          : Math.atan2(b.vy, b.vx) + (b.turnAngle || 0);
         b.vx = Math.cos(nextAngle) * spd;
         b.vy = Math.sin(nextAngle) * spd;
         if (b.turnColor !== undefined) {
           b.color = b.turnColor;
+        }
+      }
+
+      if (b.angularVel && b.angularVel !== 0) {
+        const spd = Math.hypot(b.vx, b.vy);
+        if (spd > 0.001) {
+          const nextA = Math.atan2(b.vy, b.vx) + b.angularVel * dt;
+          b.vx = Math.cos(nextA) * spd;
+          b.vy = Math.sin(nextA) * spd;
         }
       }
 

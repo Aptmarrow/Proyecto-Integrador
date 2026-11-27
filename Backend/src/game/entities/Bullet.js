@@ -28,10 +28,19 @@ class Bullet {
     this.delay         = 0;
     this.turnAfter     = 0;
     this.turnAngle     = 0;
+    this.turnAbsAngle  = null;
     this.turnSpeedMult = 1;
     this.turnColor     = null;
     this._turned       = false;
     this.holdTag       = null;
+    this.angularVel    = 0;
+    this.freezeAfter   = 0;
+    this.freezeDur     = 0;
+    this.snapToPlayer  = false;
+    this.snapOffset    = 0;
+    this.snapSpeed     = 0;
+    this._freezePhase  = 0; // 0: before freeze, 1: frozen telegraph, 2: snapped
+    this._freezeTimer  = 0;
     // Spatial hash tracking (set by SpatialHash)
     this._cellX  = NaN;
     this._cellY  = NaN;
@@ -65,33 +74,81 @@ class Bullet {
     this.delay         = Math.max(0, Number(opts?.delay) || 0);
     this.turnAfter     = Math.max(0, Number(opts?.turnAfter) || 0);
     this.turnAngle     = Number(opts?.turnAngle) || 0;
+    this.turnAbsAngle  = opts?.turnAbsAngle !== undefined && opts?.turnAbsAngle !== null ? Number(opts.turnAbsAngle) : null;
     this.turnSpeedMult = Number(opts?.turnSpeedMult) || 1;
     this.turnColor     = opts?.turnColor ?? null;
     this._turned       = false;
     this.holdTag       = opts?.holdTag ?? null;
+    this.angularVel    = Number(opts?.angularVel) || 0;
+    this.freezeAfter   = Math.max(0, Number(opts?.freezeAfter) || 0);
+    this.freezeDur     = Math.max(0, Number(opts?.freezeDur) || 0);
+    this.snapToPlayer  = Boolean(opts?.snapToPlayer);
+    this.snapOffset    = Number(opts?.snapOffset) || 0;
+    this.snapSpeed     = Number(opts?.snapSpeed) || 0;
+    this._freezePhase  = 0;
+    this._freezeTimer  = 0;
     this._cellX  = NaN;
     this._cellY  = NaN;
     return this;
   }
 
   update(deltaTime, targetPos = null) {
-    // Suspended wake phase: bullet glows stationary along boss tackle trail until delay expires
+    // Suspended wake phase: bullet glows stationary along boss tackle trail until released
     if (this.delay > 0) {
       this.delay = Math.max(0, this.delay - deltaTime);
       return;
     }
 
+    // Sakuya/Byakuren Freeze -> Red Lock-On -> Snap directly at player's live position!
+    if (this.freezeAfter > 0 && this._freezePhase < 2) {
+      if (this._freezePhase === 0 && this.age >= this.freezeAfter) {
+        this._freezePhase = 1;
+        this._freezeTimer = this.freezeDur || 0.30;
+        if (this.turnColor !== null && this.turnColor !== undefined) {
+          this.color = this.turnColor;
+        }
+        return;
+      }
+      if (this._freezePhase === 1) {
+        this._freezeTimer -= deltaTime;
+        if (this._freezeTimer <= 0) {
+          this._freezePhase = 2;
+          this._turned = true;
+          const baseSpd = this.snapSpeed > 0 ? this.snapSpeed : Math.hypot(this.vx, this.vy) * (this.turnSpeedMult || 1.55);
+          const aim = this.snapToPlayer && targetPos
+            ? Math.atan2(targetPos.y - this.y, targetPos.x - this.x) + this.snapOffset
+            : (this.turnAbsAngle !== null ? this.turnAbsAngle : Math.atan2(this.vy, this.vx) + this.turnAngle);
+          this.vx = Math.cos(aim) * baseSpd;
+          this.vy = Math.sin(aim) * baseSpd;
+        } else {
+          return;
+        }
+      }
+    }
+
     this.age += deltaTime;
 
-    // Scheduled Konngara-style path twist mid-flight
-    if (!this._turned && this.turnAfter > 0 && this.age >= this.turnAfter) {
+    // Scheduled deterministic angle fold (90° Grid Fold / Converging Jaws)
+    if (!this._turned && this.freezeAfter <= 0 && this.turnAfter > 0 && this.age >= this.turnAfter) {
       this._turned = true;
       const spd = Math.hypot(this.vx, this.vy) * (this.turnSpeedMult || 1);
-      const nextAngle = Math.atan2(this.vy, this.vx) + this.turnAngle;
+      const nextAngle = this.turnAbsAngle !== null
+        ? this.turnAbsAngle
+        : Math.atan2(this.vy, this.vx) + this.turnAngle;
       this.vx = Math.cos(nextAngle) * spd;
       this.vy = Math.sin(nextAngle) * spd;
       if (this.turnColor !== null && this.turnColor !== undefined) {
         this.color = this.turnColor;
+      }
+    }
+
+    // Smooth continuous spiral / galaxy curve
+    if (this.angularVel !== 0) {
+      const spd = Math.hypot(this.vx, this.vy);
+      if (spd > 0.001) {
+        const nextA = Math.atan2(this.vy, this.vx) + this.angularVel * deltaTime;
+        this.vx = Math.cos(nextA) * spd;
+        this.vy = Math.sin(nextA) * spd;
       }
     }
 

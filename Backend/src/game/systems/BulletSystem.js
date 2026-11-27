@@ -91,7 +91,8 @@ class BulletSystem {
       const b = this.active[i];
 
       this.hash.remove(b);
-      const targetPos = b.homeRate > 0 && b.homeTime > 0 ? this._findNearestPlayerPos(b.x, b.y, players) : null;
+      const needsTarget = (b.homeRate > 0 && b.homeTime > 0) || (b.snapToPlayer && b._freezePhase < 2);
+      const targetPos = needsTarget ? this._findNearestPlayerPos(b.x, b.y, players) : null;
       b.update(deltaTime, targetPos);
 
       const hitMapEdge =
