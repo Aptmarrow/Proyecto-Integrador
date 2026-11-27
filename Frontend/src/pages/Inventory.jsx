@@ -203,10 +203,6 @@ export default function Inventory() {
 
   const chips = useMemo(() => inventory?.chips || [], [inventory]);
   const equippedChips = useMemo(() => chips.filter((c) => c.is_equipped), [chips]);
-  const equippedNamesSet = useMemo(
-    () => new Set(equippedChips.map((c) => String(c.name || '').trim().toLowerCase())),
-    [equippedChips]
-  );
 
   const filteredChips = useMemo(() => {
     if (rarityFilter === 'all') return chips;
@@ -397,10 +393,8 @@ export default function Inventory() {
                       {filteredChips.map((chip) => {
                         const rMeta = getRarityMeta(chip.rarity);
                         const statBadges = formatChipStatBadges(chip.stats);
-                        const normName = String(chip.name || '').trim().toLowerCase();
-                        const duplicateEquipped = !chip.is_equipped && equippedNamesSet.has(normName);
                         const slotsFull = !chip.is_equipped && equippedChips.length >= MAX_EQUIPPED_CHIPS;
-                        const disabled = busyChipId === chip.id || duplicateEquipped || slotsFull;
+                        const disabled = busyChipId === chip.id || slotsFull;
 
                         return (
                           <article
@@ -442,11 +436,9 @@ export default function Inventory() {
                                 ? 'Updating...'
                                 : chip.is_equipped
                                   ? 'Unequip'
-                                  : duplicateEquipped
-                                    ? 'Already Equipped'
-                                    : slotsFull
-                                      ? 'Slots Full (3/3)'
-                                      : 'Equip'}
+                                  : slotsFull
+                                    ? 'Slots Full (3/3)'
+                                    : 'Equip'}
                             </button>
                           </article>
                         );

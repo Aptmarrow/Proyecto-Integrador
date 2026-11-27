@@ -97,16 +97,6 @@ const Chip = {
         err.statusCode = 400;
         throw err;
       }
-
-      const normalizedName = String(chip.name || '').trim().toLowerCase();
-      const hasDuplicate = equipped.some(
-        (c) => Number(c.id) !== Number(chip.id) && String(c.name || '').trim().toLowerCase() === normalizedName
-      );
-      if (hasDuplicate) {
-        const err = new Error(`Ya tenés equipada una chip "${chip.name}". No se permiten chips repetidas.`);
-        err.statusCode = 400;
-        throw err;
-      }
     }
 
     await db.query(

@@ -66,10 +66,6 @@ export default function ChipLoadoutModal({
 
   if (!isOpen) return null;
 
-  const equippedNames = new Set(
-    equippedChips.map((c) => String(c.name || '').trim().toLowerCase())
-  );
-
   return (
     <div className="cs-chip-modal-backdrop" onClick={onClose}>
       <div className="cs-chip-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Select Chips">
@@ -89,7 +85,7 @@ export default function ChipLoadoutModal({
             </svg>
             <div>
               <h3>EQUIPPED CHIPS ({equippedChips.length}/{MAX_EQUIPPED_CHIPS})</h3>
-              <span>Active Role: {selectedRole} • Max 3 unique chips</span>
+              <span>Active Role: {selectedRole} • Max 3 chips</span>
             </div>
           </div>
           <button type="button" className="cs-chip-modal-close" onClick={onClose} aria-label="Close">
@@ -166,10 +162,8 @@ export default function ChipLoadoutModal({
               {chips.map((chip) => {
                 const r = getRarity(chip.rarity);
                 const lines = formatStats(chip.stats);
-                const normName = String(chip.name || '').trim().toLowerCase();
-                const isDup = !chip.is_equipped && equippedNames.has(normName);
                 const isFull = !chip.is_equipped && equippedChips.length >= MAX_EQUIPPED_CHIPS;
-                const disabled = busyChipId === chip.id || isDup || isFull;
+                const disabled = busyChipId === chip.id || isFull;
 
                 return (
                   <div
@@ -198,11 +192,9 @@ export default function ChipLoadoutModal({
                         ? '...'
                         : chip.is_equipped
                           ? 'UNEQUIP'
-                          : isDup
-                            ? 'DUPLICATE'
-                            : isFull
-                              ? 'FULL (3/3)'
-                              : 'EQUIP'}
+                          : isFull
+                            ? 'FULL (3/3)'
+                            : 'EQUIP'}
                     </button>
                   </div>
                 );
