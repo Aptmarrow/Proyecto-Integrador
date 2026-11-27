@@ -24,9 +24,14 @@ import type { BulletSpawnOpts } from '../campaign/normalCampaignOverhaul';
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
 const PLAYER_RADIUS = 10;
-const PLAYER_SPEED = 510;
-const FOCUS_SPEED_MULTIPLIER = 0.38;
+const PLAYER_SPEED_X = 375;
+const PLAYER_SPEED_Y = 500;
+const FOCUS_SPEED_MULTIPLIER = 0.40;
 const TICK_RATE = 60;
+
+// Raise Planck/Box2D maxTranslation ceiling (default 2.0 caps 60Hz pixel worlds to 120 u/s)
+(planck as any).Settings.maxTranslation = 100;
+(planck as any).Settings.maxTranslationSquared = 100 * 100;
 const DT = 1 / TICK_RATE;
 const SKILL_COOLDOWN = 1.5;
 
@@ -995,10 +1000,10 @@ class DanmakrewSimulationWorker {
       const { dx, dy, action, focus } = p.input;
       if (!locked) {
         const len = Math.hypot(dx, dy);
-        const nx = len > 1 ? dx / len : dx;
-        const ny = len > 1 ? dy / len : dy;
-        const speed = focus ? PLAYER_SPEED * FOCUS_SPEED_MULTIPLIER : PLAYER_SPEED;
-        p.body.setLinearVelocity(planck.Vec2(nx * speed, ny * speed));
+        const nx = len > 0 ? dx / len : 0;
+        const ny = len > 0 ? dy / len : 0;
+        const mult = focus ? FOCUS_SPEED_MULTIPLIER : 1.0;
+        p.body.setLinearVelocity(planck.Vec2(nx * PLAYER_SPEED_X * mult, ny * PLAYER_SPEED_Y * mult));
         if (nx !== 0 || ny !== 0) p.angle = Math.atan2(ny, nx);
       } else {
         p.body.setLinearVelocity(planck.Vec2(0, 0));

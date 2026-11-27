@@ -7,8 +7,9 @@ import type { ParticleSystem } from '../systems/ParticleSystem';
 import { getCharacterStats, type CharacterCombatStats } from '../CharacterStats';
 import { SCALE_X, SCALE_Y, CANVAS_WIDTH, CANVAS_HEIGHT } from '../physics/RenderConstants';
 
-const PLAYER_WORLD_SPEED = 510;
-const FOCUS_SPEED_MULT = 0.38;
+// Exact 1:1 match with Backend physics.js (375 * 1.28 = 480 px/s X, 500 * 0.96 = 480 px/s Y)
+const PLAYER_CANVAS_SPEED = 480;
+const FOCUS_SPEED_MULT = 0.40;
 const BOUND_PAD_X = 10 * SCALE_X;
 const BOUND_PAD_Y = 10 * SCALE_Y;
 
@@ -227,13 +228,13 @@ export class Player {
     const inputLen = Math.hypot(rawDx, rawDy);
     const hasInput = inputLen > 0.01;
 
-    // 0ms client-side prediction matching authoritative Planck velocity, with smooth server reconciliation
+    // 0ms client-side prediction matching authoritative isotropic velocity, with jitter-free reconciliation
     if (hasInput) {
-      const nx = inputLen > 1 ? rawDx / inputLen : rawDx;
-      const ny = inputLen > 1 ? rawDy / inputLen : rawDy;
-      const speedMult = this.isFocus ? FOCUS_SPEED_MULT : 1.0;
-      this.pos.x += nx * PLAYER_WORLD_SPEED * speedMult * SCALE_X * dt;
-      this.pos.y += ny * PLAYER_WORLD_SPEED * speedMult * SCALE_Y * dt;
+      const nx = rawDx / inputLen;
+      const ny = rawDy / inputLen;
+      const speed = PLAYER_CANVAS_SPEED * (this.isFocus ? FOCUS_SPEED_MULT : 1.0);
+      this.pos.x += nx * speed * dt;
+      this.pos.y += ny * speed * dt;
       this.pos.x = Math.max(BOUND_PAD_X, Math.min(CANVAS_WIDTH - BOUND_PAD_X, this.pos.x));
       this.pos.y = Math.max(BOUND_PAD_Y, Math.min(CANVAS_HEIGHT - BOUND_PAD_Y, this.pos.y));
     }
@@ -243,17 +244,24 @@ export class Player {
       const errY = this.targetPos.y - this.pos.y;
       const errDist = Math.hypot(errX, errY);
 
-      if (errDist > 155) {
-        // Hard snap on teleports, stage restarts, or beam struggle alignment
+      if (errDist > 260) {
+        // Hard snap only on real teleports (stage restart / beam struggle alignment)
         this.pos.x = this.targetPos.x;
         this.pos.y = this.targetPos.y;
       } else if (!hasInput) {
-        const settle = 1 - Math.exp(-20 * dt);
-        this.pos.x += errX * settle;
-        this.pos.y += errY * settle;
-      } else if (errDist > 56) {
-        // Gentle background reconciliation while actively dodging so input stays crisp with zero rubber-band
-        const drift = 1 - Math.exp(-5.5 * dt);
+        // When idle, settle smoothly onto authoritative server coordinates
+        if (errDist < 1.5) {
+          this.pos.x = this.targetPos.x;
+          this.pos.y = this.targetPos.y;
+        } else {
+          const settle = 1 - Math.exp(-14 * dt);
+          this.pos.x += errX * settle;
+          this.pos.y += errY * settle;
+        }
+      } else if (errDist > 135) {
+        // While actively dodging, tolerate normal RTT lead (~45-95px) with zero pullback;
+        // only blend gently if genuine drift exceeds 135px
+        const drift = 1 - Math.exp(-4.5 * dt);
         this.pos.x += errX * drift;
         this.pos.y += errY * drift;
       }

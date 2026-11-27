@@ -166,6 +166,13 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     assert.equal(snap.boss.isActive, false);
     assert.equal(snap.campaign.disableBoss, true);
     assert.equal(snap.campaign.disableWeapons, true);
+
+    // Verify Planck maxTranslation is not capping player movement at 120 u/s:
+    // After 0.5s: p1 moves ~187.5 in X (375 u/s) and p2 moves ~250 in Y (500 u/s)
+    const p1 = snap.players.find((p) => p.id === 'p1');
+    const p2 = snap.players.find((p) => p.id === 'p2');
+    assert.ok(p1.x - 110 > 170 && p1.x - 110 < 205, `Expected p1 horizontal move ~187.5, got ${p1.x - 110}`);
+    assert.ok(p2.y - 360 > 215 && p2.y - 360 < 260, `Expected p2 vertical move ~250 (clamped near wall), got ${p2.y - 360}`);
   });
 });
 
