@@ -40,6 +40,7 @@ WORKDIR /app
 # Backend runtime
 COPY --from=backend-deps /app/Backend/node_modules ./Backend/node_modules
 COPY Backend/package*.json ./Backend/
+COPY Backend/contextbook.md ./Backend/contextbook.md
 COPY Backend/src ./Backend/src
 COPY Backend/docs ./Backend/docs
 COPY Backend/scripts ./Backend/scripts

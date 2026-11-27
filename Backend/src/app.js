@@ -9,6 +9,7 @@ const db = require('./config/database');
 
 const userRoutes = require('./routes/userRoutes');
 const roomRoutes = require('./routes/roomRoutes');
+const assistantRoutes = require('./routes/assistantRoutes');
 
 const OPENAPI_ROUTE_META = {
   'GET /': { tags: ['Health'], summary: 'Información básica de la API' },
@@ -63,6 +64,12 @@ const OPENAPI_ROUTE_META = {
   'DELETE /api/rooms/:roomId': { tags: ['Rooms'], summary: 'Cerrar/eliminar sala (solo host)', auth: true },
   'POST /api/rooms/:roomId/character': { tags: ['Rooms'], summary: 'Seleccionar rol único en el escuadrón', auth: true },
   'POST /api/rooms/:roomId/ready': { tags: ['Rooms'], summary: 'Marcar estado LISTO para iniciar partida', auth: true },
+
+  'POST /api/assistant/ask': {
+    tags: ['Assistant'],
+    summary: 'Consultar al asistente IA DanmaBot sobre el juego',
+    bodyRef: 'AskAssistantRequest',
+  },
 };
 
 async function buildApp(options = {}) {
@@ -125,6 +132,7 @@ async function buildApp(options = {}) {
           { name: 'Friends', description: 'Gestión de solicitudes de amistad' },
           { name: 'Inventory', description: 'Inventario, scraps, skins y chips con estadísticas' },
           { name: 'Rooms', description: 'Lobby, salas públicas/privadas, roles y transición a partida' },
+          { name: 'Assistant', description: 'Asistente IA DanmaBot con contexto de Danmakrew' },
         ],
         components: {
           securitySchemes: {
@@ -198,6 +206,18 @@ async function buildApp(options = {}) {
                 stage: { type: 'integer', minimum: 1, maximum: 3, example: 1 },
               },
             },
+            AskAssistantRequest: {
+              type: 'object',
+              required: ['question'],
+              properties: {
+                question: {
+                  type: 'string',
+                  minLength: 1,
+                  maxLength: 1000,
+                  example: '¿Cuáles son los controles de Danmakrew?',
+                },
+              },
+            },
           },
         },
       },
@@ -265,6 +285,7 @@ async function buildApp(options = {}) {
 
   fastify.register(userRoutes, { prefix: '/api/auth' });
   fastify.register(roomRoutes, { prefix: '/api' });
+  fastify.register(assistantRoutes, { prefix: '/api' });
 
   return fastify;
 }

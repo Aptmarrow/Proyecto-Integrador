@@ -4,6 +4,7 @@ import Home from './pages/Home'
 import JoinSelection from './pages/JoinSelection'
 import OrientationGuard from './components/OrientationGuard'
 import ProtectedRoute from './components/ProtectedRoute'
+import DanmaBot from './components/DanmaBot'
 
 const Login = lazy(() => import('./pages/Login'))
 const Register = lazy(() => import('./pages/Register'))
@@ -66,6 +67,7 @@ function App() {
   return (
     <>
       <OrientationGuard />
+      <DanmaBot />
       <RouteErrorBoundary>
         <Suspense fallback={<div className="dk-route-loading" />}>
           <Routes>
