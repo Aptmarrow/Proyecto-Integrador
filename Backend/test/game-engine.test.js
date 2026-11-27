@@ -174,5 +174,46 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     assert.ok(p1.x - 110 > 170 && p1.x - 110 < 205, `Expected p1 horizontal move ~187.5, got ${p1.x - 110}`);
     assert.ok(p2.y - 360 > 215 && p2.y - 360 < 260, `Expected p2 vertical move ~250 (clamped near wall), got ${p2.y - 360}`);
   });
+
+  it('executes M.O. (Mechanical Ophanim) Konngara right-triangle phases P1..P5 cleanly', () => {
+    const moRoom = new GameRoom('room-mo-rework', 'p1', {
+      initialPhase: 'playing',
+      difficulty: 'normal',
+      world: 3,
+      stage: 3,
+    });
+    moRoom.addPlayer('p1', 'Special_Attack');
+    moRoom.spawnBossNow();
+    assert.equal(moRoom.boss.bossId, 'mo');
+
+    // Finish M.O. intro (~4s)
+    for (let i = 0; i < 250; i++) moRoom.update(1 / 60);
+    assert.equal(moRoom.boss.moIntroActive, false);
+    assert.equal(moRoom.boss.moDashState, 'triangle');
+
+    // Run full right-triangle cycles across P1 -> P2 (Konngara corridor) -> P3 (physical dash) -> P4 -> P5
+    const seenStates = new Set();
+    let sawFullTriangle = false;
+    let sawCorridorBullets = false;
+
+    for (let targetPhase = 1; targetPhase <= 5; targetPhase++) {
+      moRoom.boss.phase = targetPhase;
+      for (let i = 0; i < 240; i++) {
+        moRoom.update(1 / 60);
+        seenStates.add(moRoom.boss.moDashState);
+        if (moRoom.boss.moDashState === 'triangle' && moRoom.boss.moDashLines.length === 3) {
+          sawFullTriangle = true;
+        }
+        if (targetPhase === 2 && moRoom.bulletSystem.active.length >= 16) {
+          sawCorridorBullets = true;
+        }
+      }
+    }
+
+    assert.ok(seenStates.has('triangle'), 'Expected Konngara triangle state');
+    assert.ok(seenStates.has('telegraph') || seenStates.has('dashing'), 'Expected P3 physical triangle dash');
+    assert.equal(sawFullTriangle, true, 'Expected 3-side right triangle lines (|, _, /)');
+    assert.equal(sawCorridorBullets, true, 'Expected P2 Konngara split wall + diagonal corridor bullets');
+  });
 });
 

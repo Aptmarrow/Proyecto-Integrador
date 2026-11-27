@@ -7,7 +7,13 @@
  */
 
 const { computeBossMovement, fireBossPattern } = require('../campaign/spaceThemesAndWaves');
-const { updateMechanicalOphanim } = require('../campaign/normalCampaignOverhaul');
+const {
+  MO_HOME_X,
+  MO_HOME_Y,
+  createInitialMoState,
+  resetMoCycleForPhase,
+  updateMechanicalOphanim,
+} = require('../campaign/moBossEngine');
 
 const BOSS_PHASES = [
   { phase: 1, name: 'Fase 1 "Patrulla Lagrange"', isSpellCard: false, maxHp: 112, pattern: 'crescent_fan', shootInterval: 0.44, laserMode: 'targeted', laserInterval: 4.8, megaLaserInterval: 0 },
@@ -127,23 +133,12 @@ class BossController {
 
     if (this.bossId === 'mo') {
       this._introProgress = 1.0;
-      this.x = 670;
+      this.x = 760;
+      this.y = MO_HOME_Y;
       this.isRefilling = false;
       this.moIntroActive = true;
       this.moIntroProgress = 0;
-      this._moState = {
-        mode: 'intro',
-        timer: 0,
-        introDuration: this._introDuration || 3.8,
-        lineIndex: 0,
-        segIndex: 0,
-        dashSpeedScale: 1.0,
-        dashChain: [],
-        dashHitPlayers: new Set(),
-        sparkAccum: 0,
-        restShotAccum: 0,
-        summonTimer: 2.0,
-      };
+      this._moState = createInitialMoState(this._introDuration || 3.8);
     } else {
       this.moIntroActive = false;
       this.moIntroProgress = 0;
@@ -160,8 +155,8 @@ class BossController {
     if (this.isRefilling) {
       this.refillTimer -= dt;
       if (this.bossId === 'mo') {
-        this.x += (400 - this.x) * Math.min(1, dt * 6);
-        this.y += (300 - this.y) * Math.min(1, dt * 6);
+        this.x += (MO_HOME_X - this.x) * Math.min(1, dt * 6);
+        this.y += (MO_HOME_Y - this.y) * Math.min(1, dt * 6);
         this.angle = Math.PI;
       }
       if (this.refillTimer <= 0) {
@@ -309,9 +304,7 @@ class BossController {
         this._laserTimer = 0;
         this._megaLaserTimer = 0;
         if (this._moState && this._moState.mode !== 'intro') {
-          this._moState.mode = 'resting';
-          this._moState.timer = 1.2;
-          this._moState.dashSpeedScale = 1.0;
+          resetMoCycleForPhase(this._moState, this.phase);
           this.moDashLines = [];
         }
 

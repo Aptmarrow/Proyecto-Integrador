@@ -19,6 +19,14 @@ import {
   type BossPhaseProfile,
 } from '../campaign/spaceCampaignCatalog';
 import type { BulletSpawnOpts } from '../campaign/normalCampaignOverhaul';
+import {
+  MO_HOME_X,
+  MO_HOME_Y,
+  createInitialMoState,
+  resetMoCycleForPhase,
+  updateWorkerMechanicalOphanim,
+  type MoBossRuntimeState,
+} from '../campaign/moBossEngine';
 
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
@@ -255,17 +263,7 @@ class DanmakrewSimulationWorker {
     moIntroProgress: 0,
     moDashState: 'idle',
     moDashLines: [] as Array<{ x1: number; y1: number; x2: number; y2: number; progress: number; active: boolean; completed?: boolean; isReturn?: boolean }>,
-    moMode: 'idle' as 'idle' | 'intro' | 'telegraph' | 'dashing' | 'resting',
-    moTimer: 0,
-    moLineIndex: 0,
-    moSegIndex: 0,
-    moDashSpeedScale: 1.0,
-    moDashChain: [] as Array<{ x1: number; y1: number; x2: number; y2: number; isReturn?: boolean }>,
-    moRestDuration: 3.0,
-    moDashHitPlayers: new Set<string>(),
-    moSparkAccum: 0,
-    moRestShotAccum: 0,
-    moSummonTimer: 2.0,
+    moState: createInitialMoState(3.8) as MoBossRuntimeState,
   };
 
   private struggle: ServerBeamStruggle = {
@@ -653,13 +651,13 @@ class DanmakrewSimulationWorker {
     this.boss.targetY = 300;
 
     if (this.boss.bossId === 'mo') {
+      this.boss.x = MO_HOME_X;
+      this.boss.y = MO_HOME_Y;
       this.boss.moIntroActive = false;
       this.boss.moIntroProgress = 1;
-      this.boss.moMode = 'resting';
-      this.boss.moTimer = 0.6;
+      resetMoCycleForPhase(this.boss.moState, clampedPhase);
       this.boss.moDashLines = [];
       this.boss.moDashState = 'idle';
-      this.boss.moDashChain = [];
     }
 
     this.emitSnapshotNow();
@@ -814,17 +812,7 @@ class DanmakrewSimulationWorker {
       moIntroProgress: 0,
       moDashState: 'idle',
       moDashLines: [],
-      moMode: 'idle',
-      moTimer: 0,
-      moLineIndex: 0,
-      moSegIndex: 0,
-      moDashSpeedScale: 1.0,
-      moDashChain: [],
-      moRestDuration: 3.0,
-      moDashHitPlayers: new Set<string>(),
-      moSparkAccum: 0,
-      moRestShotAccum: 0,
-      moSummonTimer: 2.0,
+      moState: createInitialMoState(3.8),
     };
   }
 
@@ -893,22 +881,16 @@ class DanmakrewSimulationWorker {
     this.boss.moDashState = 'idle';
     this.boss.angle = Math.PI;
     if (this.boss.bossId === 'mo') {
-      this.boss.x = 670;
-      this.boss.y = 300;
+      this.boss.x = 760;
+      this.boss.y = MO_HOME_Y;
       this.boss.isInvulnerable = true;
       this.boss.moIntroActive = true;
       this.boss.moIntroProgress = 0;
-      this.boss.moMode = 'intro';
-      this.boss.moTimer = 0;
-      this.boss.moSegIndex = 0;
-      this.boss.moDashSpeedScale = 1.0;
-      this.boss.moSummonTimer = 2.0;
-      this.boss.moDashChain = [];
+      this.boss.moState = createInitialMoState(profile.introDuration || 3.8);
     } else {
       this.boss.isInvulnerable = false;
       this.boss.moIntroActive = false;
       this.boss.moIntroProgress = 0;
-      this.boss.moMode = 'idle';
     }
   }
 
@@ -1810,111 +1792,18 @@ class DanmakrewSimulationWorker {
     }
   }
 
-  private clipWorkerRayToOuterBounds(x0: number, y0: number, tx: number, ty: number): { x: number; y: number } {
-    const pad = 125;
-    const minX = -pad;
-    const maxX = WORLD_WIDTH + pad;
-    const minY = -pad;
-    const maxY = WORLD_HEIGHT + pad;
-    let dx = tx - x0;
-    let dy = ty - y0;
-    if (Math.hypot(dx, dy) < 35) {
-      dx = 180 - x0;
-      dy = 300 - y0;
-    }
-
-    let bestS = Infinity;
-    let exitX = maxX;
-    let exitY = WORLD_HEIGHT / 2;
-
-    const tryEdge = (s: number) => {
-      if (!(s > 0.05) || s >= bestS) return;
-      const hx = x0 + s * dx;
-      const hy = y0 + s * dy;
-      if (hx >= minX - 2 && hx <= maxX + 2 && hy >= minY - 2 && hy <= maxY + 2) {
-        bestS = s;
-        exitX = Math.max(minX, Math.min(maxX, hx));
-        exitY = Math.max(minY, Math.min(maxY, hy));
-      }
-    };
-
-    if (Math.abs(dx) > 1e-5) {
-      tryEdge((minX - x0) / dx);
-      tryEdge((maxX - x0) / dx);
-    }
-    if (Math.abs(dy) > 1e-5) {
-      tryEdge((minY - y0) / dy);
-      tryEdge((maxY - y0) / dy);
-    }
-    return { x: Math.round(exitX), y: Math.round(exitY) };
-  }
-
-  private pickRandomWorkerOuterPoint(): { x: number; y: number } {
-    const pad = 125;
-    const edge = Math.floor(Math.random() * 4);
-    if (edge === 0) return { x: -pad, y: Math.round(70 + Math.random() * (WORLD_HEIGHT - 140)) };
-    if (edge === 1) return { x: WORLD_WIDTH + pad, y: Math.round(70 + Math.random() * (WORLD_HEIGHT - 140)) };
-    if (edge === 2) return { x: Math.round(90 + Math.random() * (WORLD_WIDTH - 180)), y: -pad };
-    return { x: Math.round(90 + Math.random() * (WORLD_WIDTH - 180)), y: WORLD_HEIGHT + pad };
-  }
-
-  private buildWorkerMoDashChain(startX: number, startY: number, phase: number, target: { x: number; y: number }, _seed: number) {
-    const centerX = WORLD_WIDTH / 2;
-    const centerY = WORLD_HEIGHT / 2;
-    const dashes = 4 + Math.max(1, phase || 1);
-    const px = Math.max(90, Math.min(WORLD_WIDTH - 90, target.x || 200));
-    const py = Math.max(70, Math.min(WORLD_HEIGHT - 70, target.y || centerY));
-
-    const chain: Array<{ x1: number; y1: number; x2: number; y2: number; isReturn?: boolean }> = [];
-    let lastEndX = startX;
-    let lastEndY = startY;
-
-    for (let k = 0; k < dashes; k++) {
-      let sx: number;
-      let sy: number;
-      let tx: number;
-      let ty: number;
-
-      if (k === 0) {
-        sx = startX;
-        sy = startY;
-        tx = px;
-        ty = py;
-        if (Math.hypot(tx - sx, ty - sy) < 60) {
-          tx = 180;
-          ty = py > centerY ? 190 : 410;
-        }
-      } else {
-        const entry = this.pickRandomWorkerOuterPoint();
-        sx = entry.x;
-        sy = entry.y;
-        tx = Math.round(130 + Math.random() * (WORLD_WIDTH - 260));
-        ty = Math.round(95 + Math.random() * (WORLD_HEIGHT - 190));
-      }
-
-      const exitPt = this.clipWorkerRayToOuterBounds(sx, sy, tx, ty);
-      chain.push({ x1: sx, y1: sy, x2: exitPt.x, y2: exitPt.y, isReturn: false });
-      lastEndX = exitPt.x;
-      lastEndY = exitPt.y;
-    }
-
-    chain.push({ x1: lastEndX, y1: lastEndY, x2: centerX, y2: centerY, isReturn: true });
-    return chain;
-  }
-
   private spawnWorkerMoKamikaze(phase: number, maxActive: number, statScale: number = 1.0, target?: { x: number; y: number }): void {
     const activeCount = this.enemies.filter((e) => e.type === 'mo_enemy2').length;
     if (activeCount >= maxActive) return;
 
-    // Never spawn behind the player (no left edge, and top/bottom spawns stay strictly ahead of player X)
-    const edge = Math.floor(Math.random() * 3); // 0: right, 1: top, 2: bottom
+    const edge = Math.floor(Math.random() * 3);
     const pad = 42;
-    const minFrontX = Math.min(WORLD_WIDTH - 40, Math.max(120, Math.round((target?.x ?? 120) + 70)));
+    const minFrontX = Math.min(WORLD_WIDTH - 40, Math.max(150, Math.round((target?.x ?? 120) + 95)));
     let startX: number;
     let startY: number;
     if (edge === 0) {
       startX = WORLD_WIDTH + pad;
-      startY = Math.round(45 + Math.random() * (WORLD_HEIGHT - 90));
+      startY = Math.round(55 + Math.random() * (WORLD_HEIGHT - 110));
     } else if (edge === 1) {
       startX = Math.round(minFrontX + Math.random() * Math.max(20, WORLD_WIDTH - 20 - minFrontX));
       startY = -pad;
@@ -1931,7 +1820,7 @@ class DanmakrewSimulationWorker {
       y: startY,
       startX,
       startY,
-      speed: Math.round((184 + phase * 9) * statScale),
+      speed: Math.round((176 + phase * 8) * statScale),
       hp,
       maxHp: hp,
       radius: 18,
@@ -1943,239 +1832,72 @@ class DanmakrewSimulationWorker {
       bulletColor: 0xfef08a,
       sprite: '/assets/sprites/MOenemy2png.png',
       angle: Math.PI,
-      customParams: { fuseTime: 1.75, triggerDist: 135, statScale },
+      customParams: { fuseTime: 1.85, triggerDist: 130, statScale },
     });
   }
 
   private updateWorkerMoBoss(dt: number, target: { x: number; y: number }): void {
-    const b = this.boss;
-    const centerX = WORLD_WIDTH / 2;
-    const centerY = WORLD_HEIGHT / 2;
-    const statScale = b.statScale || 1.0;
+    const emitter = {
+      spawn: (
+        x: number,
+        y: number,
+        angle: number,
+        speed: number,
+        radius: number,
+        ttl: number,
+        damage: number,
+        color: number,
+        opts?: Record<string, any> | null
+      ) => {
+        this.spawnEnemyBullet(x, y, angle, speed, radius, color, damage, {
+          ...(opts || {}),
+          ttl,
+        });
+      },
+      spawnVelocity: (
+        x: number,
+        y: number,
+        vx: number,
+        vy: number,
+        radius: number,
+        ttl: number,
+        damage: number,
+        color: number,
+        opts?: Record<string, any> | null
+      ) => {
+        const speed = Math.hypot(vx, vy);
+        const angle = Math.atan2(vy, vx);
+        this.spawnEnemyBullet(x, y, angle, speed, radius, color, damage, {
+          ...(opts || {}),
+          ttl,
+        });
+      },
+    };
 
-    if (b.moMode === 'intro') {
-      b.moTimer += dt;
-      b.isInvulnerable = true;
-      const progress = Math.min(1, b.moTimer / 3.8);
-      b.x = 670 + (centerX - 670) * (1 - Math.pow(1 - progress, 2));
-      b.y = centerY;
-      b.angle = Math.PI;
-      b.moIntroActive = true;
-      b.moIntroProgress = progress;
-      if (b.moTimer >= 3.8) {
-        b.isInvulnerable = false;
-        b.moIntroActive = false;
-        b.moIntroProgress = 1;
-        b.x = centerX;
-        b.y = centerY;
-        b.moMode = 'telegraph';
-        b.moTimer = 0;
-        b.moSegIndex = 0;
-        b.moDashSpeedScale = 1.0;
-        b.moSummonTimer = 2.6;
-        b.moDashChain = this.buildWorkerMoDashChain(b.x, b.y, b.phase, target, b.moLineIndex++);
-      }
-      return;
-    }
-
-    b.isInvulnerable = false;
-    b.moIntroActive = false;
-
-    // Offscreen MOenemy2 summons:
-    // Normal: P1=0, P2-3=1, P4-5=2 | Difficult: P1=1, P2-3=2, P4-5=3 | No Mercy: P1=2, P2-3=3, P4-5=4
-    const diffBonus = statScale >= 1.2 ? 2 : statScale >= 1.08 ? 1 : 0;
-    const phaseStep = b.phase >= 4 ? 2 : b.phase >= 2 ? 1 : 0;
-    const summonCount = phaseStep + diffBonus;
-    if (summonCount > 0) {
-      b.moSummonTimer += dt;
-      const summonInterval = Math.max(3.8, 6.0 - b.phase * 0.45);
-      if (b.moSummonTimer >= summonInterval) {
-        b.moSummonTimer = 0;
-        const maxActive = Math.min(5 + diffBonus * 2, b.phase + diffBonus);
-        for (let k = 0; k < summonCount; k++) {
-          this.spawnWorkerMoKamikaze(b.phase, maxActive, statScale, target);
-        }
-      }
-    }
-
-    if (b.moMode === 'telegraph') {
-      b.moTimer += dt;
-      const dur = Math.max(0.85, 1.25 - b.phase * 0.05);
-      if (!b.moDashChain.length) {
-        b.moDashChain = this.buildWorkerMoDashChain(b.x, b.y, b.phase, target, b.moLineIndex++);
-      }
-      const first = b.moDashChain[0];
-      b.x += (first.x1 - b.x) * Math.min(1, dt * 14);
-      b.y += (first.y1 - b.y) * Math.min(1, dt * 14);
-      b.angle = Math.atan2(first.y2 - first.y1, first.x2 - first.x1);
-      b.moDashState = 'telegraph';
-      const prog = Number(Math.min(1, b.moTimer / dur).toFixed(2));
-      b.moDashLines = b.moDashChain.map((seg, idx) => ({
-        x1: seg.x1,
-        y1: seg.y1,
-        x2: seg.x2,
-        y2: seg.y2,
-        progress: prog,
-        active: idx === 0,
-        completed: false,
-        isReturn: Boolean(seg.isReturn),
-      }));
-
-      if (b.moTimer >= dur) {
-        b.moMode = 'dashing';
-        b.moSegIndex = 0;
-        b.moDashSpeedScale = 1.0;
-        b.moTimer = 0;
-        b.moDashHitPlayers = new Set();
-        b.moSparkAccum = 0;
-      }
-      return;
-    }
-
-    if (b.moMode === 'dashing') {
-      const seg = b.moDashChain[b.moSegIndex];
-      if (!seg) {
-        b.moMode = 'resting';
-        b.moDashSpeedScale = 1.0;
-        b.moTimer = 0;
-        b.moDashLines = [];
-        return;
-      }
-
-      const segLen = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1) || 1;
-      const baseDashSpeed = (1350 + b.phase * 120) * statScale;
-      const speedScale = b.moDashSpeedScale || 1.0;
-      const segDur = seg.isReturn
-        ? Math.max(0.32, Math.min(0.55, segLen / (1650 * statScale)))
-        : Math.max(0.14, Math.min(0.65, segLen / (baseDashSpeed * speedScale)));
-
-      const prevX = b.x;
-      const prevY = b.y;
-      b.moTimer += dt;
-      const rawT = Math.min(1, b.moTimer / segDur);
-      const p = seg.isReturn
-        ? 1 - Math.pow(1 - rawT, 3)
-        : rawT < 0.5 ? 2 * rawT * rawT : 1 - Math.pow(-2 * rawT + 2, 2) / 2;
-
-      b.x = seg.x1 + (seg.x2 - seg.x1) * p;
-      b.y = seg.y1 + (seg.y2 - seg.y1) * p;
-      b.angle = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
-      b.moDashState = 'dashing';
-      b.moDashLines = b.moDashChain
-        .filter((_s, idx) => idx >= b.moSegIndex)
-        .map((s, relIdx) => ({
-          x1: s.x1,
-          y1: s.y1,
-          x2: s.x2,
-          y2: s.y2,
-          progress: relIdx === 0 ? Number(rawT.toFixed(2)) : 0,
-          active: relIdx === 0,
-          completed: false,
-          isReturn: Boolean(s.isReturn),
-        }));
-
-      b.moSparkAccum += dt;
-      const wakeInterval = Math.max(0.032, 0.068 - b.phase * 0.007);
-      if (!seg.isReturn && b.moSparkAccum >= wakeInterval && b.x > -20 && b.x < WORLD_WIDTH + 20 && b.y > -20 && b.y < WORLD_HEIGHT + 20) {
-        b.moSparkAccum = 0;
-        const pairsPerSide = Math.ceil(b.phase / 2);
-        for (const sgn of [-1, 1]) {
-          const perp = b.angle + sgn * (Math.PI / 2);
-          for (let sp = 0; sp < pairsPerSide; sp++) {
-            const fanOffset = (sp - (pairsPerSide - 1) / 2) * 0.06;
-            const spd = (118 + sp * 32) * statScale;
-            this.spawnEnemyBullet(b.x, b.y, perp + fanOffset, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
-          }
-        }
-      }
-
-      if (!seg.isReturn || rawT < 0.72) {
-        for (const [pid, pl] of this.players) {
-          if (pl.hp <= 0 || b.moDashHitPlayers.has(pid)) continue;
-          const pos = pl.body.getPosition();
-          for (let s = 1; s <= 4; s++) {
-            const st = s / 4;
-            const sx = prevX + (b.x - prevX) * st;
-            const sy = prevY + (b.y - prevY) * st;
-            if (Math.hypot(pos.x - sx, pos.y - sy) <= 42) {
-              b.moDashHitPlayers.add(pid);
-              this.applyDamageToPlayer(pl, 14);
-              break;
+    const prevScale = this.activeEnemyStatScale;
+    this.activeEnemyStatScale = 1.0; // moBossEngine already scales by boss.statScale
+    try {
+      updateWorkerMechanicalOphanim(
+        this.boss,
+        dt,
+        target,
+        emitter,
+        (sx, sy, radius, damage, hitSet) => {
+          for (const [pid, pl] of this.players) {
+            if (pl.hp <= 0 || hitSet.has(pid)) continue;
+            const pos = pl.body.getPosition();
+            if (Math.hypot(pos.x - sx, pos.y - sy) <= radius + 8) {
+              hitSet.add(pid);
+              this.applyDamageToPlayer(pl, damage);
             }
           }
+        },
+        (phase, maxActive, statScale) => {
+          this.spawnWorkerMoKamikaze(phase, maxActive, statScale, target);
         }
-      }
-
-      if (rawT >= 1) {
-        b.x = seg.x2;
-        b.y = seg.y2;
-        if (!seg.isReturn) {
-          const lineNodes = 2 + Math.max(1, b.phase);
-          const sparksPerSide = Math.ceil(b.phase / 2);
-          const lineAngle = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
-          for (let n = 1; n <= lineNodes; n++) {
-            const u = n / (lineNodes + 1);
-            const nx = seg.x1 + (seg.x2 - seg.x1) * u;
-            const ny = seg.y1 + (seg.y2 - seg.y1) * u;
-            if (nx < 10 || nx > WORLD_WIDTH - 10 || ny < 10 || ny > WORLD_HEIGHT - 10) continue;
-            for (const sgn of [-1, 1]) {
-              const perp = lineAngle + sgn * (Math.PI / 2);
-              for (let sp = 0; sp < sparksPerSide; sp++) {
-                const fanOffset = (sp - (sparksPerSide - 1) / 2) * 0.05;
-                const spd = (108 + sp * 32) * statScale;
-                this.spawnEnemyBullet(nx, ny, perp + fanOffset, spd, 4.5, 0xfef08a, Math.max(1, Math.round(4 * statScale)), { spriteType: 'MObullet3png', ttl: 12.0 });
-              }
-            }
-          }
-          b.moDashSpeedScale = (b.moDashSpeedScale || 1.0) + 0.28;
-        }
-        b.moSegIndex += 1;
-        if (b.moSegIndex < b.moDashChain.length) {
-          const nextSeg = b.moDashChain[b.moSegIndex];
-          b.x = nextSeg.x1;
-          b.y = nextSeg.y1;
-          b.angle = Math.atan2(nextSeg.y2 - nextSeg.y1, nextSeg.x2 - nextSeg.x1);
-          b.moTimer = 0;
-          b.moDashHitPlayers = new Set();
-          b.moSparkAccum = 0;
-        } else {
-          b.x = centerX;
-          b.y = centerY;
-          b.moMode = 'resting';
-          b.moDashSpeedScale = 1.0;
-          b.moTimer = 0;
-          b.moRestDuration = Math.max(2.3, 3.2 - b.phase * 0.15);
-          b.moRestShotAccum = 0;
-          b.moDashLines = [];
-        }
-      }
-      return;
-    }
-
-    b.moTimer += dt;
-    b.moDashSpeedScale = 1.0;
-    b.moDashState = 'resting';
-    b.moDashLines = [];
-    const restHoverX = centerX + Math.cos(b.moTimer * 1.45) * 52;
-    const restHoverY = centerY + Math.sin(b.moTimer * 2.2) * 62;
-    b.x += (restHoverX - b.x) * Math.min(1, dt * 4.5);
-    b.y += (restHoverY - b.y) * Math.min(1, dt * 4.5);
-    b.angle = Math.atan2(target.y - b.y, target.x - b.x);
-    b.moRestShotAccum += dt;
-    const restShotInterval = Math.max(0.54, (1.05 - b.phase * 0.06) / statScale);
-    if (b.moRestShotAccum >= restShotInterval) {
-      b.moRestShotAccum = 0;
-      const count = 8 + b.phase * 2;
-      for (let k = 0; k < count; k++) {
-        this.spawnEnemyBullet(b.x, b.y, b.animTimer * 0.75 + (Math.PI * 2 * k) / count, 175 * statScale, 5, 0xef4444, Math.max(1, Math.round(5 * statScale)), { spriteType: 'MObullet1png', ttl: 3.4 });
-      }
-    }
-    if (b.moTimer >= b.moRestDuration) {
-      b.moMode = 'telegraph';
-      b.moTimer = 0;
-      b.moSegIndex = 0;
-      b.moDashSpeedScale = 1.0;
-      b.moDashChain = this.buildWorkerMoDashChain(b.x, b.y, b.phase, target, b.moLineIndex++);
+      );
+    } finally {
+      this.activeEnemyStatScale = prevScale;
     }
   }
 
@@ -2204,9 +1926,8 @@ class DanmakrewSimulationWorker {
       this.boss.shootTimer = 0;
       this.boss.laserTimer = 0;
       this.boss.megaLaserTimer = 0;
-      if (this.boss.bossId === 'mo' && this.boss.moMode !== 'intro') {
-        this.boss.moMode = 'resting';
-        this.boss.moTimer = 1.4;
+      if (this.boss.bossId === 'mo' && this.boss.moState.mode !== 'intro') {
+        resetMoCycleForPhase(this.boss.moState, this.boss.phase);
         this.boss.moDashLines = [];
       }
     } else {

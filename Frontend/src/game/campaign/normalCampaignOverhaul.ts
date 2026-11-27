@@ -1,4 +1,5 @@
 import type { BossPhaseProfile, SpaceBossProfile, SpaceWaveEvent, WaveEnemySpec } from './spaceCampaignCatalog';
+import { MO_PHASE_DEFS } from './moBossEngine';
 
 export const ENABLE_NORMAL_OVERHAUL = true;
 
@@ -655,13 +656,7 @@ export function getNormalWorldBossProfile(
   }
 
   const baseHp = 175;
-  const raw = [
-    { name: 'Fase 1 "Vectores Rectos"', pattern: 'mo_dash_pattern', shootInterval: 0.5, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 0 },
-    { name: 'Sello Ophanim "Trazos del Trono"', pattern: 'mo_dash_pattern', shootInterval: 0.45, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 8.5 },
-    { name: 'Fase 3 "Aceleración Axial"', pattern: 'mo_dash_pattern', shootInterval: 0.4, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 0 },
-    { name: 'Protocolo Serafín "Cruce Mecánico"', pattern: 'mo_dash_pattern', shootInterval: 0.35, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 7.5 },
-    { name: 'Protocolo Final "MECHANICAL OPHANIM"', pattern: 'mo_dash_pattern', shootInterval: 0.3, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 6.8 },
-  ];
+  const raw = MO_PHASE_DEFS;
   return {
     bossId: 'mo',
     bossName: 'M.O',

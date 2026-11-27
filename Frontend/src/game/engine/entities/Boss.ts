@@ -294,8 +294,90 @@ export class Boss {
 
   private renderMoDashLines(animTimer: number, scaleX: number, scaleY: number): void {
     const g = this.moLineGraphics;
+    const pulse = 0.72 + Math.sin(animTimer * 28) * 0.28;
+
+    // ── Konngara Right-Triangle Blade Choreography (`|` -> `_` with 90° `∟` -> `/` flash) ──
+    if (this.moDashState === 'triangle') {
+      const lines = this.moDashLines;
+      const hasFullTriangle = lines.length >= 3;
+
+      // Subtle translucent crimson-gold fill flash when the Hypotenuse closes the Right Triangle
+      if (hasFullTriangle) {
+        const hypo = lines[2];
+        const fillAlpha = hypo.active
+          ? 0.08 + hypo.progress * 0.16 * pulse
+          : 0.1 * hypo.progress;
+        if (fillAlpha > 0.01) {
+          g.beginFill(0xff2b5b, fillAlpha);
+          g.moveTo(lines[0].x1 * scaleX, lines[0].y1 * scaleY);
+          g.lineTo(lines[0].x2 * scaleX, lines[0].y2 * scaleY);
+          g.lineTo(lines[1].x2 * scaleX, lines[1].y2 * scaleY);
+          g.closePath();
+          g.endFill();
+        }
+      }
+
+      for (let idx = 0; idx < lines.length; idx++) {
+        const line = lines[idx];
+        if (line.completed) continue;
+        const x1 = line.x1 * scaleX;
+        const y1 = line.y1 * scaleY;
+        const p = Math.max(0, Math.min(1, line.progress));
+        // Active line draws progressively from start -> end; completed/fading legs span full length
+        const drawT = line.active ? p : 1;
+        const fadeAlpha = line.active ? 1 : hasFullTriangle && !lines[2].active ? p : 0.85;
+        const ex = x1 + (line.x2 * scaleX - x1) * drawT;
+        const ey = y1 + (line.y2 * scaleY - y1) * drawT;
+
+        // Distinct color per Right-Triangle side:
+        // 0 = Vertical leg `|` (electric lime-gold), 1 = Horizontal leg `_` (cyan-white), 2 = Hypotenuse `/` (crimson-gold)
+        const outerColor = idx === 0 ? 0xfacc15 : idx === 1 ? 0x38bdf8 : 0xff2b5b;
+        const coreColor = idx === 0 ? 0xfef9c3 : idx === 1 ? 0xffffff : 0xfde047;
+        const outerWidth = line.active ? 16 : 9;
+        const coreWidth = line.active ? 4.2 : 2.2;
+
+        g.lineStyle(outerWidth, outerColor, 0.34 * pulse * fadeAlpha);
+        g.moveTo(x1, y1);
+        g.lineTo(ex, ey);
+
+        g.lineStyle(coreWidth, coreColor, 0.96 * fadeAlpha);
+        g.moveTo(x1, y1);
+        g.lineTo(ex, ey);
+
+        // Glowing sword-tip spark while actively slicing
+        if (line.active && drawT < 0.99) {
+          g.lineStyle(0);
+          g.beginFill(outerColor, 0.5);
+          g.drawCircle(ex, ey, 11);
+          g.endFill();
+          g.beginFill(0xffffff, 0.95);
+          g.drawCircle(ex, ey, 4.5);
+          g.endFill();
+        }
+      }
+
+      // Draw crisp 90° Right-Angle square corner marker (`∟`) once Horizontal leg starts!
+      if (lines.length >= 2) {
+        const vLeg = lines[0];
+        const hLeg = lines[1];
+        const bx = vLeg.x2 * scaleX;
+        const by = vLeg.y2 * scaleY;
+        const signY = vLeg.y1 < vLeg.y2 ? -1 : 1;
+        const signX = hLeg.x2 < hLeg.x1 ? -1 : 1;
+        const box = 16;
+        const cornerAlpha = lines.length >= 3 && !lines[2].active ? lines[2].progress : 0.9;
+        g.lineStyle(2, 0xfef08a, 0.9 * cornerAlpha);
+        g.moveTo(bx + signX * box, by);
+        g.lineTo(bx + signX * box, by + signY * box);
+        g.lineTo(bx, by + signY * box);
+      }
+
+      g.lineStyle(0);
+      return;
+    }
+
+    // ── Physical Right-Triangle Dash Telegraph / Trail (Phase 3 & periodic P5) ──
     const isDash = this.moDashState === 'dashing';
-    const pulse = 0.65 + Math.sin(animTimer * 28) * 0.35;
 
     for (let idx = 0; idx < this.moDashLines.length; idx++) {
       const line = this.moDashLines[idx];
