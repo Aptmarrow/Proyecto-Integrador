@@ -14,8 +14,8 @@ const askSchema = z.object({
   question: z
     .string()
     .trim()
-    .min(1, 'La pregunta no puede estar vacía.')
-    .max(1000, 'La pregunta es demasiado larga (máx. 1000 caracteres).'),
+    .min(1, 'Question cannot be empty.')
+    .max(1000, 'Question is too long (max 1000 characters).'),
 });
 
 /**
@@ -28,7 +28,7 @@ async function askNoMercyAssistant(question) {
   const model = process.env.LLM_MODEL || DEFAULT_MODEL;
 
   if (!apiKey) {
-    const err = new Error('LLM_API_KEY no está configurada en el servidor.');
+    const err = new Error('LLM_API_KEY is not configured on the server.');
     err.statusCode = 503;
     throw err;
   }
@@ -53,7 +53,7 @@ async function askNoMercyAssistant(question) {
 
   if (!response.ok) {
     const detail = await response.text();
-    const err = new Error(`Error del proveedor LLM (${response.status}): ${detail}`);
+    const err = new Error(`LLM provider error (${response.status}): ${detail}`);
     err.statusCode = 502;
     throw err;
   }
@@ -62,7 +62,7 @@ async function askNoMercyAssistant(question) {
   const answer = data?.choices?.[0]?.message?.content?.trim();
 
   if (!answer) {
-    const err = new Error('El modelo devolvió una respuesta vacía.');
+    const err = new Error('The model returned an empty response.');
     err.statusCode = 502;
     throw err;
   }
@@ -82,10 +82,10 @@ async function assistantRoutes(fastify) {
       const result = await askNoMercyAssistant(parsed.data.question);
       return reply.send(result);
     } catch (err) {
-      fastify.log.error({ err }, 'Error consultando al asistente LLM');
+      fastify.log.error({ err }, 'Error querying LLM assistant');
       return reply
         .status(err.statusCode || 500)
-        .send({ message: err.message || 'No se pudo obtener respuesta del asistente.' });
+        .send({ message: err.message || 'Could not get a response from the assistant.' });
     }
   });
 }

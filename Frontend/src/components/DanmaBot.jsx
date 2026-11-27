@@ -6,23 +6,23 @@ import '../styles/chatbot.css';
 const HIDDEN_ROUTES = ['/character-selection', '/game'];
 
 const FAQ_ITEMS = [
-  { emoji: '🎮', label: '¿Cómo se juega?', question: '¿Cómo se juega a Danmakrew y cuáles son los controles?' },
-  { emoji: '🛡️', label: '¿Qué roles y habilidades hay?', question: '¿Qué roles existen en Danmakrew (Tank, Support, DPS, Special Attack) y qué hace cada uno?' },
-  { emoji: '🛒', label: '¿Qué hay en Shop e Inventory?', question: '¿Qué encuentro en la Shop y cómo funciona el Inventory?' },
-  { emoji: '⚡', label: '¿Cómo jugar en sala online?', question: '¿Cómo creo o me uno a una sala multijugador en Danmakrew?' },
+  { emoji: '🎮', label: 'How do I play?', question: 'How do I play Danmakrew and what are the controls?' },
+  { emoji: '🛡️', label: 'What roles & skills exist?', question: 'What roles exist in Danmakrew (Tank, Support, DPS, Special Attack) and what does each one do?' },
+  { emoji: '🛒', label: 'How do Shop & Inventory work?', question: 'What can I find in the Shop and how does the Inventory & Chips system work?' },
+  { emoji: '⚡', label: 'How do I play online?', question: 'How do I create or join a multiplayer room in Danmakrew?' },
 ];
 
 const QUICK_CHIPS = [
-  { label: 'Controles', question: '¿Cuáles son los controles de Danmakrew?' },
-  { label: 'Roles', question: 'Explicame los 4 roles de personajes en Danmakrew' },
-  { label: 'Jefes', question: '¿Qué jefes y mundos tiene Danmakrew?' },
-  { label: 'Dificultades', question: '¿Qué diferencia hay entre Normal, Difficult y No Mercy?' },
+  { label: 'Controls', question: 'What are the controls in Danmakrew?' },
+  { label: 'Roles', question: 'Explain the 4 character roles in Danmakrew' },
+  { label: 'Bosses', question: 'What bosses and worlds does Danmakrew have?' },
+  { label: 'Difficulties', question: 'What is the difference between Normal, Difficult, and No Mercy?' },
 ];
 
 const WELCOME_MSG = {
   id: 'welcome',
   sender: 'bot',
-  text: '¡Hola! 👋 Soy **DanmaBot**, tu asistente de **Danmakrew**. Elegí una pregunta frecuente o escribime abajo en qué te puedo ayudar.',
+  text: 'Hey! 👋 I am **DanmaBot**, your **Danmakrew** assistant. Pick a frequent question or type below to ask me anything.',
 };
 
 function renderFormattedText(text) {
@@ -46,19 +46,19 @@ function renderFormattedText(text) {
 
 function getLocalFallbackAnswer(question) {
   const q = question.toLowerCase();
-  if (q.includes('control') || q.includes('juega')) {
-    return 'En **Danmakrew** te movés con **WASD o Flechas**, disparás con **Z / Espacio**, activás modo precisión (hitbox reducida) manteniendo **Shift**, y lanzás tu habilidad especial con **X**. En un *Beam Struggle*, presioná **Z / Espacio** rápido para ganar el choque.';
+  if (q.includes('control') || q.includes('play') || q.includes('juega')) {
+    return 'In **Danmakrew**, move with **WASD or Arrow Keys**, shoot with **Z / Space**, hold **Shift** for Focus Mode (precision movement), and trigger your special skill with **X**. During a *Beam Struggle*, mash **Z / Space** rapidly to win the clash.';
   }
-  if (q.includes('rol') || q.includes('tank') || q.includes('support') || q.includes('dps')) {
-    return 'Hay 4 roles únicos por escuadrón:\n• **DPS:** alto daño y cadencia rápida.\n• **Tank:** mayor vida/defensa y despliega barreras protectoras.\n• **Support:** disparos auto-aim y soporte de curación.\n• **Special Attack:** disparo de **Master Spark** y choques de rayos (*Beam Struggle*).';
+  if (q.includes('role') || q.includes('rol') || q.includes('tank') || q.includes('support') || q.includes('dps')) {
+    return 'There are 4 unique roles per squad:\n• **DPS:** high damage and fast fire rate.\n• **Tank:** higher HP/defense and deploys protective barriers.\n• **Support:** auto-aim shots and team healing.\n• **Special Attack:** fires **Master Spark** and triggers *Beam Struggles*.';
   }
-  if (q.includes('sala') || q.includes('online') || q.includes('multijugador')) {
-    return 'Desde el menú principal tocá **PLAY** para crear una sala o unirte a una existente por código/explorador. Luego cada jugador elige un rol único en la selección de personaje y marca **LISTO** para iniciar.';
+  if (q.includes('room') || q.includes('online') || q.includes('multiplayer') || q.includes('sala')) {
+    return 'From the main menu, click **PLAY** to create a room or join an existing one via room code or lobby browser. Then each player picks a unique role in Character Selection and hits **READY UP** to start.';
   }
-  if (q.includes('dificultad') || q.includes('mercy') || q.includes('difficult')) {
-    return 'La campaña tiene 3 dificultades: **Normal** (base), **Difficult** (+10% stats y aura carmesí) y **No Mercy** (+25% stats y aura violeta), cada una con 3 mundos y 3 sectores.';
+  if (q.includes('difficult') || q.includes('mercy') || q.includes('dificultad')) {
+    return 'The campaign has 3 difficulties: **Normal** (base), **Difficult** (+10% stats and crimson aura), and **No Mercy** (+25% stats and violet aura), each with 3 worlds and 3 stages.';
   }
-  return 'En este momento no pude conectar con el servidor del asistente. Intentá nuevamente en unos segundos o consultame sobre **controles**, **roles**, **salas online** o **dificultades**.';
+  return 'I could not reach the assistant server right now. Please try again in a few seconds, or ask me about **controls**, **roles**, **online rooms**, or **difficulties**.';
 }
 
 export default function DanmaBot() {
@@ -156,15 +156,15 @@ export default function DanmaBot() {
         onClick={() => setIsOpen(false)}
       />
 
-      {/* Botón flotante con carita de chatbot */}
+      {/* Floating chatbot button */}
       <button
         type="button"
         className="cb-fab"
         id="cbOpenBtn"
-        aria-label="Abrir asistente DanmaBot"
+        aria-label="Open DanmaBot assistant"
         onClick={() => setIsOpen(true)}
       >
-        <span className="cb-tooltip">¿Necesitás ayuda?</span>
+        <span className="cb-tooltip">Need help?</span>
         <span className="cb-status-dot" />
         <svg
           className="cb-bot-icon"
@@ -214,7 +214,7 @@ export default function DanmaBot() {
             </div>
             <div>
               <h3 className="cb-title">DanmaBot</h3>
-              <span className="cb-subtitle">En línea • Asistente IA</span>
+              <span className="cb-subtitle">Online • AI Assistant</span>
             </div>
           </div>
 
@@ -223,8 +223,8 @@ export default function DanmaBot() {
               type="button"
               className="cb-icon-btn"
               id="cbResetBtn"
-              title="Reiniciar chat"
-              aria-label="Reiniciar chat"
+              title="Reset chat"
+              aria-label="Reset chat"
               onClick={handleReset}
               disabled={isTyping}
             >
@@ -237,8 +237,8 @@ export default function DanmaBot() {
               type="button"
               className="cb-icon-btn"
               id="cbCloseBtn"
-              title="Cerrar"
-              aria-label="Cerrar chat"
+              title="Close"
+              aria-label="Close chat"
               onClick={() => setIsOpen(false)}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -260,10 +260,10 @@ export default function DanmaBot() {
             </div>
           ))}
 
-          {/* Tarjetas de Preguntas Frecuentes */}
+          {/* FAQ Cards */}
           {showFaq && (
             <div className="cb-faq-section" id="cbFaqSection">
-              <span className="cb-faq-label">Preguntas frecuentes</span>
+              <span className="cb-faq-label">Frequently Asked Questions</span>
               <div className="cb-faq-list">
                 {FAQ_ITEMS.map((item) => (
                   <button
@@ -281,9 +281,9 @@ export default function DanmaBot() {
             </div>
           )}
 
-          {/* Indicador de escribiendo */}
+          {/* Typing indicator */}
           {isTyping && (
-            <div className="cb-typing" id="cbTyping" aria-label="DanmaBot está escribiendo">
+            <div className="cb-typing" id="cbTyping" aria-label="DanmaBot is typing">
               <span />
               <span />
               <span />
@@ -293,7 +293,7 @@ export default function DanmaBot() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Chips rápidos */}
+        {/* Quick chips */}
         <div className="cb-chips">
           {QUICK_CHIPS.map((chip) => (
             <button
@@ -308,15 +308,15 @@ export default function DanmaBot() {
           ))}
         </div>
 
-        {/* Barra inferior para escribir */}
+        {/* Bottom input bar */}
         <form className="cb-input-bar" id="cbForm" autoComplete="off" onSubmit={handleSubmit}>
           <input
             ref={inputRef}
             type="text"
             className="cb-input"
             id="cbInput"
-            placeholder="Escribí tu consulta..."
-            aria-label="Escribí tu consulta"
+            placeholder="Type your question..."
+            aria-label="Type your question"
             maxLength={1000}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -325,7 +325,7 @@ export default function DanmaBot() {
           <button
             type="submit"
             className="cb-send-btn"
-            aria-label="Enviar mensaje"
+            aria-label="Send message"
             disabled={isTyping || !input.trim()}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
