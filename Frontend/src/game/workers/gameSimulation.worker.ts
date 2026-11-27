@@ -139,6 +139,7 @@ interface SimBullet {
   turnSpeedMult?: number;
   turnColor?: number;
   turned?: boolean;
+  holdTag?: number | null;
 }
 
 interface SimWall {
@@ -1694,6 +1695,7 @@ class DanmakrewSimulationWorker {
       turnSpeedMult: Number(opts?.turnSpeedMult) || 1,
       turnColor: opts?.turnColor,
       turned: false,
+      holdTag: opts?.holdTag ?? null,
     });
   }
 
@@ -1883,6 +1885,17 @@ class DanmakrewSimulationWorker {
           ...(opts || {}),
           ttl,
         });
+      },
+      releaseHeld: (holdTag: number, staggerSec: number = 0.012) => {
+        let idx = 0;
+        for (let i = 0; i < this.bullets.length; i++) {
+          const b = this.bullets[i];
+          if (b.holdTag === holdTag) {
+            b.holdTag = null;
+            b.delay = idx * staggerSec;
+            idx++;
+          }
+        }
       },
     };
 

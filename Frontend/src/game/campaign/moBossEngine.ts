@@ -1,12 +1,14 @@
 /**
- * Boss 3-3: M.O. (Mechanical Ophanim) — Sacred-Geometry Tackle Rework (Konngara Aesthetic).
+ * Boss 3-3: M.O. (Mechanical Ophanim) — Chained Predator Tackle Engine (Byakuren × Konngara).
  * Mirrored 1:1 with Backend/src/game/campaign/moBossEngine.js for local sandbox / Boss Dev Lab.
  */
 
-export const MO_HOME_X = 650;
+export const MO_HOME_X = 640;
 export const MO_HOME_Y = 300;
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
+const ARENA_PAD_X = 64;
+const ARENA_PAD_Y = 62;
 
 export interface MoDashLine {
   x1: number;
@@ -27,19 +29,20 @@ interface TackleSegment {
   kind: string;
   speed: number;
   isReturn: boolean;
-  edgeIndex?: number;
-  totalArms?: number;
-  centerX?: number;
-  centerY?: number;
 }
 
 export interface MoBossRuntimeState {
   mode: 'intro' | 'telegraph' | 'dashing' | 'resting';
   timer: number;
   introDuration: number;
-  cycleIndex: number;
+  volleyIndex: number;
+  burstIndex: number;
+  totalBursts: number;
   flipY: 1 | -1;
   shapeKind: string;
+  waveCounter: number;
+  activeWaveTag: number;
+  heldWaveTag: number | null;
   dashChain: TackleSegment[];
   segIndex: number;
   segProgressLastEmit: number;
@@ -48,7 +51,8 @@ export interface MoBossRuntimeState {
   restShotAccum: number;
   summonTimer: number;
   lastPhaseSeen: number;
-  gapY: number;
+  targetSnapX: number;
+  targetSnapY: number;
 }
 
 export interface MoBossAdapter {
@@ -89,44 +93,45 @@ export interface MoBulletEmitter {
     color: number,
     opts?: Record<string, any> | null
   ): void;
+  releaseHeld?(holdTag: number, staggerSec?: number): void;
 }
 
 export const MO_PHASE_DEFS = [
   {
-    name: 'Fase 1 "Tacle: Triángulo Rectángulo"',
-    pattern: 'mo_tackle_triangle',
+    name: 'Fase 1 "Escuadra Cazadora"',
+    pattern: 'mo_hunt_p1',
     shootInterval: 0.5,
     laserMode: 'none' as const,
     laserInterval: 99,
     megaLaserInterval: 0,
   },
   {
-    name: 'Sello Ophanim "Tacle: Reloj de Arena"',
-    pattern: 'mo_tackle_hourglass',
+    name: 'Sello Ophanim "Zig-Zag de Byakuren"',
+    pattern: 'mo_hunt_p2',
     shootInterval: 0.45,
     laserMode: 'none' as const,
     laserInterval: 99,
     megaLaserInterval: 0,
   },
   {
-    name: 'Fase 3 "Tacle: Estrella Pentagrama"',
-    pattern: 'mo_tackle_star',
+    name: 'Fase 3 "Estrella Depredadora"',
+    pattern: 'mo_hunt_p3',
     shootInterval: 0.4,
     laserMode: 'none' as const,
     laserInterval: 99,
     megaLaserInterval: 0,
   },
   {
-    name: 'Protocolo Serafín "Tacle: Relámpago Trenzado"',
-    pattern: 'mo_tackle_lightning',
+    name: 'Protocolo Serafín "Tijera y Guillotina"',
+    pattern: 'mo_hunt_p4',
     shootInterval: 0.35,
     laserMode: 'none' as const,
     laserInterval: 99,
     megaLaserInterval: 9.5,
   },
   {
-    name: 'Protocolo Final "MECHANICAL OPHANIM · ESPIRAL ETERNA"',
-    pattern: 'mo_tackle_spiral',
+    name: 'Protocolo Final "MECHANICAL OPHANIM · TORMENTA GEOMÉTRICA"',
+    pattern: 'mo_hunt_p5',
     shootInterval: 0.3,
     laserMode: 'none' as const,
     laserInterval: 99,
@@ -134,432 +139,442 @@ export const MO_PHASE_DEFS = [
   },
 ];
 
+function clampX(x: number): number {
+  return Math.round(Math.max(ARENA_PAD_X, Math.min(WORLD_WIDTH - ARENA_PAD_X, x)));
+}
+
+function clampY(y: number): number {
+  return Math.round(Math.max(ARENA_PAD_Y, Math.min(WORLD_HEIGHT - ARENA_PAD_Y, y)));
+}
+
+function extendThroughTarget(sx: number, sy: number, tx: number, ty: number, minTravel = 260) {
+  let dx = tx - sx;
+  let dy = ty - sy;
+  let dist = Math.hypot(dx, dy);
+  if (dist < 25) {
+    dx = sx > WORLD_WIDTH * 0.5 ? -1 : 1;
+    dy = sy > WORLD_HEIGHT * 0.5 ? -0.35 : 0.35;
+    dist = Math.hypot(dx, dy);
+  }
+  const ux = dx / dist;
+  const uy = dy / dist;
+
+  let bestT = Infinity;
+  const tryT = (t: number) => {
+    if (t > 40 && t < bestT) bestT = t;
+  };
+  if (Math.abs(ux) > 1e-4) {
+    tryT((ARENA_PAD_X - sx) / ux);
+    tryT((WORLD_WIDTH - ARENA_PAD_X - sx) / ux);
+  }
+  if (Math.abs(uy) > 1e-4) {
+    tryT((ARENA_PAD_Y - sy) / uy);
+    tryT((WORLD_HEIGHT - ARENA_PAD_Y - sy) / uy);
+  }
+  const travel = Number.isFinite(bestT) ? Math.max(minTravel, bestT) : minTravel;
+  return {
+    x: clampX(sx + ux * travel),
+    y: clampY(sy + uy * travel),
+  };
+}
+
 export function createInitialMoState(introDuration = 3.8): MoBossRuntimeState {
   return {
     mode: 'intro',
     timer: 0,
     introDuration: introDuration || 3.8,
-    cycleIndex: 0,
+    volleyIndex: 0,
+    burstIndex: 0,
+    totalBursts: 4,
     flipY: 1,
-    shapeKind: 'triangle',
+    shapeKind: 'l_hook',
+    waveCounter: 1,
+    activeWaveTag: 1,
+    heldWaveTag: null,
     dashChain: [],
     segIndex: 0,
     segProgressLastEmit: 0,
     dashHitPlayers: new Set<string>(),
-    restDuration: 1.5,
+    restDuration: 1.0,
     restShotAccum: 0,
     summonTimer: 3.0,
     lastPhaseSeen: 1,
-    gapY: MO_HOME_Y,
+    targetSnapX: 180,
+    targetSnapY: MO_HOME_Y,
   };
 }
 
 export function resetMoCycleForPhase(state: MoBossRuntimeState, phase: number): void {
   state.mode = 'telegraph';
   state.timer = 0;
+  state.burstIndex = 0;
+  state.totalBursts = phase >= 5 ? 6 : phase >= 2 ? 5 : 4;
   state.dashChain = [];
   state.segIndex = 0;
   state.segProgressLastEmit = 0;
   state.dashHitPlayers = new Set<string>();
   state.restShotAccum = 0;
+  state.heldWaveTag = null;
   state.lastPhaseSeen = phase;
 }
 
-function buildPhaseTackleChain(
+function buildDynamicBurst(
+  boss: MoBossAdapter,
+  state: MoBossRuntimeState,
   phase: number,
-  flipY: 1 | -1,
-  playerPos: { x: number; y: number } | null,
-  cycleIndex: number
-): { shapeKind: string; gapY: number; chain: TackleSegment[] } {
-  const f = flipY >= 0 ? 1 : -1;
-  const px = Math.max(140, Math.min(340, Math.round(playerPos?.x ?? 200)));
-  const py = Math.max(155, Math.min(WORLD_HEIGHT - 155, Math.round(playerPos?.y ?? MO_HOME_Y)));
+  playerPos: { x: number; y: number } | null
+): { shapeKind: string; chain: TackleSegment[] } {
+  const sx = clampX(boss.x);
+  const sy = clampY(boss.y);
+  const px = clampX(playerPos?.x ?? 180);
+  const py = clampY(playerPos?.y ?? MO_HOME_Y);
+  const bIdx = state.burstIndex;
+  const f: 1 | -1 = (bIdx + state.volleyIndex) % 2 === 0 ? 1 : -1;
+  state.flipY = f;
+  state.targetSnapX = px;
+  state.targetSnapY = py;
 
   if (phase === 1) {
-    const rightX = 640;
-    const leftX = Math.max(255, px + 80);
-    const yA = f > 0 ? 96 : WORLD_HEIGHT - 96;
-    const yB = f > 0 ? WORLD_HEIGHT - 96 : 96;
+    const cornerX = sx > WORLD_WIDTH * 0.5 ? clampX(sx - 25) : clampX(WORLD_WIDTH - 130);
+    const cornerY = clampY(py);
+    const throughX = sx > px ? ARENA_PAD_X : WORLD_WIDTH - ARENA_PAD_X;
+    if (sx < WORLD_WIDTH * 0.42) {
+      const midX = clampX(px);
+      const midY = py > MO_HOME_Y ? ARENA_PAD_Y + 20 : WORLD_HEIGHT - ARENA_PAD_Y - 20;
+      return {
+        shapeKind: 'l_hook',
+        chain: [
+          { x1: sx, y1: sy, x2: midX, y2: py, kind: 'hook_hunt', speed: 1080, isReturn: false },
+          { x1: midX, y1: py, x2: WORLD_WIDTH - 120, y2: midY, kind: 'hook_slash', speed: 1120, isReturn: false },
+        ],
+      };
+    }
     return {
-      shapeKind: 'triangle',
-      gapY: py,
+      shapeKind: 'l_hook',
       chain: [
-        { x1: rightX, y1: yA, x2: rightX, y2: yB, kind: 'tri_vert', speed: 940, isReturn: false },
-        { x1: rightX, y1: yB, x2: leftX, y2: yB, kind: 'tri_horiz', speed: 1020, isReturn: false },
-        { x1: leftX, y1: yB, x2: rightX, y2: yA, kind: 'tri_hypo', speed: 1120, isReturn: false },
-        { x1: rightX, y1: yA, x2: MO_HOME_X, y2: MO_HOME_Y, kind: 'return', speed: 920, isReturn: true },
+        { x1: sx, y1: sy, x2: cornerX, y2: cornerY, kind: 'hook_wall', speed: 1020, isReturn: false },
+        { x1: cornerX, y1: cornerY, x2: throughX, y2: cornerY, kind: 'hook_hunt', speed: 1180, isReturn: false },
       ],
     };
   }
 
   if (phase === 2) {
-    const rX = 655;
-    const lX = 265;
-    const tY = f > 0 ? 102 : WORLD_HEIGHT - 102;
-    const bY = f > 0 ? WORLD_HEIGHT - 102 : 102;
+    const end1 = extendThroughTarget(sx, sy, px, py, 300);
+    const bounceX =
+      end1.x < WORLD_WIDTH * 0.5 ? clampX(Math.max(460, px + 340)) : clampX(Math.min(260, px - 60));
+    const bounceY =
+      end1.y < MO_HOME_Y
+        ? clampY(WORLD_HEIGHT - 95 - (bIdx % 2) * 70)
+        : clampY(95 + (bIdx % 2) * 70);
     return {
-      shapeKind: 'hourglass',
-      gapY: py,
+      shapeKind: 'byakuren_zigzag',
       chain: [
-        { x1: rX, y1: tY, x2: lX, y2: bY, kind: 'hg_diag1', speed: 1060, isReturn: false },
-        { x1: lX, y1: bY, x2: lX, y2: tY, kind: 'hg_capL', speed: 1080, isReturn: false },
-        { x1: lX, y1: tY, x2: rX, y2: bY, kind: 'hg_diag2', speed: 1120, isReturn: false },
-        { x1: rX, y1: bY, x2: rX, y2: tY, kind: 'hg_capR', speed: 1040, isReturn: false },
-        { x1: rX, y1: tY, x2: MO_HOME_X, y2: MO_HOME_Y, kind: 'return', speed: 960, isReturn: true },
+        { x1: sx, y1: sy, x2: end1.x, y2: end1.y, kind: 'zig_pierce', speed: 1220, isReturn: false },
+        { x1: end1.x, y1: end1.y, x2: bounceX, y2: bounceY, kind: 'zig_ricochet', speed: 1260, isReturn: false },
       ],
     };
   }
 
   if (phase === 3) {
-    const cx = 485;
-    const cy = 300;
-    const r = 212;
-    const rotOffset = -Math.PI / 2 + (cycleIndex % 2) * (Math.PI / 5);
-    const pts: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < 5; i++) {
-      const a = rotOffset + (i * Math.PI * 2) / 5;
-      pts.push({
-        x: Math.round(cx + Math.cos(a) * r),
-        y: Math.round(cy + Math.sin(a) * r),
-      });
+    if (bIdx % 2 === 0) {
+      const exit = extendThroughTarget(sx, sy, px, py, 340);
+      return {
+        shapeKind: 'predator_star',
+        chain: [
+          { x1: sx, y1: sy, x2: exit.x, y2: exit.y, kind: 'star_pierce', speed: 1320, isReturn: false },
+        ],
+      };
     }
-    const order = [0, 2, 4, 1, 3, 0];
-    const chain: TackleSegment[] = [];
-    for (let i = 0; i < 5; i++) {
-      const p0 = pts[order[i]];
-      const p1 = pts[order[i + 1]];
-      chain.push({
-        x1: p0.x,
-        y1: p0.y,
-        x2: p1.x,
-        y2: p1.y,
-        kind: 'star_edge',
-        edgeIndex: i,
-        centerX: cx,
-        centerY: cy,
-        speed: 1160,
-        isReturn: false,
-      });
-    }
-    chain.push({
-      x1: pts[0].x,
-      y1: pts[0].y,
-      x2: MO_HOME_X,
-      y2: MO_HOME_Y,
-      kind: 'return',
-      speed: 980,
-      isReturn: true,
-    });
-    return { shapeKind: 'star', gapY: py, chain };
+    const offsetY = py > MO_HOME_Y ? -120 : 120;
+    const tx = clampX(sx < WORLD_WIDTH * 0.5 ? WORLD_WIDTH - 110 : px + 40);
+    const ty = clampY(py + offsetY);
+    const exit = extendThroughTarget(sx, sy, tx, ty, 320);
+    return {
+      shapeKind: 'predator_star',
+      chain: [
+        { x1: sx, y1: sy, x2: exit.x, y2: exit.y, kind: 'star_chord', speed: 1280, isReturn: false },
+      ],
+    };
   }
 
   if (phase === 4) {
-    const topY = f > 0 ? 105 : WORLD_HEIGHT - 105;
-    const botY = f > 0 ? WORLD_HEIGHT - 105 : 105;
-    const verts = [
-      { x: 685, y: topY },
-      { x: 575, y: botY },
-      { x: 465, y: topY },
-      { x: 355, y: botY },
-      { x: 245, y: topY },
-    ];
-    const chain: TackleSegment[] = [];
-    for (let i = 0; i < verts.length - 1; i++) {
-      chain.push({
-        x1: verts[i].x,
-        y1: verts[i].y,
-        x2: verts[i + 1].x,
-        y2: verts[i + 1].y,
-        kind: i % 2 === 0 ? 'zig_down' : 'zig_up',
-        edgeIndex: i,
-        speed: 1220,
-        isReturn: false,
-      });
+    if (bIdx % 2 === 0) {
+      const exit1 = extendThroughTarget(sx, sy, px, py, 340);
+      const exit2X = exit1.x < WORLD_WIDTH * 0.5 ? WORLD_WIDTH - 110 : ARENA_PAD_X + 20;
+      const exit2Y = exit1.y < MO_HOME_Y ? WORLD_HEIGHT - 85 : 85;
+      return {
+        shapeKind: 'guillotine_scissor',
+        chain: [
+          { x1: sx, y1: sy, x2: exit1.x, y2: exit1.y, kind: 'scissor_pierce', speed: 1340, isReturn: false },
+          { x1: exit1.x, y1: exit1.y, x2: exit2X, y2: exit2Y, kind: 'scissor_cut', speed: 1300, isReturn: false },
+        ],
+      };
     }
-    const last = verts[verts.length - 1];
-    chain.push({
-      x1: last.x,
-      y1: last.y,
-      x2: MO_HOME_X,
-      y2: MO_HOME_Y,
-      kind: 'zig_return',
-      speed: 1180,
-      isReturn: true,
-    });
-    return { shapeKind: 'lightning', gapY: py, chain };
+    const destX = sx > px ? ARENA_PAD_X : WORLD_WIDTH - 110;
+    return {
+      shapeKind: 'guillotine_scissor',
+      chain: [
+        { x1: sx, y1: sy, x2: sx, y2: py, kind: 'guillotine_align', speed: 1260, isReturn: false },
+        { x1: sx, y1: py, x2: destX, y2: py, kind: 'guillotine_sweep', speed: 1420, isReturn: false },
+      ],
+    };
   }
 
-  // P5: Inward Mechanical Square Spiral
-  const y1 = f > 0 ? 92 : WORLD_HEIGHT - 92;
-  const y2 = f > 0 ? WORLD_HEIGHT - 92 : 92;
-  const y3 = f > 0 ? 178 : WORLD_HEIGHT - 178;
-  const y4 = f > 0 ? WORLD_HEIGHT - 178 : 178;
-  const spiralPts = [
-    { x: 685, y: y1 },
-    { x: 255, y: y1 },
-    { x: 255, y: y2 },
-    { x: 615, y: y2 },
-    { x: 615, y: y3 },
-    { x: 335, y: y3 },
-    { x: 335, y: y4 },
-    { x: 525, y: y4 },
-    { x: 465, y: 300 },
-  ];
-  const chain: TackleSegment[] = [];
-  for (let i = 0; i < spiralPts.length - 1; i++) {
-    chain.push({
-      x1: spiralPts[i].x,
-      y1: spiralPts[i].y,
-      x2: spiralPts[i + 1].x,
-      y2: spiralPts[i + 1].y,
-      kind: 'spiral_arm',
-      edgeIndex: i,
-      totalArms: spiralPts.length - 1,
-      centerX: 465,
-      centerY: 300,
-      speed: 1240 + i * 35,
-      isReturn: false,
-    });
+  const patternSlot = bIdx % 3;
+  if (patternSlot === 0) {
+    const exit1 = extendThroughTarget(sx, sy, px, py, 340);
+    const bounceX = exit1.x < WORLD_WIDTH * 0.5 ? WORLD_WIDTH - 105 : ARENA_PAD_X + 20;
+    const bounceY = exit1.y < MO_HOME_Y ? WORLD_HEIGHT - 85 : 85;
+    return {
+      shapeKind: 'final_storm',
+      chain: [
+        { x1: sx, y1: sy, x2: exit1.x, y2: exit1.y, kind: 'final_zig1', speed: 1420, isReturn: false },
+        { x1: exit1.x, y1: exit1.y, x2: bounceX, y2: bounceY, kind: 'final_zig2', speed: 1440, isReturn: false },
+      ],
+    };
   }
-  chain.push({
-    x1: 465,
-    y1: 300,
-    x2: MO_HOME_X,
-    y2: MO_HOME_Y,
-    kind: 'spiral_core_return',
-    speed: 1040,
-    isReturn: true,
-  });
-  return { shapeKind: 'spiral', gapY: py, chain };
+  if (patternSlot === 1) {
+    const exit = extendThroughTarget(sx, sy, px, py, 360);
+    return {
+      shapeKind: 'final_storm',
+      chain: [
+        { x1: sx, y1: sy, x2: exit.x, y2: exit.y, kind: 'final_lunge', speed: 1480, isReturn: false },
+      ],
+    };
+  }
+  const targetX = sx > px ? ARENA_PAD_X + 10 : WORLD_WIDTH - 110;
+  return {
+    shapeKind: 'final_storm',
+    chain: [
+      { x1: sx, y1: sy, x2: sx, y2: py, kind: 'final_cage1', speed: 1360, isReturn: false },
+      { x1: sx, y1: py, x2: targetX, y2: py, kind: 'final_cage2', speed: 1460, isReturn: false },
+    ],
+  };
 }
 
-function estimateRemainingChainTime(chain: TackleSegment[], fromIndex: number, statScale: number): number {
-  let total = 0;
-  for (let i = fromIndex; i < chain.length; i++) {
-    const s = chain[i];
-    if (s.isReturn) break;
-    const len = Math.hypot(s.x2 - s.x1, s.y2 - s.y1) || 1;
-    total += Math.max(0.18, Math.min(0.55, len / ((s.speed || 1050) * statScale)));
-  }
-  return total;
-}
-
-function emitTackleWakeNode(
+function emitHeldWakeNode(
   state: MoBossRuntimeState,
   seg: TackleSegment,
   u: number,
   emitter: MoBulletEmitter,
   statScale: number
 ): void {
-  const dmg = Number((4.5 * statScale).toFixed(1));
+  const dmg = Number((4.8 * statScale).toFixed(1));
   const x = seg.x1 + (seg.x2 - seg.x1) * u;
   const y = seg.y1 + (seg.y2 - seg.y1) * u;
   const segAngle = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
   const f = state.flipY >= 0 ? 1 : -1;
+  const holdOpts = { holdTag: state.activeWaveTag, delay: 7.0 };
 
-  if (seg.kind === 'tri_vert') {
-    const distFromGap = Math.abs(y - state.gapY);
-    if (distFromGap < 44) return;
-    const isEdge = distFromGap < 82;
-    const sideSign = y < state.gapY ? -1 : 1;
-    const vx = -168 * statScale;
-    const vy = sideSign * 34 * statScale;
-    emitter.spawnVelocity(x, y, vx, vy, isEdge ? 7.2 : 5.2, 5.2, dmg, isEdge ? 0xfde047 : 0xfef9c3, {
-      delay: 0.32,
-    });
-    if (isEdge) {
-      const corridorAngle = Math.PI + f * 0.36;
-      const twistDelta = -f * 0.82;
-      for (let b = 0; b < 4; b++) {
-        emitter.spawn(x - b * 14, y, corridorAngle, 235 * statScale, 5.0, 4.8, dmg, 0x38bdf8, {
-          delay: 0.42 + b * 0.055,
-          turnAfter: 0.62,
-          turnAngle: twistDelta,
-          turnSpeedMult: 1.12,
-          turnColor: 0xff2b5b,
-        });
-      }
-    }
-    return;
-  }
+  const toPlayer = Math.atan2(state.targetSnapY - y, state.targetSnapX - x);
+  const perpA = segAngle + Math.PI / 2;
+  const perpB = segAngle - Math.PI / 2;
+  const dotA = Math.cos(perpA - toPlayer);
+  const towardPerp = dotA >= 0 ? perpA : perpB;
+  const awayPerp = dotA >= 0 ? perpB : perpA;
 
-  if (seg.kind === 'tri_horiz') {
-    const launchAngle = Math.PI + f * 0.48;
-    emitter.spawn(x, y, launchAngle, 215 * statScale, 4.8, 4.6, dmg, 0x38bdf8, {
-      delay: 0.25 + (1 - u) * 0.14,
-      turnAfter: 0.52,
-      turnAngle: -f * 0.72,
-      turnSpeedMult: 1.14,
-      turnColor: 0xfde047,
-    });
-    return;
-  }
-
-  if (seg.kind === 'tri_hypo') {
-    const perpLeft = segAngle + Math.PI / 2;
-    const perpRight = segAngle - Math.PI / 2;
-    const outward = Math.cos(perpLeft) <= 0 ? perpLeft : perpRight;
-    emitter.spawn(x, y, outward, 195 * statScale, 4.6, 4.4, dmg, 0xfef08a, {
-      spriteType: 'MObullet3png',
-      delay: 0.16,
-    });
-    return;
-  }
-
-  if (seg.kind === 'hg_diag1' || seg.kind === 'hg_diag2') {
-    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
-    const isFirst = seg.kind === 'hg_diag1';
-    const baseDelay = Math.max(0.18, rem + (isFirst ? 0.12 : 0.30));
-    const sgn = isFirst ? 1 : -1;
-    for (const dir of [-1, 1]) {
-      emitter.spawn(
-        x,
-        y,
-        segAngle + dir * (Math.PI / 2),
-        175 * statScale,
-        4.8,
-        5.0,
-        dmg,
-        isFirst ? 0x38bdf8 : 0xfde047,
-        {
-          delay: baseDelay,
-          turnAfter: 0.56,
-          turnAngle: sgn * 0.44,
-          turnSpeedMult: 1.15,
-          turnColor: isFirst ? 0xff2b5b : 0xfef08a,
-        }
-      );
-    }
-    return;
-  }
-
-  if (seg.kind === 'hg_capL' || seg.kind === 'hg_capR') {
-    if (Math.abs(u - 0.5) < 0.25) {
-      emitter.spawn(x, y, Math.PI, 220 * statScale, 5.0, 4.2, dmg, 0xef4444, {
+  if (seg.kind === 'hook_wall') {
+    const distFromPlayerY = Math.abs(y - state.targetSnapY);
+    const gapCenter = clampY(state.targetSnapY + f * 58);
+    if (Math.abs(y - gapCenter) < 34) return;
+    const isEdge = Math.abs(y - gapCenter) < 66;
+    const sideSign = y < gapCenter ? -1 : 1;
+    emitter.spawnVelocity(
+      x,
+      y,
+      -210 * statScale,
+      sideSign * 38 * statScale,
+      isEdge ? 6.8 : 5.0,
+      5.2,
+      dmg,
+      isEdge ? 0xfde047 : 0xfef9c3,
+      { ...holdOpts, turnAfter: isEdge ? 0.45 : 0, turnAngle: f * 0.48, turnSpeedMult: 1.15, turnColor: 0xff2b5b }
+    );
+    if (distFromPlayerY < 32) {
+      emitter.spawn(x, y, toPlayer, 255 * statScale, 5.0, 4.4, dmg, 0xef4444, {
+        ...holdOpts,
         spriteType: 'MObullet1png',
-        delay: 0.2,
       });
     }
     return;
   }
 
-  if (seg.kind === 'star_edge') {
-    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
-    const outwardAngle = Math.atan2(y - (seg.centerY ?? 300), x - (seg.centerX ?? 485));
-    emitter.spawn(x, y, outwardAngle, 188 * statScale, 5.0, 5.0, dmg, 0xfde047, {
-      delay: Math.max(0.18, rem + 0.22),
-      turnAfter: 0.58,
-      turnAngle: f * 0.32,
-      turnSpeedMult: 1.12,
-      turnColor: 0x38bdf8,
+  if (seg.kind === 'hook_hunt' || seg.kind === 'hook_slash') {
+    emitter.spawn(x, y, towardPerp, 215 * statScale, 5.0, 5.0, dmg, 0x38bdf8, {
+      ...holdOpts,
+      turnAfter: 0.48,
+      turnAngle: f * 0.56,
+      turnSpeedMult: 1.16,
+      turnColor: 0xff2b5b,
+    });
+    emitter.spawn(x, y, awayPerp, 170 * statScale, 4.5, 4.8, dmg, 0xfef08a, {
+      ...holdOpts,
+      spriteType: 'MObullet3png',
     });
     return;
   }
 
-  if (seg.kind === 'zig_down' || seg.kind === 'zig_up') {
-    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
-    const isDown = seg.kind === 'zig_down';
-    const latticeAngle = isDown ? Math.PI + 0.50 : Math.PI - 0.50;
-    const snapDelta = isDown ? -0.52 : 0.52;
-    emitter.spawn(x, y, latticeAngle, 205 * statScale, 4.8, 5.0, dmg, isDown ? 0x38bdf8 : 0xfde047, {
-      delay: Math.max(0.16, rem + 0.14),
-      turnAfter: 0.62,
-      turnAngle: snapDelta,
-      turnSpeedMult: 1.16,
+  if (seg.kind === 'zig_pierce' || seg.kind === 'zig_ricochet') {
+    const isPierce = seg.kind === 'zig_pierce';
+    const twist = (isPierce ? 1 : -1) * f * 0.62;
+    emitter.spawn(
+      x,
+      y,
+      towardPerp + f * 0.18,
+      245 * statScale,
+      5.0,
+      5.0,
+      dmg,
+      isPierce ? 0x38bdf8 : 0xfde047,
+      {
+        ...holdOpts,
+        turnAfter: 0.42,
+        turnAngle: twist,
+        turnSpeedMult: 1.18,
+        turnColor: 0xff2b5b,
+      }
+    );
+    emitter.spawn(
+      x,
+      y,
+      towardPerp - f * 0.34,
+      185 * statScale,
+      4.6,
+      5.0,
+      dmg,
+      isPierce ? 0xfef9c3 : 0x38bdf8,
+      {
+        ...holdOpts,
+        turnAfter: 0.52,
+        turnAngle: -twist * 0.75,
+        turnSpeedMult: 1.12,
+        turnColor: 0xfde047,
+      }
+    );
+    return;
+  }
+
+  if (seg.kind === 'star_pierce' || seg.kind === 'star_chord') {
+    emitter.spawn(x, y, towardPerp, 265 * statScale, 4.6, 4.8, dmg, 0xfef08a, {
+      ...holdOpts,
+      spriteType: 'MObullet3png',
+    });
+    emitter.spawn(x, y, towardPerp + f * 0.24, 185 * statScale, 5.0, 5.2, dmg, 0xfde047, {
+      ...holdOpts,
+      turnAfter: 0.46,
+      turnAngle: -f * 0.58,
+      turnSpeedMult: 1.18,
+      turnColor: 0x38bdf8,
+    });
+    emitter.spawn(x, y, awayPerp, 195 * statScale, 4.6, 4.8, dmg, 0x38bdf8, {
+      ...holdOpts,
+      turnAfter: 0.5,
+      turnAngle: f * 0.45,
+      turnSpeedMult: 1.12,
       turnColor: 0xff2b5b,
     });
     return;
   }
 
-  if (seg.kind === 'zig_return') {
-    emitter.spawn(x, y, Math.PI + (u - 0.5) * 0.55, 230 * statScale, 4.6, 4.2, dmg, 0xfef08a, {
-      spriteType: 'MObullet3png',
-      delay: 0.1,
+  if (
+    seg.kind === 'scissor_pierce' ||
+    seg.kind === 'scissor_cut' ||
+    seg.kind === 'guillotine_align' ||
+    seg.kind === 'guillotine_sweep'
+  ) {
+    const isSweep = seg.kind === 'guillotine_sweep' || seg.kind === 'scissor_pierce';
+    emitter.spawn(x, y, towardPerp, (isSweep ? 255 : 220) * statScale, 5.0, 5.0, dmg, 0x38bdf8, {
+      ...holdOpts,
+      turnAfter: 0.4,
+      turnAngle: f * 0.65,
+      turnSpeedMult: 1.2,
+      turnColor: 0xff2b5b,
     });
+    emitter.spawn(x, y, awayPerp, 215 * statScale, 4.8, 5.0, dmg, 0xfde047, {
+      ...holdOpts,
+      turnAfter: 0.44,
+      turnAngle: -f * 0.58,
+      turnSpeedMult: 1.15,
+      turnColor: 0xef4444,
+    });
+    if (isSweep) {
+      emitter.spawn(x, y, toPlayer, 260 * statScale, 4.5, 4.5, dmg, 0xfef08a, {
+        ...holdOpts,
+        spriteType: 'MObullet3png',
+      });
+    }
     return;
   }
 
-  if (seg.kind === 'spiral_arm') {
-    if (u > 0.42 && u < 0.58) return;
-    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
-    const ringFromInside = Math.max(0, (seg.totalArms || 8) - 1 - (seg.edgeIndex || 0));
-    const cascadeDelay = Math.max(0.18, rem + 0.16 + ringFromInside * 0.08);
-    const outAngle = Math.atan2(y - (seg.centerY ?? 300), x - (seg.centerX ?? 465));
+  const twistAngle = f * 0.68;
+  emitter.spawn(x, y, towardPerp + f * 0.16, 265 * statScale, 5.0, 5.2, dmg, 0xfde047, {
+    ...holdOpts,
+    turnAfter: 0.38,
+    turnAngle: twistAngle,
+    turnSpeedMult: 1.22,
+    turnColor: 0xff2b5b,
+  });
+  emitter.spawn(x, y, towardPerp - f * 0.24, 200 * statScale, 4.8, 5.2, dmg, 0x38bdf8, {
+    ...holdOpts,
+    turnAfter: 0.46,
+    turnAngle: -twistAngle,
+    turnSpeedMult: 1.18,
+    turnColor: 0xfef08a,
+  });
+  emitter.spawn(x, y, awayPerp, 225 * statScale, 4.6, 4.8, dmg, 0xfef08a, {
+    ...holdOpts,
+    spriteType: 'MObullet3png',
+  });
+}
+
+function emitCornerAimedBurst(
+  seg: TackleSegment,
+  playerPos: { x: number; y: number } | null,
+  emitter: MoBulletEmitter,
+  statScale: number,
+  phase: number
+): void {
+  const vx = seg.x2;
+  const vy = seg.y2;
+  const dmg = Number((5.0 * statScale).toFixed(1));
+  const aim = playerPos ? Math.atan2(playerPos.y - vy, playerPos.x - vx) : Math.PI;
+
+  const fanHalf = phase >= 5 ? 3 : phase >= 2 ? 2 : 1;
+  const stepRad = phase >= 5 ? 0.18 : 0.21;
+  const spd = (255 + phase * 12) * statScale;
+
+  for (let k = -fanHalf; k <= fanHalf; k++) {
+    emitter.spawn(vx, vy, aim + k * stepRad, spd - Math.abs(k) * 14, 5.0, 4.2, dmg, 0xef4444, {
+      spriteType: 'MObullet1png',
+    });
+  }
+
+  if (
+    phase >= 4 &&
+    (seg.kind === 'scissor_cut' ||
+      seg.kind === 'guillotine_sweep' ||
+      seg.kind === 'final_zig2' ||
+      seg.kind === 'final_cage2')
+  ) {
     emitter.spawn(
-      x,
-      y,
-      outAngle,
-      195 * statScale,
-      5.0,
-      5.2,
-      dmg,
-      (seg.edgeIndex || 0) % 2 === 0 ? 0xfde047 : 0x38bdf8,
-      {
-        delay: cascadeDelay,
-        turnAfter: 0.52,
-        turnAngle: f * 0.48,
-        turnSpeedMult: 1.16,
-        turnColor: 0xff2b5b,
-      }
+      vx,
+      vy,
+      aim + (phase >= 5 ? 0 : 0.14),
+      210 * statScale,
+      11.0,
+      5.5,
+      Number((6.5 * statScale).toFixed(1)),
+      0x9ca3af,
+      { spriteType: 'MObullet4png', splitOnImpact: true, splitCount: phase >= 5 ? 8 : 6 }
     );
   }
 }
 
-function emitTackleVertexBurst(
-  state: MoBossRuntimeState,
-  seg: TackleSegment,
-  emitter: MoBulletEmitter,
-  statScale: number
-): void {
-  const dmg = Number((4.8 * statScale).toFixed(1));
-  const vx = seg.x2;
-  const vy = seg.y2;
-
-  if (seg.kind === 'star_edge') {
-    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
-    const petals = 6;
-    const baseRot = (seg.edgeIndex || 0) * 0.42;
-    for (let k = 0; k < petals; k++) {
-      emitter.spawn(
-        vx,
-        vy,
-        baseRot + (Math.PI * 2 * k) / petals,
-        165 * statScale,
-        4.8,
-        4.8,
-        dmg,
-        0xef4444,
-        { spriteType: 'MObullet1png', delay: Math.max(0.18, rem + 0.22) }
-      );
-    }
-    return;
+function releasePreviousWave(state: MoBossRuntimeState, emitter: MoBulletEmitter, stagger = 0.012): void {
+  if (state.heldWaveTag !== null && emitter.releaseHeld) {
+    emitter.releaseHeld(state.heldWaveTag, stagger);
   }
-
-  if (seg.kind === 'spiral_arm' && seg.edgeIndex === (seg.totalArms || 8) - 1) {
-    for (const ang of [Math.PI - 0.35, Math.PI + 0.35]) {
-      emitter.spawn(
-        vx,
-        vy,
-        ang,
-        185 * statScale,
-        11.2,
-        5.5,
-        Number((6.5 * statScale).toFixed(1)),
-        0x9ca3af,
-        { spriteType: 'MObullet4png', splitOnImpact: true, splitCount: 6 }
-      );
-    }
-    return;
-  }
-
-  if (seg.kind === 'tri_vert' || seg.kind === 'tri_horiz') {
-    for (const off of [-0.3, 0, 0.3]) {
-      emitter.spawn(vx, vy, Math.PI + off, 190 * statScale, 4.4, 3.8, dmg, 0xfef08a, {
-        spriteType: 'MObullet3png',
-        delay: 0.14,
-      });
-    }
-  }
+  state.heldWaveTag = null;
 }
 
 export function updateWorkerMechanicalOphanim(
@@ -599,14 +614,15 @@ export function updateWorkerMechanicalOphanim(
   boss.isInvulnerable = false;
 
   if (state.lastPhaseSeen !== phase) {
+    releasePreviousWave(state, emitter, 0.008);
     resetMoCycleForPhase(state, phase);
   }
 
   const diffBonus = statScale >= 1.2 ? 2 : statScale >= 1.08 ? 1 : 0;
-  const summonCount = phase >= 4 ? diffBonus : diffBonus >= 2 ? 1 : 0;
+  const summonCount = phase >= 5 ? 1 + diffBonus : phase >= 4 ? diffBonus : diffBonus >= 2 ? 1 : 0;
   if (onSpawnKamikaze && summonCount > 0) {
     state.summonTimer += dt;
-    const summonInterval = Math.max(5.0, 7.5 - phase * 0.4);
+    const summonInterval = Math.max(4.6, 7.0 - phase * 0.4);
     if (state.summonTimer >= summonInterval) {
       state.summonTimer = 0;
       const maxActive = Math.min(4, 1 + diffBonus);
@@ -618,20 +634,19 @@ export function updateWorkerMechanicalOphanim(
 
   if (state.mode === 'telegraph') {
     state.timer += dt;
-    const duration = Math.max(0.75, 1.05 - phase * 0.04);
+    const telegraphDur = Math.max(0.28, (0.46 - phase * 0.032) / Math.sqrt(statScale));
+
     if (state.dashChain.length === 0) {
-      const built = buildPhaseTackleChain(phase, state.flipY, playerPos, state.cycleIndex);
+      const built = buildDynamicBurst(boss, state, phase, playerPos);
       state.shapeKind = built.shapeKind;
-      state.gapY = built.gapY;
       state.dashChain = built.chain;
     }
+
     const first = state.dashChain[0];
-    boss.x += (first.x1 - boss.x) * Math.min(1, dt * 9);
-    boss.y += (first.y1 - boss.y) * Math.min(1, dt * 9);
     boss.angle = Math.atan2(first.y2 - first.y1, first.x2 - first.x1);
     boss.moDashState = 'telegraph';
 
-    const prog = Number(Math.min(1, state.timer / duration).toFixed(2));
+    const prog = Number(Math.min(1, state.timer / telegraphDur).toFixed(2));
     boss.moDashLines = state.dashChain.map((seg, idx) => ({
       x1: seg.x1,
       y1: seg.y1,
@@ -643,7 +658,10 @@ export function updateWorkerMechanicalOphanim(
       isReturn: Boolean(seg.isReturn),
     }));
 
-    if (state.timer >= duration) {
+    if (state.timer >= telegraphDur) {
+      releasePreviousWave(state, emitter, Math.max(0.008, 0.015 - phase * 0.001));
+      state.waveCounter += 1;
+      state.activeWaveTag = state.waveCounter;
       state.mode = 'dashing';
       state.segIndex = 0;
       state.timer = 0;
@@ -656,17 +674,16 @@ export function updateWorkerMechanicalOphanim(
   if (state.mode === 'dashing') {
     const seg = state.dashChain[state.segIndex];
     if (!seg) {
-      state.mode = 'resting';
+      state.heldWaveTag = state.activeWaveTag;
+      state.mode = 'telegraph';
       state.timer = 0;
-      state.restDuration = Math.max(1.25, 1.9 - phase * 0.1);
-      state.restShotAccum = 0;
-      boss.moDashLines = [];
+      state.dashChain = [];
       return;
     }
 
     const segLen = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1) || 1;
-    const speed = (seg.speed || 1050) * statScale;
-    const segDur = Math.max(0.18, Math.min(0.56, segLen / speed));
+    const speed = (seg.speed || 1200) * statScale;
+    const segDur = Math.max(0.15, Math.min(0.46, segLen / speed));
     const prevX = boss.x;
     const prevY = boss.y;
 
@@ -696,28 +713,24 @@ export function updateWorkerMechanicalOphanim(
         isReturn: Boolean(s.isReturn),
       }));
 
-    const nodesPerSeg =
-      seg.kind === 'tri_vert'
-        ? 11
-        : seg.kind === 'star_edge'
-          ? 7
-          : seg.kind === 'spiral_arm'
-            ? Math.max(4, Math.round(segLen / 46))
-            : Math.max(5, Math.round(segLen / 52));
-    const stepU = 1 / (nodesPerSeg + 1);
-    while (state.segProgressLastEmit + stepU <= ease && state.segProgressLastEmit + stepU < 0.98) {
-      state.segProgressLastEmit += stepU;
-      emitTackleWakeNode(state, seg, state.segProgressLastEmit, emitter, statScale);
+    if (!seg.isReturn) {
+      const spacingPx = Math.max(32, 48 - phase * 3);
+      const nodesPerSeg = Math.max(6, Math.min(16, Math.round(segLen / spacingPx)));
+      const stepU = 1 / (nodesPerSeg + 1);
+      while (state.segProgressLastEmit + stepU <= ease && state.segProgressLastEmit + stepU < 0.98) {
+        state.segProgressLastEmit += stepU;
+        emitHeldWakeNode(state, seg, state.segProgressLastEmit, emitter, statScale);
+      }
     }
 
-    if (!seg.isReturn || rawT < 0.72) {
-      for (let s = 1; s <= 4; s++) {
-        const st = s / 4;
+    if (!seg.isReturn || rawT < 0.7) {
+      for (let s = 1; s <= 5; s++) {
+        const st = s / 5;
         onContactDamage(
           prevX + (boss.x - prevX) * st,
           prevY + (boss.y - prevY) * st,
-          34,
-          14,
+          38,
+          16,
           state.dashHitPlayers
         );
       }
@@ -727,7 +740,7 @@ export function updateWorkerMechanicalOphanim(
       boss.x = seg.x2;
       boss.y = seg.y2;
       if (!seg.isReturn) {
-        emitTackleVertexBurst(state, seg, emitter, statScale);
+        emitCornerAimedBurst(seg, playerPos, emitter, statScale, phase);
       }
       state.segIndex += 1;
       state.timer = 0;
@@ -735,43 +748,64 @@ export function updateWorkerMechanicalOphanim(
       state.dashHitPlayers = new Set<string>();
 
       if (state.segIndex >= state.dashChain.length) {
-        state.mode = 'resting';
-        state.restDuration = Math.max(1.25, 1.9 - phase * 0.1);
-        state.restShotAccum = 0;
-        boss.moDashLines = [];
+        state.heldWaveTag = state.activeWaveTag;
+        state.burstIndex += 1;
+        state.dashChain = [];
+
+        if (state.burstIndex < state.totalBursts) {
+          state.mode = 'telegraph';
+        } else {
+          releasePreviousWave(state, emitter, 0.012);
+          state.mode = 'resting';
+          state.restDuration = Math.max(0.85, 1.3 - phase * 0.08);
+          state.restShotAccum = 0;
+          boss.moDashLines = [];
+        }
       }
     }
     return;
   }
 
-  // Vulnerable recovery hover
+  // Brief active recovery hover with anti-safespot odd-way aimed rings
   state.timer += dt;
   boss.moDashState = 'resting';
   boss.moDashLines = [];
 
-  const hoverX = MO_HOME_X + Math.cos(state.timer * 1.6) * 26;
-  const hoverY = MO_HOME_Y + Math.sin(state.timer * 2.4) * 58;
-  boss.x += (hoverX - boss.x) * Math.min(1, dt * 5.0);
-  boss.y += (hoverY - boss.y) * Math.min(1, dt * 5.0);
+  const targetHoverX = MO_HOME_X;
+  const targetHoverY = clampY((playerPos?.y ?? MO_HOME_Y) * 0.45 + MO_HOME_Y * 0.55);
+  boss.x += (targetHoverX - boss.x) * Math.min(1, dt * 4.8);
+  boss.y += (targetHoverY - boss.y) * Math.min(1, dt * 4.8);
   if (playerPos) {
     boss.angle = Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x);
   }
 
   state.restShotAccum += dt;
-  if (state.restShotAccum >= Math.max(0.75, 1.15 - phase * 0.06)) {
+  const restShotInterval = Math.max(0.38, 0.62 - phase * 0.04);
+  if (state.restShotAccum >= restShotInterval) {
     state.restShotAccum = 0;
     const aim = playerPos ? Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x) : Math.PI;
-    const spread = phase >= 4 ? [-0.28, 0, 0.28] : [-0.22, 0.22];
-    for (const off of spread) {
-      emitter.spawn(boss.x - 20, boss.y, aim + off, 205 * statScale, 4.6, 3.8, Number((4.5 * statScale).toFixed(1)), 0xef4444, {
-        spriteType: 'MObullet1png',
-      });
+    const count = 5 + phase * 2;
+    const speed = (220 + phase * 12) * statScale;
+    for (let k = 0; k < count; k++) {
+      const a = aim + (Math.PI * 2 * k) / count;
+      emitter.spawn(
+        boss.x,
+        boss.y,
+        a,
+        speed,
+        4.8,
+        4.0,
+        Number((4.8 * statScale).toFixed(1)),
+        k === 0 ? 0xff2b5b : 0xef4444,
+        { spriteType: k % 2 === 0 ? 'MObullet1png' : 'MObullet3png' }
+      );
     }
   }
 
-  if (state.timer >= (state.restDuration || 1.5)) {
-    state.cycleIndex += 1;
-    state.flipY = state.cycleIndex % 2 === 0 ? 1 : -1;
+  if (state.timer >= (state.restDuration || 1.0)) {
+    state.volleyIndex += 1;
+    state.burstIndex = 0;
+    state.totalBursts = phase >= 5 ? 6 : phase >= 2 ? 5 : 4;
     state.mode = 'telegraph';
     state.timer = 0;
     state.dashChain = [];

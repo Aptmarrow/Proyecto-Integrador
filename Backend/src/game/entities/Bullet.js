@@ -31,6 +31,7 @@ class Bullet {
     this.turnSpeedMult = 1;
     this.turnColor     = null;
     this._turned       = false;
+    this.holdTag       = null;
     // Spatial hash tracking (set by SpatialHash)
     this._cellX  = NaN;
     this._cellY  = NaN;
@@ -67,6 +68,7 @@ class Bullet {
     this.turnSpeedMult = Number(opts?.turnSpeedMult) || 1;
     this.turnColor     = opts?.turnColor ?? null;
     this._turned       = false;
+    this.holdTag       = opts?.holdTag ?? null;
     this._cellX  = NaN;
     this._cellY  = NaN;
     return this;

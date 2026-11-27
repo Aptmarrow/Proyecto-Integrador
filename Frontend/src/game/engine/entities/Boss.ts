@@ -295,9 +295,9 @@ export class Boss {
   private renderMoDashLines(animTimer: number, scaleX: number, scaleY: number): void {
     const g = this.moLineGraphics;
     const isDash = this.moDashState === 'dashing';
-    const pulse = 0.68 + Math.sin(animTimer * 28) * 0.32;
+    const pulse = 0.7 + Math.sin(animTimer * 34) * 0.3;
 
-    // Render full sacred-geometry tackle telegraph / active slash trail
+    // Render razor-sharp 1-2 line predator sightline + directional chevron arrows
     for (let idx = 0; idx < this.moDashLines.length; idx++) {
       const line = this.moDashLines[idx];
       if (line.completed) continue;
@@ -308,31 +308,48 @@ export class Boss {
 
       const isActiveLine = isDash && line.active;
       const isReturn = Boolean(line.isReturn);
-      // Alternating geometric palette during telegraph (gold / cyan / crimson) so vertices read clearly
-      const telegraphColor = isReturn ? 0x00f2fe : idx === 0 ? 0xfacc15 : idx % 2 === 1 ? 0x38bdf8 : 0xff2b5b;
-      const outerColor = isActiveLine ? 0xff2b5b : telegraphColor;
-      const outerAlpha = isActiveLine ? 0.52 : isReturn ? 0.16 * pulse : (idx === 0 ? 0.34 : 0.22) * pulse;
-      const outerWidth = isActiveLine ? 22 : isReturn ? 7 : 10 + line.progress * 5;
-      const coreAlpha = isActiveLine ? 0.98 : isReturn ? 0.45 * pulse : (idx === 0 ? 0.88 : 0.62) * pulse;
-      const coreWidth = isActiveLine ? 5 : isReturn ? 1.8 : 2.6;
+      const outerColor = isActiveLine ? 0xff2b5b : isReturn ? 0x00f2fe : idx === 0 ? 0xff2b5b : 0xfacc15;
+      // Wide danger corridor band matching M.O.'s physical roller body during telegraph!
+      if (!isDash && !isReturn && idx === 0) {
+        g.lineStyle(38 * scaleX * 0.85, 0xff2b5b, (0.07 + line.progress * 0.14) * pulse);
+        g.moveTo(x1, y1);
+        g.lineTo(x2, y2);
+      }
+
+      const outerAlpha = isActiveLine ? 0.56 : isReturn ? 0.18 * pulse : (idx === 0 ? 0.42 : 0.24) * pulse;
+      const outerWidth = isActiveLine ? 22 : isReturn ? 7 : 10 + line.progress * 8;
+      const coreAlpha = isActiveLine ? 0.98 : isReturn ? 0.48 * pulse : (idx === 0 ? 0.95 : 0.68) * pulse;
+      const coreWidth = isActiveLine ? 5 : isReturn ? 1.8 : 2.8;
 
       g.lineStyle(outerWidth, outerColor, outerAlpha);
       g.moveTo(x1, y1);
       g.lineTo(x2, y2);
 
-      g.lineStyle(coreWidth, isActiveLine ? 0xfde047 : isReturn ? 0xfef08a : 0xffffff, coreAlpha);
+      g.lineStyle(coreWidth, isActiveLine ? 0xfde047 : 0xffffff, coreAlpha);
       g.moveTo(x1, y1);
       g.lineTo(x2, y2);
 
-      // Glowing bounce-vertex node rings at each corner of the geometric tackle!
-      if (!isReturn) {
-        const nodeR = isActiveLine ? 12 : 8.5 * (0.85 + Math.sin(animTimer * 14 + idx) * 0.15);
-        g.lineStyle(2, outerColor, 0.82 * pulse);
-        g.drawCircle(x2, y2, nodeR);
-      } else {
-        g.lineStyle(2, 0x00f2fe, 0.8);
-        g.drawCircle(x2, y2, 14 * (0.85 + Math.sin(animTimer * 8) * 0.15));
+      // Animated directional chevron arrows along the sightline so player instantly reads tackle direction!
+      const segLen = Math.hypot(x2 - x1, y2 - y1);
+      if (!isDash && segLen > 80) {
+        const ang = Math.atan2(y2 - y1, x2 - x1);
+        const chevCount = Math.min(4, Math.max(2, Math.floor(segLen / 120)));
+        const flow = (animTimer * 2.4) % 1;
+        g.lineStyle(2.4, idx === 0 ? 0xfde047 : 0x38bdf8, 0.92 * pulse);
+        for (let c = 0; c < chevCount; c++) {
+          const u = ((c + flow) / chevCount) * 0.86 + 0.07;
+          const cx = x1 + (x2 - x1) * u;
+          const cy = y1 + (y2 - y1) * u;
+          const wing = 11;
+          g.moveTo(cx - Math.cos(ang - 0.55) * wing, cy - Math.sin(ang - 0.55) * wing);
+          g.lineTo(cx, cy);
+          g.lineTo(cx - Math.cos(ang + 0.55) * wing, cy - Math.sin(ang + 0.55) * wing);
+        }
       }
+
+      // Glowing bounce-vertex reticle ring at the end of each slash
+      g.lineStyle(2.2, outerColor, 0.88 * pulse);
+      g.drawCircle(x2, y2, isActiveLine ? 13 : 9.5);
     }
     g.lineStyle(0);
 
@@ -345,8 +362,8 @@ export class Boss {
         const t = i / 6;
         const ax = sx + (this.pos.x - sx) * t;
         const ay = sy + (this.pos.y - sy) * t;
-        g.beginFill(activeLine.isReturn ? 0x00f2fe : i % 2 === 0 ? 0xfde047 : 0xff2b5b, 0.2 * t);
-        g.drawCircle(ax, ay, 25 * t);
+        g.beginFill(activeLine.isReturn ? 0x00f2fe : i % 2 === 0 ? 0xfde047 : 0xff2b5b, 0.22 * t);
+        g.drawCircle(ax, ay, 26 * t);
         g.endFill();
       }
     }

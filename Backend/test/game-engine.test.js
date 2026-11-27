@@ -175,7 +175,7 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     assert.ok(p2.y - 360 > 215 && p2.y - 360 < 260, `Expected p2 vertical move ~250 (clamped near wall), got ${p2.y - 360}`);
   });
 
-  it('executes M.O. (Mechanical Ophanim) 5 sacred-geometry tackle shapes cleanly', () => {
+  it('executes M.O. (Mechanical Ophanim) Byakuren x Konngara hunting tackles with zero safespots', () => {
     const moRoom = new GameRoom('room-mo-rework', 'p1', {
       initialPhase: 'playing',
       difficulty: 'normal',
@@ -183,6 +183,7 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
       stage: 3,
     });
     moRoom.addPlayer('p1', 'Special_Attack');
+    const p1 = moRoom.players.get('p1');
     moRoom.spawnBossNow();
     assert.equal(moRoom.boss.bossId, 'mo');
 
@@ -191,32 +192,47 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     assert.equal(moRoom.boss.moIntroActive, false);
     assert.equal(moRoom.boss.moDashState, 'telegraph');
 
-    // Run full cycles across all 5 geometric tackle phases (triangle, hourglass, star, lightning, spiral)
+    // Verify chained hunting across all 5 phases:
+    // - Only 1-2 lines telegraphed at once (never cluttered whole-phase web)
+    // - Stationary player takes damage (zero safespot!)
+    // - Held wake bullets release on next tackle and snap-bend mid-flight (`_turned`)
     const seenShapes = new Set();
     const seenStates = new Set();
+    let maxTelegraphLines = 0;
     let sawTurnedBullet = false;
+    let stationaryPlayerHit = false;
 
     for (let targetPhase = 1; targetPhase <= 5; targetPhase++) {
       moRoom.boss.phase = targetPhase;
-      for (let i = 0; i < 280; i++) {
+      p1.hp = p1.stats.hpMax;
+      for (let i = 0; i < 320; i++) {
         moRoom.update(1 / 60);
         seenStates.add(moRoom.boss.moDashState);
+        if (moRoom.boss.moDashState === 'telegraph') {
+          maxTelegraphLines = Math.max(maxTelegraphLines, moRoom.boss.moDashLines.length);
+        }
         if (moRoom.boss._moState?.shapeKind) {
           seenShapes.add(moRoom.boss._moState.shapeKind);
         }
         if (moRoom.bulletSystem.active.some((b) => b._turned)) {
           sawTurnedBullet = true;
         }
+        if (p1.hp < p1.stats.hpMax) {
+          stationaryPlayerHit = true;
+          p1.hp = p1.stats.hpMax; // revive to keep testing remaining phases
+        }
       }
     }
 
     assert.deepEqual(
       [...seenShapes].sort(),
-      ['hourglass', 'lightning', 'spiral', 'star', 'triangle'],
-      'Expected all 5 geometric tackle shapes'
+      ['byakuren_zigzag', 'final_storm', 'guillotine_scissor', 'l_hook', 'predator_star'],
+      'Expected all 5 chained hunting tackle modes'
     );
+    assert.ok(maxTelegraphLines >= 1 && maxTelegraphLines <= 2, `Expected 1-2 telegraph lines at once, got ${maxTelegraphLines}`);
     assert.ok(seenStates.has('telegraph') && seenStates.has('dashing') && seenStates.has('resting'));
-    assert.equal(sawTurnedBullet, true, 'Expected delayed wake bullets to snap-bend mid-flight');
+    assert.equal(stationaryPlayerHit, true, 'Standing still must NOT be a safespot');
+    assert.equal(sawTurnedBullet, true, 'Expected cascading wake bullets to snap-bend mid-flight');
   });
 });
 

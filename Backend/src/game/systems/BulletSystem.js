@@ -174,6 +174,23 @@ class BulletSystem {
     }
   }
 
+  /**
+   * Release all suspended boss wake bullets matching `holdTag` with an optional
+   * cascading stagger (seconds per bullet) for Byakuren-style synchronized wakeups.
+   */
+  releaseHeldBullets(holdTag, staggerSec = 0.012) {
+    let idx = 0;
+    for (let i = 0; i < this.active.length; i++) {
+      const b = this.active[i];
+      if (b.holdTag === holdTag) {
+        b.holdTag = null;
+        b.delay = idx * staggerSec;
+        idx++;
+      }
+    }
+    return idx;
+  }
+
   clear() {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const b = this.active[i];

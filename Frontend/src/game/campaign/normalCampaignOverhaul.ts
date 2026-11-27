@@ -691,6 +691,7 @@ export interface BulletSpawnOpts {
   turnAngle?: number;
   turnSpeedMult?: number;
   turnColor?: number;
+  holdTag?: number | null;
 }
 
 export function fireNormalBossPattern(
