@@ -3,7 +3,13 @@
 const GameRoom = require('../game/GameRoom');
 const { verifyToken } = require('../config/auth');
 const { RoomInputGuard } = require('./gameInputGuard');
-const { parseAllowedOrigins, isOriginAllowed, validateClientMessage, isDevBypassTokenAllowed } = require('./gameSecurity');
+const {
+  parseAllowedOrigins,
+  isOriginAllowed,
+  validateClientMessage,
+  isDevBypassTokenAllowed,
+  isDebugCommandAllowed,
+} = require('./gameSecurity');
 const { CHARACTER_ROLES, getAvailableCharacterRole, removePlayer: removeRedisPlayer } = require('../utils/roomUtils');
 const redis    = require('../config/redis');
 
@@ -579,6 +585,7 @@ function setupGameRoute(app) {
         }
 
         case 'spawn-boss': {
+          if (!isDebugCommandAllowed()) return;
           if (!ws.roomId) return;
           const room = gameRooms.get(ws.roomId);
           if (!room) return;
@@ -625,6 +632,7 @@ function setupGameRoute(app) {
         }
 
         case 'start-struggle': {
+          if (!isDebugCommandAllowed()) return;
           if (!ws.roomId) return;
           const room = gameRooms.get(ws.roomId);
           if (!room) return;

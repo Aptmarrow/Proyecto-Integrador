@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import BulletBackground from '../components/BulletBackground';
+import { DEV_TOOLS_ENABLED } from '../config/devTools';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -55,6 +56,24 @@ export default function Home() {
             GTFO ;]
           </button>
         </div>
+
+        {DEV_TOOLS_ENABLED && (
+          <div className="menu-row">
+            <button
+              type="button"
+              className="menu-btn"
+              style={{
+                borderColor: '#f59e0b',
+                color: '#fde68a',
+                fontSize: '0.85rem',
+                padding: '10px 22px',
+              }}
+              onClick={() => navigate('/dev?test=boss')}
+            >
+              DEV · BOSS LAB (/dev)
+            </button>
+          </div>
+        )}
 
       </div>
     </div>

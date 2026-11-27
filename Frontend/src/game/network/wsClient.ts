@@ -160,6 +160,28 @@ export interface ServerChipDrop {
   rarityLabel: string;
 }
 
+export interface DevTelemetrySnapshot {
+  godMode: boolean;
+  infiniteSp: boolean;
+  paused: boolean;
+  timeScale: number;
+  hitsTaken: number;
+  bulletCount: number;
+  enemyCount: number;
+  laserCount: number;
+  bossPhaseCount: number;
+  bossId: string;
+  bossName: string;
+  bossHp: number;
+  bossMaxHp: number;
+  bossPhase: number;
+  bossActive: boolean;
+  bossSpellcard: string;
+  difficulty: string;
+  world: number;
+  stage: number;
+}
+
 export interface GameSnapshot {
   type: 'snapshot';
   tick: number;
@@ -176,6 +198,7 @@ export interface GameSnapshot {
   campaign?: ServerCampaign;
   struggle?: ServerBeamStruggle;
   chipDrops?: ServerChipDrop[];
+  devTelemetry?: DevTelemetrySnapshot;
 }
 
 export type GameServerMessage =

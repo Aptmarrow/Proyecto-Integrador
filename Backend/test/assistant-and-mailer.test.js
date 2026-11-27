@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const { buildApp } = require('../src/app');
 const { createMailTransport } = require('../src/utils/mailer');
-const { isDevBypassTokenAllowed } = require('../src/ws/gameSecurity');
+const { isDevBypassTokenAllowed, isDebugCommandAllowed } = require('../src/ws/gameSecurity');
 
 describe('Assistant API (/api/assistant/ask), Postfix Mailer & WS Production Auth', () => {
   let app;
@@ -118,5 +118,10 @@ describe('Assistant API (/api/assistant/ask), Postfix Mailer & WS Production Aut
     assert.equal(isDevBypassTokenAllowed('guest_123', 'development'), true);
     assert.equal(isDevBypassTokenAllowed('dev_user', 'test'), true);
     assert.equal(isDevBypassTokenAllowed('regular-jwt-string', 'development'), false);
+
+    assert.equal(isDebugCommandAllowed('production', undefined), false);
+    assert.equal(isDebugCommandAllowed('production', 'false'), false);
+    assert.equal(isDebugCommandAllowed('production', 'true'), true);
+    assert.equal(isDebugCommandAllowed('development', undefined), true);
   });
 });

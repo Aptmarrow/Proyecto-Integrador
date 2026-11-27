@@ -1,3 +1,4 @@
+import * as PIXI from 'pixi.js';
 import type { CharacterClass, RemotePlayer, Bullet, LaserBeam, WallBarrier, SparkParticle, StageState, BossPhase, GameDifficulty } from './types';
 import type { ServerBullet, ServerLaser, ServerBoss, ServerBeamStruggle, ServerEnemy, ServerCampaign, ServerChipDrop } from '../network/wsClient';
 import { BaseStageEngine } from './BaseStageEngine';
@@ -38,6 +39,8 @@ export class GameEngine extends BaseStageEngine {
   private lastMoIntroLocked: boolean = false;
   private difficultyGlintFilter: DifficultyGlintFilter | null = null;
   private hadSpellcardOverlay: boolean = false;
+  public showDebugHitboxes: boolean = false;
+  private debugHitboxGraphics: PIXI.Graphics | null = null;
   private readonly reusableStruggleState = {
     active: false,
     isAligning: false,
@@ -858,11 +861,83 @@ export class GameEngine extends BaseStageEngine {
     // 10. Aplicar Temblor de Pantalla
     this.applyScreenShake(dt, 8);
 
+    // 10.5. Overlay de hitboxes (solo cuando Boss Lab Debug Hitboxes está activo)
+    if (this.showDebugHitboxes) {
+      this.renderDebugHitboxes();
+    }
+
     // 11. Renderizar WebGL en sincronía exacta 1:1 con este frame de requestAnimationFrame
     this.app.renderer.render(this.app.stage);
   }
 
+  public setDebugHitboxes(enabled: boolean): void {
+    this.showDebugHitboxes = Boolean(enabled);
+    if (this.showDebugHitboxes && !this.debugHitboxGraphics && !this.isDestroyed) {
+      this.debugHitboxGraphics = new PIXI.Graphics();
+      this.debugHitboxGraphics.zIndex = 9999;
+      this.app.stage.addChild(this.debugHitboxGraphics);
+    } else if (!this.showDebugHitboxes && this.debugHitboxGraphics) {
+      this.debugHitboxGraphics.clear();
+    }
+  }
+
+  private renderDebugHitboxes(): void {
+    if (!this.showDebugHitboxes || !this.debugHitboxGraphics) return;
+    const g = this.debugHitboxGraphics;
+    g.clear();
+
+    // Player exact hurtbox (PLAYER_RADIUS = 10 in 800x600 world coordinates)
+    const pRadius = 10 * this.SCALE_X;
+    g.lineStyle(1.75, 0x00ff88, 0.95);
+    g.beginFill(0x00ff88, 0.18);
+    g.drawCircle(this.player.pos.x, this.player.pos.y, pRadius);
+    g.endFill();
+    g.beginFill(0xffffff, 1);
+    g.drawCircle(this.player.pos.x, this.player.pos.y, 2);
+    g.endFill();
+
+    // Boss hurtbox (~42 world units) + center crosshair
+    if (this.boss && this.boss.isActive && !this.boss.isDefeated) {
+      const bRadius = 42 * this.SCALE_X;
+      g.lineStyle(2, 0xff2a85, 0.9);
+      g.beginFill(0xff2a85, 0.1);
+      g.drawCircle(this.boss.pos.x, this.boss.pos.y, bRadius);
+      g.endFill();
+      g.lineStyle(1, 0xfde047, 0.85);
+      g.moveTo(this.boss.pos.x - 10, this.boss.pos.y);
+      g.lineTo(this.boss.pos.x + 10, this.boss.pos.y);
+      g.moveTo(this.boss.pos.x, this.boss.pos.y - 10);
+      g.lineTo(this.boss.pos.x, this.boss.pos.y + 10);
+    }
+
+    // Active enemy hurtboxes
+    const enemies = this.enemySystem.enemies;
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i];
+      if (!e || e.isDead) continue;
+      g.lineStyle(1.5, 0xfacc15, 0.85);
+      g.drawCircle(e.pos.x, e.pos.y, Math.max(8, e.radius));
+    }
+
+    // Enemy / boss bullet hitboxes
+    const bullets = this.bulletSystem.bullets;
+    g.lineStyle(1, 0x38bdf8, 0.72);
+    for (let i = 0; i < bullets.length; i++) {
+      const b = bullets[i];
+      if (!b || b.isPlayerBullet) continue;
+      g.drawCircle(b.x, b.y, Math.max(2, b.radius));
+    }
+  }
+
   public override destroy(): void {
+    if (this.debugHitboxGraphics) {
+      try {
+        this.debugHitboxGraphics.destroy();
+      } catch {
+        // ignore
+      }
+      this.debugHitboxGraphics = null;
+    }
     super.destroy();
   }
 }

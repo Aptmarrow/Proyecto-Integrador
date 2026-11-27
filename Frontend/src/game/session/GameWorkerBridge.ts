@@ -127,6 +127,67 @@ export class GameWorkerBridge {
     }
   }
 
+  public devJumpLevel(
+    difficulty: Difficulty | string,
+    world: number,
+    stage: number,
+    autoSpawnBoss: boolean = false
+  ): void {
+    if (this.worker && this.isInitialized) {
+      this.worker.postMessage({
+        type: 'DEV_JUMP_LEVEL',
+        payload: { difficulty, world, stage, autoSpawnBoss },
+      });
+    }
+  }
+
+  public devJumpBossPhase(phase: number): void {
+    if (this.worker && this.isInitialized) {
+      this.worker.postMessage({ type: 'DEV_JUMP_BOSS_PHASE', payload: { phase } });
+    }
+  }
+
+  public devDamageBoss(mode: 'percent' | 'one_hp' | 'kill', value: number = 25): void {
+    if (this.worker && this.isInitialized) {
+      this.worker.postMessage({ type: 'DEV_DAMAGE_BOSS', payload: { mode, value } });
+    }
+  }
+
+  public devClearBullets(): void {
+    if (this.worker && this.isInitialized) {
+      this.worker.postMessage({ type: 'DEV_CLEAR_BULLETS' });
+    }
+  }
+
+  public devSetFlags(flags: {
+    godMode?: boolean;
+    infiniteSp?: boolean;
+    paused?: boolean;
+    timeScale?: number;
+  }): void {
+    if (this.worker && this.isInitialized) {
+      this.worker.postMessage({ type: 'DEV_SET_FLAGS', payload: flags });
+    }
+  }
+
+  public devStepFrame(frames: number = 1): void {
+    if (this.worker && this.isInitialized) {
+      this.worker.postMessage({ type: 'DEV_STEP_FRAME', payload: { frames } });
+    }
+  }
+
+  public devResetHits(): void {
+    if (this.worker && this.isInitialized) {
+      this.worker.postMessage({ type: 'DEV_RESET_HITS' });
+    }
+  }
+
+  public devHealPlayer(): void {
+    if (this.worker && this.isInitialized) {
+      this.worker.postMessage({ type: 'DEV_HEAL_PLAYER' });
+    }
+  }
+
   public isActive(): boolean {
     return this.isInitialized && this.worker !== null;
   }

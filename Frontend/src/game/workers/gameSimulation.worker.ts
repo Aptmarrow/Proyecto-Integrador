@@ -217,6 +217,13 @@ class DanmakrewSimulationWorker {
   private loopTimer: ReturnType<typeof setInterval> | null = null;
   private activeEnemyStatScale = 1.0;
 
+  // Boss Lab / Dev Tools state (local worker only, never runs on multiplayer server)
+  private devGodMode = false;
+  private devInfiniteSp = false;
+  private devPaused = false;
+  private devTimeScale = 1.0;
+  private devHitsTaken = 0;
+
   private boss = {
     x: 685,
     y: 300,
@@ -386,12 +393,21 @@ class DanmakrewSimulationWorker {
     let accumulator = 0;
     this.loopTimer = setInterval(() => {
       const now = performance.now();
-      accumulator = Math.min(accumulator + Math.max(0, now - lastTime), tickMs * 4);
+      const elapsedMs = Math.max(0, now - lastTime);
       lastTime = now;
+
+      if (this.devPaused) {
+        accumulator = 0;
+        return;
+      }
+
+      const scaledElapsed = elapsedMs * this.devTimeScale;
+      const maxSteps = this.devTimeScale > 1.25 ? 6 : 3;
+      accumulator = Math.min(accumulator + scaledElapsed, tickMs * (maxSteps + 1));
 
       let stepped = false;
       let steps = 0;
-      while (accumulator >= tickMs && steps < 3) {
+      while (accumulator >= tickMs && steps < maxSteps) {
         accumulator -= tickMs;
         steps++;
         stepped = true;
@@ -399,12 +415,16 @@ class DanmakrewSimulationWorker {
       }
 
       if (stepped) {
-        self.postMessage({
-          type: 'SNAPSHOT',
-          payload: this.buildSnapshot(),
-        });
+        this.emitSnapshotNow();
       }
     }, 4);
+  }
+
+  private emitSnapshotNow(): void {
+    self.postMessage({
+      type: 'SNAPSHOT',
+      payload: this.buildSnapshot(),
+    });
   }
 
   public stop(): void {
@@ -556,6 +576,7 @@ class DanmakrewSimulationWorker {
 
   public restartStage(): void {
     this.autoAdvanceTimer = 0;
+    this.devHitsTaken = 0;
     this.resetStageRuntime();
     let idx = 0;
     for (const [, p] of this.players) {
@@ -568,6 +589,173 @@ class DanmakrewSimulationWorker {
       p.body.setLinearVelocity(planck.Vec2(0, 0));
       idx++;
     }
+    this.emitSnapshotNow();
+  }
+
+  // ── Boss Lab Dev Commands (local sandbox worker only) ──────────────────────
+  public devJumpLevel(
+    difficulty: string = 'normal',
+    world: number = 1,
+    stage: number = 1,
+    autoSpawnBoss: boolean = false
+  ): void {
+    const normDiff =
+      difficulty === 'no_mercy' ? 'no_mercy' : difficulty === 'difficult' ? 'difficult' : 'normal';
+    const w = Math.max(1, Math.min(3, Math.floor(Number(world) || 1)));
+    const s = Math.max(1, Math.min(3, Math.floor(Number(stage) || 1)));
+    this.customStageProfile = null;
+    this.difficulty = normDiff;
+    this.stageIndex = (w - 1) * 3 + (s - 1);
+    this.restartStage();
+    if (autoSpawnBoss) {
+      this.spawnBossNow();
+      this.emitSnapshotNow();
+    }
+  }
+
+  public devJumpBossPhase(targetPhase: number): void {
+    if (this.customStageProfile?.disableBoss) return;
+    if (!this.boss.isActive || this.boss.isDefeated) {
+      this.spawnBossNow();
+    }
+    const phases = this.getActiveBossPhases();
+    const totalPhases = Math.max(1, phases.length);
+    const clampedPhase = Math.max(1, Math.min(totalPhases, Math.floor(Number(targetPhase) || 1)));
+    const spell = phases[clampedPhase - 1] || phases[0];
+    const hp = Math.round(spell.maxHp * this.getSquadHpScale());
+
+    this.bullets = this.bullets.filter((b) => b.ownerId !== 'boss');
+    this.lasers = [];
+    this.enemies = [];
+    this.stageState = 'boss_battle';
+    this.autoAdvanceTimer = 0;
+    this.devHitsTaken = 0;
+
+    this.boss.isActive = true;
+    this.boss.isDefeated = false;
+    this.boss.isRefilling = false;
+    this.boss.refillTimer = 0;
+    this.boss.isInvulnerable = false;
+    this.boss.isLockedForBeam = false;
+    this.boss.phase = clampedPhase;
+    this.boss.remainingStocks = Math.max(0, totalPhases - clampedPhase);
+    this.boss.hp = hp;
+    this.boss.maxHp = hp;
+    this.boss.spellcardName = spell.name;
+    this.boss.isSpellCard = Boolean(spell.isSpellCard);
+    this.boss.shootTimer = 0;
+    this.boss.shotIndex = 0;
+    this.boss.laserTimer = 0.8;
+    this.boss.megaLaserTimer = 0;
+    this.boss.x = 685;
+    this.boss.y = 300;
+    this.boss.targetX = 685;
+    this.boss.targetY = 300;
+
+    if (this.boss.bossId === 'mo') {
+      this.boss.moIntroActive = false;
+      this.boss.moIntroProgress = 1;
+      this.boss.moMode = 'resting';
+      this.boss.moTimer = 0.6;
+      this.boss.moDashLines = [];
+      this.boss.moDashState = 'idle';
+      this.boss.moDashChain = [];
+    }
+
+    this.emitSnapshotNow();
+  }
+
+  public devDamageBoss(mode: 'percent' | 'one_hp' | 'kill', value: number = 25): void {
+    // Also support active end-stage minibosses
+    const mb = this.enemies.find((e) => e.isMiniboss);
+    if (mb && !this.boss.isActive) {
+      if (mode === 'kill') {
+        mb.hp = 0;
+        this.enemies = this.enemies.filter((e) => e !== mb);
+        this.handleMinibossDefeated();
+      } else if (mode === 'one_hp') {
+        mb.hp = 1;
+      } else {
+        mb.hp = Math.max(0, mb.hp - Math.ceil(mb.maxHp * (value / 100)));
+        if (mb.hp <= 0) {
+          this.enemies = this.enemies.filter((e) => e !== mb);
+          this.handleMinibossDefeated();
+        }
+      }
+      this.emitSnapshotNow();
+      return;
+    }
+
+    if (!this.boss.isActive || this.boss.isDefeated) return;
+    this.boss.isRefilling = false;
+    this.boss.isInvulnerable = false;
+
+    if (mode === 'kill') {
+      this.boss.remainingStocks = 0;
+      this.boss.hp = 0;
+      this.advanceBossPhaseOrDefeat();
+    } else if (mode === 'one_hp') {
+      this.boss.hp = 1;
+    } else {
+      const dmg = Math.max(1, Math.ceil(this.boss.maxHp * (Math.max(1, Math.min(100, value)) / 100)));
+      this.boss.hp = Math.max(0, this.boss.hp - dmg);
+      if (this.boss.hp <= 0) {
+        this.advanceBossPhaseOrDefeat();
+      }
+    }
+    this.emitSnapshotNow();
+  }
+
+  public devClearBullets(): void {
+    this.bullets = [];
+    this.lasers = [];
+    this.emitSnapshotNow();
+  }
+
+  public devSetFlags(flags: {
+    godMode?: boolean;
+    infiniteSp?: boolean;
+    paused?: boolean;
+    timeScale?: number;
+  }): void {
+    if (typeof flags.godMode === 'boolean') this.devGodMode = flags.godMode;
+    if (typeof flags.infiniteSp === 'boolean') {
+      this.devInfiniteSp = flags.infiniteSp;
+      if (this.devInfiniteSp) {
+        for (const [, p] of this.players) {
+          p.sp = p.stats.spMax;
+          p.skillCooldown = 0;
+        }
+      }
+    }
+    if (typeof flags.paused === 'boolean') this.devPaused = flags.paused;
+    if (typeof flags.timeScale === 'number' && Number.isFinite(flags.timeScale)) {
+      this.devTimeScale = Math.max(0.1, Math.min(4.0, flags.timeScale));
+    }
+    this.emitSnapshotNow();
+  }
+
+  public devStepFrame(frames: number = 1): void {
+    const count = Math.max(1, Math.min(30, Math.floor(frames) || 1));
+    this.devPaused = true;
+    for (let i = 0; i < count; i++) {
+      this.step(DT);
+    }
+    this.emitSnapshotNow();
+  }
+
+  public devResetHits(): void {
+    this.devHitsTaken = 0;
+    this.emitSnapshotNow();
+  }
+
+  public devHealPlayer(): void {
+    for (const [, p] of this.players) {
+      p.hp = p.stats.hpMax;
+      p.sp = p.stats.spMax;
+      p.skillCooldown = 0;
+    }
+    this.emitSnapshotNow();
   }
 
   private resetStageRuntime(): void {
@@ -999,8 +1187,8 @@ class DanmakrewSimulationWorker {
       }
 
       p.shootCooldown = Math.max(0, p.shootCooldown - dt);
-      p.skillCooldown = Math.max(0, p.skillCooldown - dt);
-      p.sp = Math.min(p.stats.spMax, p.sp + dt * 50);
+      p.skillCooldown = this.devInfiniteSp ? 0 : Math.max(0, p.skillCooldown - dt);
+      p.sp = this.devInfiniteSp ? p.stats.spMax : Math.min(p.stats.spMax, p.sp + dt * 50);
 
       const { dx, dy, action, focus } = p.input;
       if (!locked) {
@@ -2351,6 +2539,10 @@ class DanmakrewSimulationWorker {
   }
 
   private applyDamageToPlayer(p: SimPlayer, rawDamage: number): void {
+    if (this.devGodMode) {
+      this.devHitsTaken++;
+      return;
+    }
     const mitigation = Math.max(0, Math.min(1, p.stats.defensePercent / 100));
     const finalDamage = rawDamage * (1 - mitigation);
     p.hp = Math.max(0, Number((p.hp - finalDamage).toFixed(2)));
@@ -2513,6 +2705,29 @@ class DanmakrewSimulationWorker {
       clearSubtext: meta.clearSubtext,
     };
 
+    const bossPhases = this.getActiveBossPhases();
+    const devTelemetry = {
+      godMode: this.devGodMode,
+      infiniteSp: this.devInfiniteSp,
+      paused: this.devPaused,
+      timeScale: this.devTimeScale,
+      hitsTaken: this.devHitsTaken,
+      bulletCount: bullets.length,
+      enemyCount: enemies.length,
+      laserCount: lasers.length,
+      bossPhaseCount: bossPhases.length,
+      bossId: boss.bossId || 'first_boss',
+      bossName: boss.fullBossName || boss.bossId || 'Boss',
+      bossHp: Math.round(boss.hp || 0),
+      bossMaxHp: Math.round(boss.maxHp || 1),
+      bossPhase: boss.phase || 1,
+      bossActive: Boolean(boss.isActive && !boss.isDefeated),
+      bossSpellcard: boss.spellcardName || '',
+      difficulty: this.difficulty,
+      world: meta.world,
+      stage: meta.stage,
+    };
+
     return {
       type: 'snapshot',
       tick: this.tick,
@@ -2526,6 +2741,7 @@ class DanmakrewSimulationWorker {
       boss,
       campaign,
       struggle: { ...this.struggle },
+      devTelemetry,
     };
   }
 }
@@ -2578,6 +2794,35 @@ self.onmessage = (e: MessageEvent) => {
       break;
     case 'RESTART_STAGE':
       sim.restartStage();
+      break;
+    case 'DEV_JUMP_LEVEL':
+      sim.devJumpLevel(
+        payload?.difficulty || 'normal',
+        payload?.world ?? 1,
+        payload?.stage ?? 1,
+        Boolean(payload?.autoSpawnBoss)
+      );
+      break;
+    case 'DEV_JUMP_BOSS_PHASE':
+      sim.devJumpBossPhase(payload?.phase ?? 1);
+      break;
+    case 'DEV_DAMAGE_BOSS':
+      sim.devDamageBoss(payload?.mode || 'percent', payload?.value ?? 25);
+      break;
+    case 'DEV_CLEAR_BULLETS':
+      sim.devClearBullets();
+      break;
+    case 'DEV_SET_FLAGS':
+      sim.devSetFlags(payload || {});
+      break;
+    case 'DEV_STEP_FRAME':
+      sim.devStepFrame(payload?.frames ?? 1);
+      break;
+    case 'DEV_RESET_HITS':
+      sim.devResetHits();
+      break;
+    case 'DEV_HEAL_PLAYER':
+      sim.devHealPlayer();
       break;
     case 'STOP':
       sim.stop();

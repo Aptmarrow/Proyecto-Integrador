@@ -1,5 +1,10 @@
 import { GameEngine } from '../engine/GameEngine';
-import { GameWSClient, type GameSnapshot, type ServerPlayer } from '../network/wsClient';
+import {
+  GameWSClient,
+  type DevTelemetrySnapshot,
+  type GameSnapshot,
+  type ServerPlayer,
+} from '../network/wsClient';
 import { SnapshotInterpolator } from '../network/SnapshotInterpolator';
 import { GameWorkerBridge } from './GameWorkerBridge';
 import { normalizeRole } from './squadState';
@@ -51,6 +56,9 @@ export type RuntimeSessionOptions = {
   onWorkerModeChange?: (mode: WorkerRuntimeMode, statusMessage: string) => void;
   onHostStatusChange?: (isHost: boolean) => void;
   onRoomClosed?: (message: string) => void;
+  onDevTelemetry?: (telemetry: DevTelemetrySnapshot) => void;
+  onToggleDevPanel?: () => void;
+  onDebugHitboxesChange?: (enabled: boolean) => void;
 };
 
 const UUID_REGEX = /^[0-9a-f-]{36}$/i;
@@ -105,6 +113,8 @@ export class GameRuntimeSession {
   private destroyed = false;
   private numpad6Streak = 0;
   private lastNumpad6At = 0;
+  private lastDevTelemetry: DevTelemetrySnapshot | null = null;
+  private lastDevTelemetryEmitAt = 0;
 
   private readonly onWindowBlur = () => {
     for (const k of Object.keys(this.keys)) {
@@ -168,12 +178,47 @@ export class GameRuntimeSession {
     }
 
     if (this.options.allowDebugHotkeys && this.runtimeMode === 'local-worker') {
+      if (e.code === 'F2' && !e.repeat) {
+        e.preventDefault();
+        this.options.onToggleDevPanel?.();
+        return;
+      }
       if (e.code === 'Digit1') this.selectRole('DPS');
       if (e.code === 'Digit2') this.selectRole('Tank');
       if (e.code === 'Digit3') this.selectRole('Support');
       if (e.code === 'Digit4') this.selectRole('Special_Attack');
-      if (e.code === 'KeyR' && !e.repeat) this.restartStage();
+      if (e.code === 'KeyR' && !e.repeat) {
+        if (e.shiftKey) {
+          this.devJumpBossPhase(this.lastDevTelemetry?.bossPhase || 1);
+        } else {
+          this.restartStage();
+        }
+      }
       if (e.code === 'KeyN' && !e.repeat) this.goToNextStage();
+      if (e.code === 'KeyG' && !e.repeat) {
+        this.devSetFlags({ godMode: !this.lastDevTelemetry?.godMode });
+      }
+      if (e.code === 'KeyH' && !e.repeat) {
+        this.toggleDebugHitboxes();
+      }
+      if (e.code === 'KeyP' && !e.repeat) {
+        this.devSetFlags({ paused: !this.lastDevTelemetry?.paused });
+      }
+      if (e.code === 'Period' && !e.repeat) {
+        this.devStepFrame(1);
+      }
+      if (e.code === 'KeyC' && !e.repeat) {
+        this.devClearBullets();
+      }
+      if (e.code === 'BracketLeft' && !e.repeat) {
+        const cur = this.lastDevTelemetry?.bossPhase || 1;
+        this.devJumpBossPhase(Math.max(1, cur - 1));
+      }
+      if (e.code === 'BracketRight' && !e.repeat) {
+        const cur = this.lastDevTelemetry?.bossPhase || 1;
+        const max = this.lastDevTelemetry?.bossPhaseCount || 5;
+        this.devJumpBossPhase(Math.min(max, cur + 1));
+      }
     }
 
     if (this.options.allowDebugHotkeys && e.code === 'KeyT' && !e.repeat) this.startBeamStruggleTest();
@@ -454,6 +499,63 @@ export class GameRuntimeSession {
     return false;
   }
 
+  public devJumpLevel(difficulty: Difficulty, world: number, stage: number, autoSpawnBoss = false): void {
+    if (!this.options.allowDebugHotkeys || !this.workerBridge?.isActive()) return;
+    this.snapshotInterpolator.reset();
+    this.engine.restartStage();
+    this.workerBridge.devJumpLevel(difficulty, world, stage, autoSpawnBoss);
+  }
+
+  public devJumpBossPhase(phase: number): void {
+    if (!this.options.allowDebugHotkeys || !this.workerBridge?.isActive()) return;
+    this.workerBridge.devJumpBossPhase(phase);
+  }
+
+  public devDamageBoss(mode: 'percent' | 'one_hp' | 'kill', value: number = 25): void {
+    if (!this.options.allowDebugHotkeys || !this.workerBridge?.isActive()) return;
+    this.workerBridge.devDamageBoss(mode, value);
+  }
+
+  public devClearBullets(): void {
+    if (!this.options.allowDebugHotkeys || !this.workerBridge?.isActive()) return;
+    this.workerBridge.devClearBullets();
+  }
+
+  public devSetFlags(flags: {
+    godMode?: boolean;
+    infiniteSp?: boolean;
+    paused?: boolean;
+    timeScale?: number;
+  }): void {
+    if (!this.options.allowDebugHotkeys || !this.workerBridge?.isActive()) return;
+    this.workerBridge.devSetFlags(flags);
+  }
+
+  public devStepFrame(frames: number = 1): void {
+    if (!this.options.allowDebugHotkeys || !this.workerBridge?.isActive()) return;
+    this.workerBridge.devStepFrame(frames);
+  }
+
+  public devResetHits(): void {
+    if (!this.options.allowDebugHotkeys || !this.workerBridge?.isActive()) return;
+    this.workerBridge.devResetHits();
+  }
+
+  public devHealPlayer(): void {
+    if (!this.options.allowDebugHotkeys || !this.workerBridge?.isActive()) return;
+    this.workerBridge.devHealPlayer();
+  }
+
+  public setDebugHitboxes(enabled: boolean): void {
+    if (!this.options.allowDebugHotkeys) return;
+    this.engine.setDebugHitboxes(enabled);
+    this.options.onDebugHitboxesChange?.(enabled);
+  }
+
+  public toggleDebugHitboxes(): void {
+    this.setDebugHitboxes(!this.engine.showDebugHitboxes);
+  }
+
   private readonly loop = (now: number) => {
     if (this.stopped) return;
     const dt = Math.min((now - this.lastTime) / 1000, 0.1);
@@ -554,5 +656,28 @@ export class GameRuntimeSession {
     if (snapshot.stageTime !== undefined) this.engine.setSyncedStageTime(snapshot.stageTime);
     if (snapshot.campaign) this.engine.applyBackendCampaign(snapshot.campaign);
     if (snapshot.chipDrops?.length) this.engine.applyBackendChipDrops(snapshot.chipDrops, this.myPlayerId);
+    if (snapshot.devTelemetry && this.options.allowDebugHotkeys) {
+      const prev = this.lastDevTelemetry;
+      const next = snapshot.devTelemetry;
+      this.lastDevTelemetry = next;
+      const nowMs = performance.now();
+      const stateChanged =
+        !prev ||
+        prev.godMode !== next.godMode ||
+        prev.infiniteSp !== next.infiniteSp ||
+        prev.paused !== next.paused ||
+        prev.timeScale !== next.timeScale ||
+        prev.hitsTaken !== next.hitsTaken ||
+        prev.bossPhase !== next.bossPhase ||
+        prev.bossActive !== next.bossActive ||
+        prev.bossId !== next.bossId ||
+        prev.difficulty !== next.difficulty ||
+        prev.world !== next.world ||
+        prev.stage !== next.stage;
+      if (stateChanged || nowMs - this.lastDevTelemetryEmitAt >= 120) {
+        this.lastDevTelemetryEmitAt = nowMs;
+        this.options.onDevTelemetry?.(next);
+      }
+    }
   }
 }

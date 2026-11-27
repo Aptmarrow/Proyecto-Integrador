@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { DEV_TOOLS_ENABLED } from '../config/devTools';
 import { deleteRoom, getIdToken, getStoredUserId, leaveRoom } from '../services/api';
 import { clearLutCache, decodeLutWithKey, getCachedLutProfile } from '../game/engine/SpriteLutCache';
 import {
@@ -23,6 +24,11 @@ import '../styles/game.css';
 
 const SESSION_STORAGE_KEY = 'danma_game_session';
 
+// Tree-shaken completely out of production builds (`DEV_TOOLS_ENABLED === false`)
+const BossDevPanel = DEV_TOOLS_ENABLED
+  ? lazy(() => import('../game/devtools/BossDevPanel'))
+  : null;
+
 function readPersistedGameSession() {
   try {
     const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -39,12 +45,13 @@ export default function Game({ isDevMode = false }) {
   const sessionRef = useRef(null);
 
   const isSandboxRoute =
-    isDevMode ||
-    location.pathname === '/sandbox' ||
-    location.pathname === '/dev' ||
-    location.pathname === '/test' ||
-    location.search.includes('sandbox=true') ||
-    location.search.includes('dev=true');
+    DEV_TOOLS_ENABLED &&
+    (isDevMode ||
+      location.pathname === '/sandbox' ||
+      location.pathname === '/dev' ||
+      location.pathname === '/test' ||
+      location.search.includes('sandbox=true') ||
+      location.search.includes('dev=true'));
 
   const launchConfig = useMemo(() => {
     const persisted = isSandboxRoute ? null : readPersistedGameSession();
@@ -158,6 +165,11 @@ export default function Game({ isDevMode = false }) {
   const [bossEtaSeconds, setBossEtaSeconds] = useState(0);
   const [stageClearTitle, setStageClearTitle] = useState('STAGE CLEARED!');
   const [stageClearSubtext, setStageClearSubtext] = useState('Boss derrotado.');
+  const [devPanelOpen, setDevPanelOpen] = useState(
+    () => DEV_TOOLS_ENABLED && typeof window !== 'undefined' && window.innerWidth >= 900
+  );
+  const [devTelemetry, setDevTelemetry] = useState(null);
+  const [debugHitboxes, setDebugHitboxes] = useState(false);
   const [canAdvanceStage, setCanAdvanceStage] = useState(false);
   const [isCampaignComplete, setIsCampaignComplete] = useState(false);
 
@@ -300,6 +312,9 @@ export default function Game({ isDevMode = false }) {
         isHostRef.current = hostFlag;
         setIsHost(hostFlag);
       },
+      onDevTelemetry: isSandboxRoute ? (nextTelemetry) => setDevTelemetry(nextTelemetry) : undefined,
+      onToggleDevPanel: isSandboxRoute ? () => setDevPanelOpen((prev) => !prev) : undefined,
+      onDebugHitboxesChange: isSandboxRoute ? (enabled) => setDebugHitboxes(enabled) : undefined,
       onRoomClosed: (message) => {
         if (leavingRef.current) return;
         clearLutCache();
@@ -620,6 +635,20 @@ export default function Game({ isDevMode = false }) {
   const handleSpawnBoss = useCallback(() => sessionRef.current?.spawnBossNow(), []);
   const handleStartStruggle = useCallback(() => sessionRef.current?.startBeamStruggleTest(), []);
   const handleSelectStagePreview = useCallback((idx) => sessionRef.current?.selectStagePreviewVariant(idx), []);
+  const handleDevJumpLevel = useCallback(
+    (diff, world, stage, autoBoss) => sessionRef.current?.devJumpLevel(diff, world, stage, autoBoss),
+    []
+  );
+  const handleDevJumpPhase = useCallback((phase) => sessionRef.current?.devJumpBossPhase(phase), []);
+  const handleDevDamageBoss = useCallback((mode, val) => sessionRef.current?.devDamageBoss(mode, val), []);
+  const handleDevClearBullets = useCallback(() => sessionRef.current?.devClearBullets(), []);
+  const handleDevSetFlags = useCallback((flags) => sessionRef.current?.devSetFlags(flags), []);
+  const handleDevStepFrame = useCallback((frames) => sessionRef.current?.devStepFrame(frames), []);
+  const handleDevResetHits = useCallback(() => sessionRef.current?.devResetHits(), []);
+  const handleDevHealPlayer = useCallback(() => sessionRef.current?.devHealPlayer(), []);
+  const handleDevToggleHitboxes = useCallback(() => sessionRef.current?.toggleDebugHitboxes(), []);
+  const handleDevRestartStage = useCallback(() => sessionRef.current?.restartStage(), []);
+  const handleDevNextStage = useCallback(() => sessionRef.current?.goToNextStage(), []);
 
   const playerHpPercent = Math.max(0, Math.min(100, (playerHp / (playerMaxHp || 100)) * 100));
   const playerSpPercent = Math.max(0, Math.min(100, (playerSp / (playerMaxSp || 1000)) * 100));
@@ -730,6 +759,31 @@ export default function Game({ isDevMode = false }) {
             onSelectStagePreview={handleSelectStagePreview}
             onToggleFullscreen={toggleFullscreen}
           />
+        )}
+        {DEV_TOOLS_ENABLED && isSandboxRoute && BossDevPanel && (
+          <Suspense fallback={null}>
+            <BossDevPanel
+              isOpen={devPanelOpen}
+              onToggleOpen={() => setDevPanelOpen((prev) => !prev)}
+              telemetry={devTelemetry}
+              selectedClass={selectedClass}
+              debugHitboxes={debugHitboxes}
+              onJumpLevel={handleDevJumpLevel}
+              onJumpPhase={handleDevJumpPhase}
+              onDamageBoss={handleDevDamageBoss}
+              onSpawnBoss={handleSpawnBoss}
+              onStartStruggle={handleStartStruggle}
+              onClearBullets={handleDevClearBullets}
+              onSetFlags={handleDevSetFlags}
+              onStepFrame={handleDevStepFrame}
+              onResetHits={handleDevResetHits}
+              onHealPlayer={handleDevHealPlayer}
+              onToggleHitboxes={handleDevToggleHitboxes}
+              onSelectRole={handleSelectRole}
+              onRestartStage={handleDevRestartStage}
+              onNextStage={handleDevNextStage}
+            />
+          </Suspense>
         )}
       </div>
     </div>

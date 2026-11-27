@@ -93,9 +93,18 @@ function isDevBypassTokenAllowed(token, nodeEnv = process.env.NODE_ENV) {
   );
 }
 
+function isDebugCommandAllowed(
+  nodeEnv = process.env.NODE_ENV,
+  enableFlag = process.env.ENABLE_DEBUG_COMMANDS
+) {
+  if (nodeEnv !== 'production') return true;
+  return enableFlag === 'true';
+}
+
 module.exports = {
   parseAllowedOrigins,
   isOriginAllowed,
   validateClientMessage,
   isDevBypassTokenAllowed,
+  isDebugCommandAllowed,
 };
