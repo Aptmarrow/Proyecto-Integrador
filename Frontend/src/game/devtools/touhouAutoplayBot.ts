@@ -108,28 +108,35 @@ interface CandidateProfile {
   stopFocus: boolean;
 }
 
-// Precompute 57 clean directional + tap-and-hold Touhou candidate trajectories once at module load
+// Precompute 33 authentic 8-way keyboard (WASD/Arrows) + Focus tap-and-hold candidate trajectories
+// so movement looks 100% indistinguishable from a top human player on keyboard!
 const CANDIDATES: CandidateProfile[] = (() => {
   const list: CandidateProfile[] = [];
   // 0: Hold position in pinpoint Focus (5px hitbox)
   list.push({ dx: 0, dy: 0, focus: true, stopAfter: Infinity, stopFocus: true });
 
-  const NUM_ANGLES = 16;
-  for (let i = 0; i < NUM_ANGLES; i++) {
-    const a = (Math.PI * 2 * i) / NUM_ANGLES;
-    const dx = Math.cos(a);
-    const dy = Math.sin(a);
-    // Focus sustained micro-glide (classic Touhou streaming)
+  const DIRS_8: Array<[number, number]> = [
+    [1, 0],
+    [1, 1],
+    [0, 1],
+    [-1, 1],
+    [-1, 0],
+    [-1, -1],
+    [0, -1],
+    [1, -1],
+  ];
+  for (const [rx, ry] of DIRS_8) {
+    const len = Math.hypot(rx, ry);
+    const dx = rx / len;
+    const dy = ry / len;
+    // Focus sustained micro-glide (Shift + WASD)
     list.push({ dx, dy, focus: true, stopAfter: Infinity, stopFocus: true });
     // Focus short micro-tap -> hold pinpoint Focus inside pocket
     list.push({ dx, dy, focus: true, stopAfter: 0.14, stopFocus: true });
-    // Full-speed macro escape (clearing M.O.'s physical tackles & sweeping walls)
+    // Full-speed macro escape (WASD without Shift)
     list.push({ dx, dy, focus: false, stopAfter: Infinity, stopFocus: false });
-  }
-  // 8 cardinal/diagonal fast burst -> immediate Focus stop inside tight safe pocket
-  for (let i = 0; i < 8; i++) {
-    const a = (Math.PI * 2 * i) / 8;
-    list.push({ dx: Math.cos(a), dy: Math.sin(a), focus: false, stopAfter: 0.15, stopFocus: true });
+    // Fast burst -> immediate Shift Focus stop inside tight safe pocket
+    list.push({ dx, dy, focus: false, stopAfter: 0.15, stopFocus: true });
   }
   return list;
 })();
@@ -186,12 +193,14 @@ export class TouhouAutoplayBot {
   private prevDy = 0;
   private prevFocus = true;
   private commitTimer = 0;
+  private focusHoldTimer = 0;
 
   public reset(): void {
     this.prevDx = 0;
     this.prevDy = 0;
     this.prevFocus = true;
     this.commitTimer = 0;
+    this.focusHoldTimer = 0;
   }
 
   public computeInput(
@@ -209,6 +218,7 @@ export class TouhouAutoplayBot {
     }
 
     this.commitTimer = Math.max(0, this.commitTimer - dt);
+    this.focusHoldTimer = Math.max(0, this.focusHoldTimer - dt);
 
     // 1. Pre-predict every relevant enemy bullet across all 7 lookahead timestamps (exact physics!)
     let bCount = 0;
@@ -635,14 +645,17 @@ export class TouhouAutoplayBot {
         prevT = curT;
       }
 
-      // 5. Smooth Touhou Superplay aesthetics (anti-jitter continuity + clean Focus preference)
+      // 5. Smooth human-like continuity (anti-jitter keyboard hold + natural Shift Focus rhythm)
       const dirDiffSq = (cand.dx - this.prevDx) ** 2 + (cand.dy - this.prevDy) ** 2;
-      score += dirDiffSq * (this.commitTimer > 0 ? 180 : 65);
+      score += dirDiffSq * (this.commitTimer > 0 ? 220 : 85);
+      if (cand.focus !== this.prevFocus) {
+        score += this.focusHoldTimer > 0 ? 480 : 35;
+      }
       if (cand.focus) {
-        score -= 18; // Prefer sleek Focus micro-dodge when equally safe!
+        score -= 18;
       }
       if (cand.dx === 0 && cand.dy === 0) {
-        score -= 10; // Don't wiggle unnecessarily when completely safe
+        score -= 12;
       }
 
       if (score < bestScore) {
@@ -651,10 +664,13 @@ export class TouhouAutoplayBot {
       }
     }
 
-    // Small smoothing Hysteresis when switching directions rapidly during calm moments
+    // Small human-like hold hysteresis so direction & Shift don't flicker frame-to-frame
     const switchedHard = (bestCand.dx - this.prevDx) ** 2 + (bestCand.dy - this.prevDy) ** 2 > 1.2;
     if (switchedHard && bestScore < 50000) {
-      this.commitTimer = 0.06;
+      this.commitTimer = 0.08;
+    }
+    if (bestCand.focus !== this.prevFocus) {
+      this.focusHoldTimer = 0.14;
     }
 
     this.prevDx = bestCand.dx;

@@ -58,6 +58,7 @@ export type RuntimeSessionOptions = {
   onRoomClosed?: (message: string) => void;
   onDevTelemetry?: (telemetry: DevTelemetrySnapshot) => void;
   onToggleDevPanel?: () => void;
+  onToggleCleanUi?: () => void;
   onDebugHitboxesChange?: (enabled: boolean) => void;
 };
 
@@ -182,6 +183,11 @@ export class GameRuntimeSession {
       if (e.code === 'F2' && !e.repeat) {
         e.preventDefault();
         this.options.onToggleDevPanel?.();
+        return;
+      }
+      if (e.code === 'F4' && !e.repeat) {
+        e.preventDefault();
+        this.options.onToggleCleanUi?.();
         return;
       }
       if (e.code === 'Digit1') this.selectRole('DPS');

@@ -24,7 +24,9 @@ function formatRecTime(sec) {
 
 export default function BossDevPanel({
   isOpen,
+  stealthCleanUi,
   onToggleOpen,
+  onToggleStealthCleanUi,
   telemetry,
   selectedClass,
   debugHitboxes,
@@ -76,8 +78,8 @@ export default function BossDevPanel({
     stage: 1,
   };
 
-  // When capturing full screen+HUD, hide the entire Dev Lab pill so zero dev UI appears in the video!
-  if (recordingMode === 'screen' && !isOpen) {
+  // In Clean Mode [F4] or full-tab recording, hide 100% of Dev Lab UI so zero badges appear on screen!
+  if ((stealthCleanUi || recordingMode === 'screen') && !isOpen) {
     return null;
   }
 
@@ -91,11 +93,10 @@ export default function BossDevPanel({
         type="button"
         className="dk-devlab-toggle"
         onClick={onToggleOpen}
-        title="Abrir/Cerrar Boss Dev Lab [F2]"
+        title="Abrir/Cerrar Dev Lab [F2] · Ocultar todo [F4]"
       >
-        <span className={`dk-devlab-dot ${recordingMode ? 'rec' : t.paused ? 'paused' : t.botPlay ? 'bot' : t.godMode ? 'god' : ''}`} />
+        <span className={`dk-devlab-dot ${recordingMode ? 'rec' : t.paused ? 'paused' : t.godMode ? 'god' : ''}`} />
         <span>DEV LAB [F2]</span>
-        {t.botPlay && <span className="dk-devlab-mini-tag bot">BOT</span>}
         {recordingMode && <span className="dk-devlab-mini-tag rec">● {formatRecTime(recordElapsed)}</span>}
         {t.godMode && <span className="dk-devlab-mini-tag">GOD</span>}
         {t.paused && <span className="dk-devlab-mini-tag warn">PAUSED</span>}
@@ -327,9 +328,17 @@ export default function BossDevPanel({
                 type="button"
                 className="dk-devlab-btn"
                 onClick={onStartMoBotShowcase}
-                title="Reinicia M.O. desde la intro con Bot Play listo para grabar"
+                title="Reinicia M.O. desde la intro en modo limpio listo para grabar"
               >
                 ★ Run M.O.
+              </button>
+              <button
+                type="button"
+                className={`dk-devlab-btn ${stealthCleanUi ? 'active' : ''}`}
+                onClick={onToggleStealthCleanUi}
+                title="Oculta el panel Dev Lab y botones de debug para grabar con OBS o Rec + HUD [F4]"
+              >
+                Limpio [F4]
               </button>
             </div>
 

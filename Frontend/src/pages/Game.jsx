@@ -168,6 +168,7 @@ export default function Game({ isDevMode = false }) {
   const [devPanelOpen, setDevPanelOpen] = useState(
     () => DEV_TOOLS_ENABLED && typeof window !== 'undefined' && window.innerWidth >= 900
   );
+  const [stealthCleanUi, setStealthCleanUi] = useState(false);
   const [devTelemetry, setDevTelemetry] = useState(null);
   const [debugHitboxes, setDebugHitboxes] = useState(false);
   const [recordingMode, setRecordingMode] = useState(null);
@@ -319,7 +320,21 @@ export default function Game({ isDevMode = false }) {
         setIsHost(hostFlag);
       },
       onDevTelemetry: isSandboxRoute ? (nextTelemetry) => setDevTelemetry(nextTelemetry) : undefined,
-      onToggleDevPanel: isSandboxRoute ? () => setDevPanelOpen((prev) => !prev) : undefined,
+      onToggleDevPanel: isSandboxRoute
+        ? () => {
+            setStealthCleanUi(false);
+            setDevPanelOpen((prev) => !prev);
+          }
+        : undefined,
+      onToggleCleanUi: isSandboxRoute
+        ? () => {
+            setStealthCleanUi((prev) => {
+              const next = !prev;
+              setDevPanelOpen(!next);
+              return next;
+            });
+          }
+        : undefined,
       onDebugHitboxesChange: isSandboxRoute ? (enabled) => setDebugHitboxes(enabled) : undefined,
       onRoomClosed: (message) => {
         if (leavingRef.current) return;
@@ -674,7 +689,7 @@ export default function Game({ isDevMode = false }) {
     }
     setRecordStatus('');
     const canvas = session.getCanvasElement();
-    const label = `${devTelemetry?.bossId || 'boss'}-w${currentWorld}-${currentStage}-${mode}`;
+    const label = `${devTelemetry?.bossId || 'boss'}-w${currentWorld}-${currentStage}`;
     const ok = await recorderRef.current.start(mode, canvas, label, (st) => {
       setRecordingMode(st.recording ? st.mode : null);
       if (!st.recording) {
@@ -687,8 +702,9 @@ export default function Game({ isDevMode = false }) {
       }
     });
     if (ok && mode === 'screen') {
-      // Collapse Dev Lab completely so zero debug chrome appears in the HUD capture!
+      // Hide 100% of dev chrome so HUD capture looks identical to a normal live match!
       setDevPanelOpen(false);
+      setStealthCleanUi(true);
     }
   }, [currentStage, currentWorld, devTelemetry?.bossId]);
 
@@ -700,8 +716,18 @@ export default function Game({ isDevMode = false }) {
     session.devResetHits();
     session.devHealPlayer();
     session.devSetFlags({ botPlay: true, paused: false, timeScale: 1 });
-    setRecordStatus('M.O. Full Run + Bot Play activado. Tocá Rec Canvas o Rec + HUD.');
+    setDevPanelOpen(false);
+    setStealthCleanUi(true);
+    setRecordStatus('');
   }, [devTelemetry?.difficulty]);
+
+  const handleToggleStealthCleanUi = useCallback(() => {
+    setStealthCleanUi((prev) => {
+      const next = !prev;
+      setDevPanelOpen(!next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!recordingMode) return undefined;
@@ -827,13 +853,13 @@ export default function Game({ isDevMode = false }) {
 
         <AdFooter />
 
-        {(!isTouchDevice || isSandboxRoute) && recordingMode !== 'screen' && (
+        {(!isTouchDevice || isSandboxRoute) && (
           <FloatingControlsBar
             selectedClass={selectedClass}
             isFullscreen={isFullscreen}
-            canSwitchRole={isSandboxRoute && isLocalWorkerMode}
-            showDebugActions={isSandboxRoute}
-            stagePreviewVariants={stagePreviewVariants}
+            canSwitchRole={isSandboxRoute && isLocalWorkerMode && !stealthCleanUi && recordingMode !== 'screen'}
+            showDebugActions={isSandboxRoute && !stealthCleanUi && recordingMode !== 'screen'}
+            stagePreviewVariants={stealthCleanUi || recordingMode === 'screen' ? [] : stagePreviewVariants}
             activeStagePreviewIdx={activeStagePreviewIdx}
             onSelectRole={handleSelectRole}
             onTriggerSkill={handleTriggerSkill}
@@ -847,7 +873,12 @@ export default function Game({ isDevMode = false }) {
           <Suspense fallback={null}>
             <BossDevPanel
               isOpen={devPanelOpen}
-              onToggleOpen={() => setDevPanelOpen((prev) => !prev)}
+              stealthCleanUi={stealthCleanUi}
+              onToggleOpen={() => {
+                setStealthCleanUi(false);
+                setDevPanelOpen((prev) => !prev);
+              }}
+              onToggleStealthCleanUi={handleToggleStealthCleanUi}
               telemetry={devTelemetry}
               selectedClass={selectedClass}
               debugHitboxes={debugHitboxes}

@@ -40,7 +40,7 @@ export class ShowcaseRecorder {
   private chunks: BlobPart[] = [];
   private activeMode: RecordMode | null = null;
   private startedAt = 0;
-  private label = 'botplay';
+  private label = 'gameplay';
   private onStateChange?: (state: { recording: boolean; mode: RecordMode | null; savedFile?: string; error?: string }) => void;
 
   public isRecording(): boolean {
@@ -66,7 +66,7 @@ export class ShowcaseRecorder {
       this.stop();
     }
     this.onStateChange = onStateChange;
-    this.label = (label || 'botplay').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
+    this.label = (label || 'gameplay').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
 
     if (typeof MediaRecorder === 'undefined') {
       onStateChange?.({ recording: false, mode: null, error: 'MediaRecorder no soportado en este navegador.' });
