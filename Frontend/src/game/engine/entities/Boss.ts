@@ -294,91 +294,10 @@ export class Boss {
 
   private renderMoDashLines(animTimer: number, scaleX: number, scaleY: number): void {
     const g = this.moLineGraphics;
-    const pulse = 0.72 + Math.sin(animTimer * 28) * 0.28;
-
-    // ── Konngara Right-Triangle Blade Choreography (`|` -> `_` with 90° `∟` -> `/` flash) ──
-    if (this.moDashState === 'triangle') {
-      const lines = this.moDashLines;
-      const hasFullTriangle = lines.length >= 3;
-
-      // Subtle translucent crimson-gold fill flash when the Hypotenuse closes the Right Triangle
-      if (hasFullTriangle) {
-        const hypo = lines[2];
-        const fillAlpha = hypo.active
-          ? 0.08 + hypo.progress * 0.16 * pulse
-          : 0.1 * hypo.progress;
-        if (fillAlpha > 0.01) {
-          g.beginFill(0xff2b5b, fillAlpha);
-          g.moveTo(lines[0].x1 * scaleX, lines[0].y1 * scaleY);
-          g.lineTo(lines[0].x2 * scaleX, lines[0].y2 * scaleY);
-          g.lineTo(lines[1].x2 * scaleX, lines[1].y2 * scaleY);
-          g.closePath();
-          g.endFill();
-        }
-      }
-
-      for (let idx = 0; idx < lines.length; idx++) {
-        const line = lines[idx];
-        if (line.completed) continue;
-        const x1 = line.x1 * scaleX;
-        const y1 = line.y1 * scaleY;
-        const p = Math.max(0, Math.min(1, line.progress));
-        // Active line draws progressively from start -> end; completed/fading legs span full length
-        const drawT = line.active ? p : 1;
-        const fadeAlpha = line.active ? 1 : hasFullTriangle && !lines[2].active ? p : 0.85;
-        const ex = x1 + (line.x2 * scaleX - x1) * drawT;
-        const ey = y1 + (line.y2 * scaleY - y1) * drawT;
-
-        // Distinct color per Right-Triangle side:
-        // 0 = Vertical leg `|` (electric lime-gold), 1 = Horizontal leg `_` (cyan-white), 2 = Hypotenuse `/` (crimson-gold)
-        const outerColor = idx === 0 ? 0xfacc15 : idx === 1 ? 0x38bdf8 : 0xff2b5b;
-        const coreColor = idx === 0 ? 0xfef9c3 : idx === 1 ? 0xffffff : 0xfde047;
-        const outerWidth = line.active ? 16 : 9;
-        const coreWidth = line.active ? 4.2 : 2.2;
-
-        g.lineStyle(outerWidth, outerColor, 0.34 * pulse * fadeAlpha);
-        g.moveTo(x1, y1);
-        g.lineTo(ex, ey);
-
-        g.lineStyle(coreWidth, coreColor, 0.96 * fadeAlpha);
-        g.moveTo(x1, y1);
-        g.lineTo(ex, ey);
-
-        // Glowing sword-tip spark while actively slicing
-        if (line.active && drawT < 0.99) {
-          g.lineStyle(0);
-          g.beginFill(outerColor, 0.5);
-          g.drawCircle(ex, ey, 11);
-          g.endFill();
-          g.beginFill(0xffffff, 0.95);
-          g.drawCircle(ex, ey, 4.5);
-          g.endFill();
-        }
-      }
-
-      // Draw crisp 90° Right-Angle square corner marker (`∟`) once Horizontal leg starts!
-      if (lines.length >= 2) {
-        const vLeg = lines[0];
-        const hLeg = lines[1];
-        const bx = vLeg.x2 * scaleX;
-        const by = vLeg.y2 * scaleY;
-        const signY = vLeg.y1 < vLeg.y2 ? -1 : 1;
-        const signX = hLeg.x2 < hLeg.x1 ? -1 : 1;
-        const box = 16;
-        const cornerAlpha = lines.length >= 3 && !lines[2].active ? lines[2].progress : 0.9;
-        g.lineStyle(2, 0xfef08a, 0.9 * cornerAlpha);
-        g.moveTo(bx + signX * box, by);
-        g.lineTo(bx + signX * box, by + signY * box);
-        g.lineTo(bx, by + signY * box);
-      }
-
-      g.lineStyle(0);
-      return;
-    }
-
-    // ── Physical Right-Triangle Dash Telegraph / Trail (Phase 3 & periodic P5) ──
     const isDash = this.moDashState === 'dashing';
+    const pulse = 0.68 + Math.sin(animTimer * 28) * 0.32;
 
+    // Render full sacred-geometry tackle telegraph / active slash trail
     for (let idx = 0; idx < this.moDashLines.length; idx++) {
       const line = this.moDashLines[idx];
       if (line.completed) continue;
@@ -389,38 +308,45 @@ export class Boss {
 
       const isActiveLine = isDash && line.active;
       const isReturn = Boolean(line.isReturn);
-      const outerColor = isReturn ? 0x00f2fe : 0xff2b5b;
-      const outerAlpha = isActiveLine ? 0.5 : isReturn ? 0.16 * pulse : 0.24 * pulse;
-      const outerWidth = isActiveLine ? 22 : isReturn ? 7 : 11 + line.progress * 6;
-      const coreAlpha = isActiveLine ? 0.96 : isReturn ? 0.48 * pulse : 0.68 * pulse;
-      const coreWidth = isActiveLine ? 5 : isReturn ? 1.8 : 2.5;
+      // Alternating geometric palette during telegraph (gold / cyan / crimson) so vertices read clearly
+      const telegraphColor = isReturn ? 0x00f2fe : idx === 0 ? 0xfacc15 : idx % 2 === 1 ? 0x38bdf8 : 0xff2b5b;
+      const outerColor = isActiveLine ? 0xff2b5b : telegraphColor;
+      const outerAlpha = isActiveLine ? 0.52 : isReturn ? 0.16 * pulse : (idx === 0 ? 0.34 : 0.22) * pulse;
+      const outerWidth = isActiveLine ? 22 : isReturn ? 7 : 10 + line.progress * 5;
+      const coreAlpha = isActiveLine ? 0.98 : isReturn ? 0.45 * pulse : (idx === 0 ? 0.88 : 0.62) * pulse;
+      const coreWidth = isActiveLine ? 5 : isReturn ? 1.8 : 2.6;
 
       g.lineStyle(outerWidth, outerColor, outerAlpha);
       g.moveTo(x1, y1);
       g.lineTo(x2, y2);
 
-      g.lineStyle(coreWidth, isReturn ? 0xfef08a : 0xffffff, coreAlpha);
+      g.lineStyle(coreWidth, isActiveLine ? 0xfde047 : isReturn ? 0xfef08a : 0xffffff, coreAlpha);
       g.moveTo(x1, y1);
       g.lineTo(x2, y2);
 
-      if (isReturn) {
-        g.lineStyle(2, 0x00f2fe, 0.85);
-        g.drawCircle(x2, y2, 16 * (0.85 + Math.sin(animTimer * 8) * 0.15));
+      // Glowing bounce-vertex node rings at each corner of the geometric tackle!
+      if (!isReturn) {
+        const nodeR = isActiveLine ? 12 : 8.5 * (0.85 + Math.sin(animTimer * 14 + idx) * 0.15);
+        g.lineStyle(2, outerColor, 0.82 * pulse);
+        g.drawCircle(x2, y2, nodeR);
+      } else {
+        g.lineStyle(2, 0x00f2fe, 0.8);
+        g.drawCircle(x2, y2, 14 * (0.85 + Math.sin(animTimer * 8) * 0.15));
       }
     }
     g.lineStyle(0);
 
-    // High-speed afterimage trail while M.O dashes along the active line
+    // High-speed crimson-gold afterimage trail while M.O. physically tackles along the active edge
     const activeLine = this.moDashLines.find((l) => l.active);
     if (isDash && activeLine) {
       const sx = activeLine.x1 * scaleX;
       const sy = activeLine.y1 * scaleY;
-      for (let i = 1; i <= 4; i++) {
-        const t = i / 5;
+      for (let i = 1; i <= 5; i++) {
+        const t = i / 6;
         const ax = sx + (this.pos.x - sx) * t;
         const ay = sy + (this.pos.y - sy) * t;
-        g.beginFill(activeLine.isReturn ? 0x00f2fe : 0xff2b5b, 0.18 * t);
-        g.drawCircle(ax, ay, 24 * t);
+        g.beginFill(activeLine.isReturn ? 0x00f2fe : i % 2 === 0 ? 0xfde047 : 0xff2b5b, 0.2 * t);
+        g.drawCircle(ax, ay, 25 * t);
         g.endFill();
       }
     }

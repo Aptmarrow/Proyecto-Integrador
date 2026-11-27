@@ -686,6 +686,11 @@ export interface BulletSpawnOpts {
   homeTime?: number;
   splitOnImpact?: boolean;
   splitCount?: number;
+  delay?: number;
+  turnAfter?: number;
+  turnAngle?: number;
+  turnSpeedMult?: number;
+  turnColor?: number;
 }
 
 export function fireNormalBossPattern(

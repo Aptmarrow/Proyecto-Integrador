@@ -25,6 +25,12 @@ class Bullet {
     this.splitOnImpact = false;
     this.splitCount    = 6;
     this.age           = 0;
+    this.delay         = 0;
+    this.turnAfter     = 0;
+    this.turnAngle     = 0;
+    this.turnSpeedMult = 1;
+    this.turnColor     = null;
+    this._turned       = false;
     // Spatial hash tracking (set by SpatialHash)
     this._cellX  = NaN;
     this._cellY  = NaN;
@@ -55,13 +61,37 @@ class Bullet {
     this.splitOnImpact = Boolean(opts?.splitOnImpact);
     this.splitCount    = opts?.splitCount || 6;
     this.age           = 0;
+    this.delay         = Math.max(0, Number(opts?.delay) || 0);
+    this.turnAfter     = Math.max(0, Number(opts?.turnAfter) || 0);
+    this.turnAngle     = Number(opts?.turnAngle) || 0;
+    this.turnSpeedMult = Number(opts?.turnSpeedMult) || 1;
+    this.turnColor     = opts?.turnColor ?? null;
+    this._turned       = false;
     this._cellX  = NaN;
     this._cellY  = NaN;
     return this;
   }
 
   update(deltaTime, targetPos = null) {
+    // Suspended wake phase: bullet glows stationary along boss tackle trail until delay expires
+    if (this.delay > 0) {
+      this.delay = Math.max(0, this.delay - deltaTime);
+      return;
+    }
+
     this.age += deltaTime;
+
+    // Scheduled Konngara-style path twist mid-flight
+    if (!this._turned && this.turnAfter > 0 && this.age >= this.turnAfter) {
+      this._turned = true;
+      const spd = Math.hypot(this.vx, this.vy) * (this.turnSpeedMult || 1);
+      const nextAngle = Math.atan2(this.vy, this.vx) + this.turnAngle;
+      this.vx = Math.cos(nextAngle) * spd;
+      this.vy = Math.sin(nextAngle) * spd;
+      if (this.turnColor !== null && this.turnColor !== undefined) {
+        this.color = this.turnColor;
+      }
+    }
 
     if (this.expAccel !== 0) {
       const spd = Math.hypot(this.vx, this.vy);

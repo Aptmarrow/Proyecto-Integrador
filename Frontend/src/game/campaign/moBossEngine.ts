@@ -1,9 +1,9 @@
 /**
- * Reworked Boss 3-3: M.O. (Mechanical Ophanim) — Konngara (Touhou 1) Right-Triangle Edition.
- * Mirrored 1:1 with Backend/src/game/campaign/moBossEngine.js for local sandbox/Boss Dev Lab.
+ * Boss 3-3: M.O. (Mechanical Ophanim) — Sacred-Geometry Tackle Rework (Konngara Aesthetic).
+ * Mirrored 1:1 with Backend/src/game/campaign/moBossEngine.js for local sandbox / Boss Dev Lab.
  */
 
-export const MO_HOME_X = 648;
+export const MO_HOME_X = 650;
 export const MO_HOME_Y = 300;
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
@@ -19,36 +19,36 @@ export interface MoDashLine {
   isReturn?: boolean;
 }
 
+interface TackleSegment {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  kind: string;
+  speed: number;
+  isReturn: boolean;
+  edgeIndex?: number;
+  totalArms?: number;
+  centerX?: number;
+  centerY?: number;
+}
+
 export interface MoBossRuntimeState {
-  mode: 'intro' | 'triangle' | 'dash_telegraph' | 'dash_active' | 'resting';
+  mode: 'intro' | 'telegraph' | 'dashing' | 'resting';
   timer: number;
   introDuration: number;
   cycleIndex: number;
   flipY: 1 | -1;
-  strokeStage: number;
-  strokeTimer: number;
-  railEmitAccum: number;
-  railShotsLeft: number;
-  twistShotsLeft: number;
-  twistEmitAccum: number;
-  corridorAngle: number;
-  twistAngle: number;
-  gapY: number;
-  upperAnchor: { x: number; y: number; vx: number; vy: number } | null;
-  lowerAnchor: { x: number; y: number; vx: number; vy: number } | null;
-  twistUpperPivot: { x: number; y: number } | null;
-  twistLowerPivot: { x: number; y: number } | null;
-  triA: { x: number; y: number };
-  triB: { x: number; y: number };
-  triC: { x: number; y: number };
-  dashChain: Array<{ x1: number; y1: number; x2: number; y2: number; isReturn?: boolean }>;
+  shapeKind: string;
+  dashChain: TackleSegment[];
   segIndex: number;
+  segProgressLastEmit: number;
   dashHitPlayers: Set<string>;
-  sparkAccum: number;
   restDuration: number;
   restShotAccum: number;
   summonTimer: number;
   lastPhaseSeen: number;
+  gapY: number;
 }
 
 export interface MoBossAdapter {
@@ -93,44 +93,44 @@ export interface MoBulletEmitter {
 
 export const MO_PHASE_DEFS = [
   {
-    name: 'Fase 1 "Cateto Axial"',
-    pattern: 'mo_konngara_p1',
+    name: 'Fase 1 "Tacle: Triángulo Rectángulo"',
+    pattern: 'mo_tackle_triangle',
     shootInterval: 0.5,
     laserMode: 'none' as const,
     laserInterval: 99,
     megaLaserInterval: 0,
   },
   {
-    name: 'Sello Konngara "Corredor del Triángulo Rectángulo"',
-    pattern: 'mo_konngara_p2',
+    name: 'Sello Ophanim "Tacle: Reloj de Arena"',
+    pattern: 'mo_tackle_hourglass',
     shootInterval: 0.45,
     laserMode: 'none' as const,
     laserInterval: 99,
     megaLaserInterval: 0,
   },
   {
-    name: 'Fase 3 "Sierra del Triángulo"',
-    pattern: 'mo_konngara_p3',
+    name: 'Fase 3 "Tacle: Estrella Pentagrama"',
+    pattern: 'mo_tackle_star',
     shootInterval: 0.4,
     laserMode: 'none' as const,
     laserInterval: 99,
     megaLaserInterval: 0,
   },
   {
-    name: 'Protocolo Serafín "Doble Corredor Inverso"',
-    pattern: 'mo_konngara_p4',
+    name: 'Protocolo Serafín "Tacle: Relámpago Trenzado"',
+    pattern: 'mo_tackle_lightning',
     shootInterval: 0.35,
     laserMode: 'none' as const,
     laserInterval: 99,
-    megaLaserInterval: 9.0,
+    megaLaserInterval: 9.5,
   },
   {
-    name: 'Protocolo Final "MECHANICAL OPHANIM · TRIÁNGULO ETERNO"',
-    pattern: 'mo_konngara_p5',
+    name: 'Protocolo Final "MECHANICAL OPHANIM · ESPIRAL ETERNA"',
+    pattern: 'mo_tackle_spiral',
     shootInterval: 0.3,
     laserMode: 'none' as const,
     laserInterval: 99,
-    megaLaserInterval: 8.0,
+    megaLaserInterval: 8.5,
   },
 ];
 
@@ -141,268 +141,423 @@ export function createInitialMoState(introDuration = 3.8): MoBossRuntimeState {
     introDuration: introDuration || 3.8,
     cycleIndex: 0,
     flipY: 1,
-    strokeStage: 0,
-    strokeTimer: 0,
-    railEmitAccum: 0,
-    railShotsLeft: 0,
-    twistShotsLeft: 0,
-    twistEmitAccum: 0,
-    corridorAngle: Math.PI + 0.4,
-    twistAngle: Math.PI - 0.46,
-    gapY: MO_HOME_Y,
-    upperAnchor: null,
-    lowerAnchor: null,
-    twistUpperPivot: null,
-    twistLowerPivot: null,
-    triA: { x: MO_HOME_X - 42, y: MO_HOME_Y - 78 },
-    triB: { x: MO_HOME_X - 42, y: MO_HOME_Y + 78 },
-    triC: { x: MO_HOME_X - 188, y: MO_HOME_Y + 78 },
+    shapeKind: 'triangle',
     dashChain: [],
     segIndex: 0,
+    segProgressLastEmit: 0,
     dashHitPlayers: new Set<string>(),
-    sparkAccum: 0,
-    restDuration: 1.6,
+    restDuration: 1.5,
     restShotAccum: 0,
     summonTimer: 3.0,
     lastPhaseSeen: 1,
+    gapY: MO_HOME_Y,
   };
 }
 
 export function resetMoCycleForPhase(state: MoBossRuntimeState, phase: number): void {
-  state.mode = phase === 3 ? 'dash_telegraph' : 'triangle';
+  state.mode = 'telegraph';
   state.timer = 0;
-  state.strokeStage = 0;
-  state.strokeTimer = 0;
-  state.railEmitAccum = 0;
-  state.railShotsLeft = 0;
-  state.twistShotsLeft = 0;
-  state.twistEmitAccum = 0;
-  state.upperAnchor = null;
-  state.lowerAnchor = null;
-  state.twistUpperPivot = null;
-  state.twistLowerPivot = null;
   state.dashChain = [];
   state.segIndex = 0;
+  state.segProgressLastEmit = 0;
   state.dashHitPlayers = new Set<string>();
-  state.sparkAccum = 0;
   state.restShotAccum = 0;
   state.lastPhaseSeen = phase;
 }
 
-function computeRightTriangleVertices(bx: number, by: number, flipY: 1 | -1, scale = 1.0) {
-  const halfH = 74 * scale;
-  const legW = 148 * scale;
-  const ax = Math.max(360, bx - 44);
-  const ay = Math.max(46, Math.min(WORLD_HEIGHT - 46, by - flipY * halfH));
-  const byCorner = Math.max(46, Math.min(WORLD_HEIGHT - 46, by + flipY * halfH));
-  const cx = Math.max(180, ax - legW);
-  return {
-    triA: { x: Math.round(ax), y: Math.round(ay) },
-    triB: { x: Math.round(ax), y: Math.round(byCorner) },
-    triC: { x: Math.round(cx), y: Math.round(byCorner) },
-  };
-}
-
-function buildPhysicalRightTriangleDash(flipY: 1 | -1, playerPos?: { x: number; y: number } | null) {
-  const rightX = 650;
-  const leftX = Math.max(210, Math.min(320, Math.round((playerPos?.x ?? 200) + 85)));
-  const topY = 118;
-  const botY = WORLD_HEIGHT - 118;
-  const A = { x: rightX, y: flipY > 0 ? topY : botY };
-  const B = { x: rightX, y: flipY > 0 ? botY : topY };
-  const C = { x: leftX, y: B.y };
-  return [
-    { x1: A.x, y1: A.y, x2: B.x, y2: B.y, isReturn: false },
-    { x1: B.x, y1: B.y, x2: C.x, y2: C.y, isReturn: false },
-    { x1: C.x, y1: C.y, x2: A.x, y2: A.y, isReturn: false },
-    { x1: A.x, y1: A.y, x2: MO_HOME_X, y2: MO_HOME_Y, isReturn: true },
-  ];
-}
-
-function fireStroke1SplitWall(
-  boss: MoBossAdapter,
-  state: MoBossRuntimeState,
-  playerPos: { x: number; y: number } | null,
-  emitter: MoBulletEmitter,
-  statScale: number,
-  phase: number
-): void {
-  const dmg = Number((4.5 * statScale).toFixed(1));
-  const rawPlayerY = playerPos?.y ?? MO_HOME_Y;
-  const offset = state.flipY * (phase >= 4 ? 42 : 28);
-  const gapY = Math.max(175, Math.min(WORLD_HEIGHT - 175, rawPlayerY + offset));
-  state.gapY = gapY;
-
-  const spawnX = Math.max(540, boss.x - 32);
-  const initialHalfGap = phase >= 4 ? 32 : 38;
-  const bulletsPerSide = phase >= 4 ? 9 : 7;
-  const spacing = 24;
-  const wallSpeedX = -(148 + phase * 8) * statScale;
-  const gapExpandVy = (34 + phase * 3) * statScale;
-
-  state.upperAnchor = { x: spawnX, y: gapY - initialHalfGap, vx: wallSpeedX, vy: -gapExpandVy };
-  state.lowerAnchor = { x: spawnX, y: gapY + initialHalfGap, vx: wallSpeedX, vy: gapExpandVy };
-
-  for (let k = 0; k < bulletsPerSide; k++) {
-    const isEdge = k === 0;
-    const uy = gapY - initialHalfGap - k * spacing;
-    const ly = gapY + initialHalfGap + k * spacing;
-    const radius = isEdge ? 7.2 : 5.2;
-    const color = isEdge ? 0xfde047 : 0xfef9c3;
-
-    if (uy >= 16 && uy <= WORLD_HEIGHT - 16) {
-      emitter.spawnVelocity(spawnX, uy, wallSpeedX, -gapExpandVy, radius, 5.5, dmg, color);
-    }
-    if (ly >= 16 && ly <= WORLD_HEIGHT - 16) {
-      emitter.spawnVelocity(spawnX, ly, wallSpeedX, gapExpandVy, radius, 5.5, dmg, color);
-    }
-  }
-
-  if (phase >= 4 && playerPos) {
-    const aim = Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x);
-    for (const off of [-0.36, 0.36]) {
-      emitter.spawn(boss.x - 20, boss.y, aim + off, 225 * statScale, 4.8, 4.0, dmg, 0xef4444, {
-        spriteType: 'MObullet1png',
-      });
-    }
-  }
-}
-
-function emitStroke2CorridorBead(
-  state: MoBossRuntimeState,
-  emitter: MoBulletEmitter,
-  statScale: number,
+function buildPhaseTackleChain(
   phase: number,
-  isFirstBeat: boolean
-): void {
-  if (!state.upperAnchor || !state.lowerAnchor) return;
-  const dmg = Number((4.5 * statScale).toFixed(1));
-  const railSpeed = (242 + phase * 10) * statScale;
-  const angle = state.corridorAngle;
-
-  for (const anchor of [state.upperAnchor, state.lowerAnchor]) {
-    if (anchor.x < 40 || anchor.x > WORLD_WIDTH - 20 || anchor.y < 14 || anchor.y > WORLD_HEIGHT - 14) {
-      continue;
-    }
-    emitter.spawn(
-      anchor.x,
-      anchor.y,
-      angle,
-      railSpeed,
-      isFirstBeat ? 7.5 : 5.0,
-      4.2,
-      dmg,
-      isFirstBeat ? 0x38bdf8 : 0xe0f2fe
-    );
-  }
-}
-
-function emitStroke3TwistBead(
-  state: MoBossRuntimeState,
-  emitter: MoBulletEmitter,
-  statScale: number,
-  phase: number,
-  isFirstBeat: boolean
-): void {
-  if (!state.twistUpperPivot || !state.twistLowerPivot) return;
-  const dmg = Number((4.8 * statScale).toFixed(1));
-  const twistSpeed = (268 + phase * 12) * statScale;
-  const angle = state.twistAngle;
-
-  for (const pivot of [state.twistUpperPivot, state.twistLowerPivot]) {
-    if (pivot.x < 30 || pivot.x > WORLD_WIDTH - 20 || pivot.y < 14 || pivot.y > WORLD_HEIGHT - 14) {
-      continue;
-    }
-    emitter.spawn(
-      pivot.x,
-      pivot.y,
-      angle,
-      twistSpeed,
-      isFirstBeat ? 7.8 : 5.0,
-      4.0,
-      dmg,
-      isFirstBeat ? 0xff2b5b : 0xfde047,
-      isFirstBeat ? null : { spriteType: 'MObullet3png' }
-    );
-  }
-}
-
-function fireHypotenuseFlourish(
-  boss: MoBossAdapter,
-  state: MoBossRuntimeState,
+  flipY: 1 | -1,
   playerPos: { x: number; y: number } | null,
-  emitter: MoBulletEmitter,
-  statScale: number,
-  phase: number
-): void {
-  const dmg = Number((5.0 * statScale).toFixed(1));
-  const { triA, triC } = state;
-  const hypoAngle = Math.atan2(triA.y - triC.y, triA.x - triC.x);
+  cycleIndex: number
+): { shapeKind: string; gapY: number; chain: TackleSegment[] } {
+  const f = flipY >= 0 ? 1 : -1;
+  const px = Math.max(140, Math.min(340, Math.round(playerPos?.x ?? 200)));
+  const py = Math.max(155, Math.min(WORLD_HEIGHT - 155, Math.round(playerPos?.y ?? MO_HOME_Y)));
 
   if (phase === 1) {
-    for (let k = 0; k < 5; k++) {
-      const u = (k + 0.5) / 5;
-      const sx = triC.x + (triA.x - triC.x) * u;
-      const sy = triC.y + (triA.y - triC.y) * u;
-      const aim = playerPos ? Math.atan2(playerPos.y - sy, playerPos.x - sx) : Math.PI;
-      emitter.spawn(sx, sy, aim, 210 * statScale, 4.6, 4.2, dmg, 0xfef08a, {
-        spriteType: 'MObullet3png',
+    const rightX = 640;
+    const leftX = Math.max(255, px + 80);
+    const yA = f > 0 ? 96 : WORLD_HEIGHT - 96;
+    const yB = f > 0 ? WORLD_HEIGHT - 96 : 96;
+    return {
+      shapeKind: 'triangle',
+      gapY: py,
+      chain: [
+        { x1: rightX, y1: yA, x2: rightX, y2: yB, kind: 'tri_vert', speed: 940, isReturn: false },
+        { x1: rightX, y1: yB, x2: leftX, y2: yB, kind: 'tri_horiz', speed: 1020, isReturn: false },
+        { x1: leftX, y1: yB, x2: rightX, y2: yA, kind: 'tri_hypo', speed: 1120, isReturn: false },
+        { x1: rightX, y1: yA, x2: MO_HOME_X, y2: MO_HOME_Y, kind: 'return', speed: 920, isReturn: true },
+      ],
+    };
+  }
+
+  if (phase === 2) {
+    const rX = 655;
+    const lX = 265;
+    const tY = f > 0 ? 102 : WORLD_HEIGHT - 102;
+    const bY = f > 0 ? WORLD_HEIGHT - 102 : 102;
+    return {
+      shapeKind: 'hourglass',
+      gapY: py,
+      chain: [
+        { x1: rX, y1: tY, x2: lX, y2: bY, kind: 'hg_diag1', speed: 1060, isReturn: false },
+        { x1: lX, y1: bY, x2: lX, y2: tY, kind: 'hg_capL', speed: 1080, isReturn: false },
+        { x1: lX, y1: tY, x2: rX, y2: bY, kind: 'hg_diag2', speed: 1120, isReturn: false },
+        { x1: rX, y1: bY, x2: rX, y2: tY, kind: 'hg_capR', speed: 1040, isReturn: false },
+        { x1: rX, y1: tY, x2: MO_HOME_X, y2: MO_HOME_Y, kind: 'return', speed: 960, isReturn: true },
+      ],
+    };
+  }
+
+  if (phase === 3) {
+    const cx = 485;
+    const cy = 300;
+    const r = 212;
+    const rotOffset = -Math.PI / 2 + (cycleIndex % 2) * (Math.PI / 5);
+    const pts: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < 5; i++) {
+      const a = rotOffset + (i * Math.PI * 2) / 5;
+      pts.push({
+        x: Math.round(cx + Math.cos(a) * r),
+        y: Math.round(cy + Math.sin(a) * r),
+      });
+    }
+    const order = [0, 2, 4, 1, 3, 0];
+    const chain: TackleSegment[] = [];
+    for (let i = 0; i < 5; i++) {
+      const p0 = pts[order[i]];
+      const p1 = pts[order[i + 1]];
+      chain.push({
+        x1: p0.x,
+        y1: p0.y,
+        x2: p1.x,
+        y2: p1.y,
+        kind: 'star_edge',
+        edgeIndex: i,
+        centerX: cx,
+        centerY: cy,
+        speed: 1160,
+        isReturn: false,
+      });
+    }
+    chain.push({
+      x1: pts[0].x,
+      y1: pts[0].y,
+      x2: MO_HOME_X,
+      y2: MO_HOME_Y,
+      kind: 'return',
+      speed: 980,
+      isReturn: true,
+    });
+    return { shapeKind: 'star', gapY: py, chain };
+  }
+
+  if (phase === 4) {
+    const topY = f > 0 ? 105 : WORLD_HEIGHT - 105;
+    const botY = f > 0 ? WORLD_HEIGHT - 105 : 105;
+    const verts = [
+      { x: 685, y: topY },
+      { x: 575, y: botY },
+      { x: 465, y: topY },
+      { x: 355, y: botY },
+      { x: 245, y: topY },
+    ];
+    const chain: TackleSegment[] = [];
+    for (let i = 0; i < verts.length - 1; i++) {
+      chain.push({
+        x1: verts[i].x,
+        y1: verts[i].y,
+        x2: verts[i + 1].x,
+        y2: verts[i + 1].y,
+        kind: i % 2 === 0 ? 'zig_down' : 'zig_up',
+        edgeIndex: i,
+        speed: 1220,
+        isReturn: false,
+      });
+    }
+    const last = verts[verts.length - 1];
+    chain.push({
+      x1: last.x,
+      y1: last.y,
+      x2: MO_HOME_X,
+      y2: MO_HOME_Y,
+      kind: 'zig_return',
+      speed: 1180,
+      isReturn: true,
+    });
+    return { shapeKind: 'lightning', gapY: py, chain };
+  }
+
+  // P5: Inward Mechanical Square Spiral
+  const y1 = f > 0 ? 92 : WORLD_HEIGHT - 92;
+  const y2 = f > 0 ? WORLD_HEIGHT - 92 : 92;
+  const y3 = f > 0 ? 178 : WORLD_HEIGHT - 178;
+  const y4 = f > 0 ? WORLD_HEIGHT - 178 : 178;
+  const spiralPts = [
+    { x: 685, y: y1 },
+    { x: 255, y: y1 },
+    { x: 255, y: y2 },
+    { x: 615, y: y2 },
+    { x: 615, y: y3 },
+    { x: 335, y: y3 },
+    { x: 335, y: y4 },
+    { x: 525, y: y4 },
+    { x: 465, y: 300 },
+  ];
+  const chain: TackleSegment[] = [];
+  for (let i = 0; i < spiralPts.length - 1; i++) {
+    chain.push({
+      x1: spiralPts[i].x,
+      y1: spiralPts[i].y,
+      x2: spiralPts[i + 1].x,
+      y2: spiralPts[i + 1].y,
+      kind: 'spiral_arm',
+      edgeIndex: i,
+      totalArms: spiralPts.length - 1,
+      centerX: 465,
+      centerY: 300,
+      speed: 1240 + i * 35,
+      isReturn: false,
+    });
+  }
+  chain.push({
+    x1: 465,
+    y1: 300,
+    x2: MO_HOME_X,
+    y2: MO_HOME_Y,
+    kind: 'spiral_core_return',
+    speed: 1040,
+    isReturn: true,
+  });
+  return { shapeKind: 'spiral', gapY: py, chain };
+}
+
+function estimateRemainingChainTime(chain: TackleSegment[], fromIndex: number, statScale: number): number {
+  let total = 0;
+  for (let i = fromIndex; i < chain.length; i++) {
+    const s = chain[i];
+    if (s.isReturn) break;
+    const len = Math.hypot(s.x2 - s.x1, s.y2 - s.y1) || 1;
+    total += Math.max(0.18, Math.min(0.55, len / ((s.speed || 1050) * statScale)));
+  }
+  return total;
+}
+
+function emitTackleWakeNode(
+  state: MoBossRuntimeState,
+  seg: TackleSegment,
+  u: number,
+  emitter: MoBulletEmitter,
+  statScale: number
+): void {
+  const dmg = Number((4.5 * statScale).toFixed(1));
+  const x = seg.x1 + (seg.x2 - seg.x1) * u;
+  const y = seg.y1 + (seg.y2 - seg.y1) * u;
+  const segAngle = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
+  const f = state.flipY >= 0 ? 1 : -1;
+
+  if (seg.kind === 'tri_vert') {
+    const distFromGap = Math.abs(y - state.gapY);
+    if (distFromGap < 44) return;
+    const isEdge = distFromGap < 82;
+    const sideSign = y < state.gapY ? -1 : 1;
+    const vx = -168 * statScale;
+    const vy = sideSign * 34 * statScale;
+    emitter.spawnVelocity(x, y, vx, vy, isEdge ? 7.2 : 5.2, 5.2, dmg, isEdge ? 0xfde047 : 0xfef9c3, {
+      delay: 0.32,
+    });
+    if (isEdge) {
+      const corridorAngle = Math.PI + f * 0.36;
+      const twistDelta = -f * 0.82;
+      for (let b = 0; b < 4; b++) {
+        emitter.spawn(x - b * 14, y, corridorAngle, 235 * statScale, 5.0, 4.8, dmg, 0x38bdf8, {
+          delay: 0.42 + b * 0.055,
+          turnAfter: 0.62,
+          turnAngle: twistDelta,
+          turnSpeedMult: 1.12,
+          turnColor: 0xff2b5b,
+        });
+      }
+    }
+    return;
+  }
+
+  if (seg.kind === 'tri_horiz') {
+    const launchAngle = Math.PI + f * 0.48;
+    emitter.spawn(x, y, launchAngle, 215 * statScale, 4.8, 4.6, dmg, 0x38bdf8, {
+      delay: 0.25 + (1 - u) * 0.14,
+      turnAfter: 0.52,
+      turnAngle: -f * 0.72,
+      turnSpeedMult: 1.14,
+      turnColor: 0xfde047,
+    });
+    return;
+  }
+
+  if (seg.kind === 'tri_hypo') {
+    const perpLeft = segAngle + Math.PI / 2;
+    const perpRight = segAngle - Math.PI / 2;
+    const outward = Math.cos(perpLeft) <= 0 ? perpLeft : perpRight;
+    emitter.spawn(x, y, outward, 195 * statScale, 4.6, 4.4, dmg, 0xfef08a, {
+      spriteType: 'MObullet3png',
+      delay: 0.16,
+    });
+    return;
+  }
+
+  if (seg.kind === 'hg_diag1' || seg.kind === 'hg_diag2') {
+    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
+    const isFirst = seg.kind === 'hg_diag1';
+    const baseDelay = Math.max(0.18, rem + (isFirst ? 0.12 : 0.30));
+    const sgn = isFirst ? 1 : -1;
+    for (const dir of [-1, 1]) {
+      emitter.spawn(
+        x,
+        y,
+        segAngle + dir * (Math.PI / 2),
+        175 * statScale,
+        4.8,
+        5.0,
+        dmg,
+        isFirst ? 0x38bdf8 : 0xfde047,
+        {
+          delay: baseDelay,
+          turnAfter: 0.56,
+          turnAngle: sgn * 0.44,
+          turnSpeedMult: 1.15,
+          turnColor: isFirst ? 0xff2b5b : 0xfef08a,
+        }
+      );
+    }
+    return;
+  }
+
+  if (seg.kind === 'hg_capL' || seg.kind === 'hg_capR') {
+    if (Math.abs(u - 0.5) < 0.25) {
+      emitter.spawn(x, y, Math.PI, 220 * statScale, 5.0, 4.2, dmg, 0xef4444, {
+        spriteType: 'MObullet1png',
+        delay: 0.2,
       });
     }
     return;
   }
 
-  if (state.twistUpperPivot && state.twistLowerPivot) {
-    const midX = (state.twistUpperPivot.x + state.twistLowerPivot.x) * 0.5;
-    const midY = (state.twistUpperPivot.y + state.twistLowerPivot.y) * 0.5;
-    emitter.spawn(midX + 26, midY, state.corridorAngle, 205 * statScale, 5.0, 3.5, dmg, 0xef4444, {
-      spriteType: 'MObullet1png',
+  if (seg.kind === 'star_edge') {
+    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
+    const outwardAngle = Math.atan2(y - (seg.centerY ?? 300), x - (seg.centerX ?? 485));
+    emitter.spawn(x, y, outwardAngle, 188 * statScale, 5.0, 5.0, dmg, 0xfde047, {
+      delay: Math.max(0.18, rem + 0.22),
+      turnAfter: 0.58,
+      turnAngle: f * 0.32,
+      turnSpeedMult: 1.12,
+      turnColor: 0x38bdf8,
     });
+    return;
   }
 
-  if (phase === 4) {
-    const normal = hypoAngle + (state.flipY > 0 ? Math.PI / 2 : -Math.PI / 2);
-    const dirToLeft = Math.cos(normal) <= 0 ? normal : normal + Math.PI;
-    for (let k = 1; k <= 4; k++) {
-      const u = k / 5;
-      const sx = triC.x + (triA.x - triC.x) * u;
-      const sy = triC.y + (triA.y - triC.y) * u;
-      emitter.spawn(sx, sy, dirToLeft, 215 * statScale, 4.8, 4.2, dmg, 0xef4444, {
-        spriteType: 'MObullet1png',
-      });
-    }
+  if (seg.kind === 'zig_down' || seg.kind === 'zig_up') {
+    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
+    const isDown = seg.kind === 'zig_down';
+    const latticeAngle = isDown ? Math.PI + 0.50 : Math.PI - 0.50;
+    const snapDelta = isDown ? -0.52 : 0.52;
+    emitter.spawn(x, y, latticeAngle, 205 * statScale, 4.8, 5.0, dmg, isDown ? 0x38bdf8 : 0xfde047, {
+      delay: Math.max(0.16, rem + 0.14),
+      turnAfter: 0.62,
+      turnAngle: snapDelta,
+      turnSpeedMult: 1.16,
+      turnColor: 0xff2b5b,
+    });
+    return;
   }
 
-  if (phase >= 5) {
-    const ringCount = 12;
-    const rot = boss.animTimer * 1.1;
-    for (let k = 0; k < ringCount; k++) {
-      const a = rot + (Math.PI * 2 * k) / ringCount;
+  if (seg.kind === 'zig_return') {
+    emitter.spawn(x, y, Math.PI + (u - 0.5) * 0.55, 230 * statScale, 4.6, 4.2, dmg, 0xfef08a, {
+      spriteType: 'MObullet3png',
+      delay: 0.1,
+    });
+    return;
+  }
+
+  if (seg.kind === 'spiral_arm') {
+    if (u > 0.42 && u < 0.58) return;
+    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
+    const ringFromInside = Math.max(0, (seg.totalArms || 8) - 1 - (seg.edgeIndex || 0));
+    const cascadeDelay = Math.max(0.18, rem + 0.16 + ringFromInside * 0.08);
+    const outAngle = Math.atan2(y - (seg.centerY ?? 300), x - (seg.centerX ?? 465));
+    emitter.spawn(
+      x,
+      y,
+      outAngle,
+      195 * statScale,
+      5.0,
+      5.2,
+      dmg,
+      (seg.edgeIndex || 0) % 2 === 0 ? 0xfde047 : 0x38bdf8,
+      {
+        delay: cascadeDelay,
+        turnAfter: 0.52,
+        turnAngle: f * 0.48,
+        turnSpeedMult: 1.16,
+        turnColor: 0xff2b5b,
+      }
+    );
+  }
+}
+
+function emitTackleVertexBurst(
+  state: MoBossRuntimeState,
+  seg: TackleSegment,
+  emitter: MoBulletEmitter,
+  statScale: number
+): void {
+  const dmg = Number((4.8 * statScale).toFixed(1));
+  const vx = seg.x2;
+  const vy = seg.y2;
+
+  if (seg.kind === 'star_edge') {
+    const rem = estimateRemainingChainTime(state.dashChain, state.segIndex + 1, statScale);
+    const petals = 6;
+    const baseRot = (seg.edgeIndex || 0) * 0.42;
+    for (let k = 0; k < petals; k++) {
       emitter.spawn(
-        boss.x,
-        boss.y,
-        a,
-        185 * statScale,
+        vx,
+        vy,
+        baseRot + (Math.PI * 2 * k) / petals,
+        165 * statScale,
         4.8,
-        4.2,
+        4.8,
         dmg,
-        k % 2 === 0 ? 0xef4444 : 0xfde047,
-        { spriteType: k % 2 === 0 ? 'MObullet1png' : 'MObullet3png' }
+        0xef4444,
+        { spriteType: 'MObullet1png', delay: Math.max(0.18, rem + 0.22) }
       );
     }
-    if (state.cycleIndex % 2 === 1 && playerPos) {
-      const aim = Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x);
+    return;
+  }
+
+  if (seg.kind === 'spiral_arm' && seg.edgeIndex === (seg.totalArms || 8) - 1) {
+    for (const ang of [Math.PI - 0.35, Math.PI + 0.35]) {
       emitter.spawn(
-        boss.x - 24,
-        boss.y,
-        aim,
-        175 * statScale,
-        11.5,
+        vx,
+        vy,
+        ang,
+        185 * statScale,
+        11.2,
         5.5,
-        Number((7 * statScale).toFixed(1)),
+        Number((6.5 * statScale).toFixed(1)),
         0x9ca3af,
         { spriteType: 'MObullet4png', splitOnImpact: true, splitCount: 6 }
       );
+    }
+    return;
+  }
+
+  if (seg.kind === 'tri_vert' || seg.kind === 'tri_horiz') {
+    for (const off of [-0.3, 0, 0.3]) {
+      emitter.spawn(vx, vy, Math.PI + off, 190 * statScale, 4.4, 3.8, dmg, 0xfef08a, {
+        spriteType: 'MObullet3png',
+        delay: 0.14,
+      });
     }
   }
 }
@@ -451,7 +606,7 @@ export function updateWorkerMechanicalOphanim(
   const summonCount = phase >= 4 ? diffBonus : diffBonus >= 2 ? 1 : 0;
   if (onSpawnKamikaze && summonCount > 0) {
     state.summonTimer += dt;
-    const summonInterval = Math.max(4.8, 7.2 - phase * 0.4);
+    const summonInterval = Math.max(5.0, 7.5 - phase * 0.4);
     if (state.summonTimer >= summonInterval) {
       state.summonTimer = 0;
       const maxActive = Math.min(4, 1 + diffBonus);
@@ -461,16 +616,18 @@ export function updateWorkerMechanicalOphanim(
     }
   }
 
-  // Phase 3 / periodic P5: Physical Right-Triangle Dash inside arena
-  if (state.mode === 'dash_telegraph') {
+  if (state.mode === 'telegraph') {
     state.timer += dt;
     const duration = Math.max(0.75, 1.05 - phase * 0.04);
     if (state.dashChain.length === 0) {
-      state.dashChain = buildPhysicalRightTriangleDash(state.flipY, playerPos);
+      const built = buildPhaseTackleChain(phase, state.flipY, playerPos, state.cycleIndex);
+      state.shapeKind = built.shapeKind;
+      state.gapY = built.gapY;
+      state.dashChain = built.chain;
     }
     const first = state.dashChain[0];
-    boss.x += (first.x1 - boss.x) * Math.min(1, dt * 8);
-    boss.y += (first.y1 - boss.y) * Math.min(1, dt * 8);
+    boss.x += (first.x1 - boss.x) * Math.min(1, dt * 9);
+    boss.y += (first.y1 - boss.y) * Math.min(1, dt * 9);
     boss.angle = Math.atan2(first.y2 - first.y1, first.x2 - first.x1);
     boss.moDashState = 'telegraph';
 
@@ -487,29 +644,29 @@ export function updateWorkerMechanicalOphanim(
     }));
 
     if (state.timer >= duration) {
-      state.mode = 'dash_active';
+      state.mode = 'dashing';
       state.segIndex = 0;
       state.timer = 0;
+      state.segProgressLastEmit = 0;
       state.dashHitPlayers = new Set<string>();
-      state.sparkAccum = 0;
     }
     return;
   }
 
-  if (state.mode === 'dash_active') {
+  if (state.mode === 'dashing') {
     const seg = state.dashChain[state.segIndex];
     if (!seg) {
       state.mode = 'resting';
       state.timer = 0;
-      state.restDuration = phase >= 5 ? 1.0 : 1.7;
+      state.restDuration = Math.max(1.25, 1.9 - phase * 0.1);
       state.restShotAccum = 0;
       boss.moDashLines = [];
       return;
     }
 
     const segLen = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1) || 1;
-    const speed = (seg.isReturn ? 950 : 980 + phase * 90) * statScale;
-    const segDur = Math.max(0.24, Math.min(0.62, segLen / speed));
+    const speed = (seg.speed || 1050) * statScale;
+    const segDur = Math.max(0.18, Math.min(0.56, segLen / speed));
     const prevX = boss.x;
     const prevY = boss.y;
 
@@ -539,27 +696,21 @@ export function updateWorkerMechanicalOphanim(
         isReturn: Boolean(s.isReturn),
       }));
 
-    state.sparkAccum += dt;
-    const wakeInterval = Math.max(0.055, 0.085 - phase * 0.005);
-    if (!seg.isReturn && state.sparkAccum >= wakeInterval) {
-      state.sparkAccum = 0;
-      const perpSpeed = 128 * statScale;
-      for (const sgn of [-1, 1]) {
-        emitter.spawn(
-          boss.x,
-          boss.y,
-          boss.angle + sgn * (Math.PI / 2),
-          perpSpeed,
-          4.4,
-          4.2,
-          Math.max(1, Math.round(4 * statScale)),
-          0xfef08a,
-          { spriteType: 'MObullet3png' }
-        );
-      }
+    const nodesPerSeg =
+      seg.kind === 'tri_vert'
+        ? 11
+        : seg.kind === 'star_edge'
+          ? 7
+          : seg.kind === 'spiral_arm'
+            ? Math.max(4, Math.round(segLen / 46))
+            : Math.max(5, Math.round(segLen / 52));
+    const stepU = 1 / (nodesPerSeg + 1);
+    while (state.segProgressLastEmit + stepU <= ease && state.segProgressLastEmit + stepU < 0.98) {
+      state.segProgressLastEmit += stepU;
+      emitTackleWakeNode(state, seg, state.segProgressLastEmit, emitter, statScale);
     }
 
-    if (!seg.isReturn || rawT < 0.7) {
+    if (!seg.isReturn || rawT < 0.72) {
       for (let s = 1; s <= 4; s++) {
         const st = s / 4;
         onContactDamage(
@@ -575,13 +726,17 @@ export function updateWorkerMechanicalOphanim(
     if (rawT >= 1) {
       boss.x = seg.x2;
       boss.y = seg.y2;
+      if (!seg.isReturn) {
+        emitTackleVertexBurst(state, seg, emitter, statScale);
+      }
       state.segIndex += 1;
       state.timer = 0;
+      state.segProgressLastEmit = 0;
       state.dashHitPlayers = new Set<string>();
-      state.sparkAccum = 0;
+
       if (state.segIndex >= state.dashChain.length) {
         state.mode = 'resting';
-        state.restDuration = phase >= 5 ? 0.9 : 1.7;
+        state.restDuration = Math.max(1.25, 1.9 - phase * 0.1);
         state.restShotAccum = 0;
         boss.moDashLines = [];
       }
@@ -589,187 +744,37 @@ export function updateWorkerMechanicalOphanim(
     return;
   }
 
-  if (state.mode === 'resting') {
-    state.timer += dt;
-    boss.moDashState = 'resting';
-    boss.moDashLines = [];
+  // Vulnerable recovery hover
+  state.timer += dt;
+  boss.moDashState = 'resting';
+  boss.moDashLines = [];
 
-    const hoverY = MO_HOME_Y + Math.sin(state.timer * 2.2) * 55;
-    boss.x += (MO_HOME_X - boss.x) * Math.min(1, dt * 5.0);
-    boss.y += (hoverY - boss.y) * Math.min(1, dt * 5.0);
-    if (playerPos) {
-      boss.angle = Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x);
-    }
-
-    if (phase === 3) {
-      state.restShotAccum += dt;
-      if (state.restShotAccum >= 0.75) {
-        state.restShotAccum = 0;
-        const aim = playerPos ? Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x) : Math.PI;
-        for (const off of [-0.24, 0.24]) {
-          emitter.spawn(
-            boss.x - 24,
-            boss.y,
-            aim + off,
-            185 * statScale,
-            11.0,
-            5.5,
-            Number((6.5 * statScale).toFixed(1)),
-            0x9ca3af,
-            { spriteType: 'MObullet4png', splitOnImpact: true, splitCount: 6 }
-          );
-        }
-      }
-    }
-
-    if (state.timer >= (state.restDuration || 1.2)) {
-      state.cycleIndex += 1;
-      state.flipY = state.cycleIndex % 2 === 0 ? 1 : -1;
-      state.timer = 0;
-      if (phase === 3 || (phase === 5 && state.cycleIndex % 3 === 2)) {
-        state.mode = 'dash_telegraph';
-        state.dashChain = buildPhysicalRightTriangleDash(state.flipY, playerPos);
-        state.segIndex = 0;
-      } else {
-        state.mode = 'triangle';
-        state.strokeStage = 0;
-        state.strokeTimer = 0;
-        state.railShotsLeft = 0;
-        state.twistShotsLeft = 0;
-      }
-    }
-    return;
-  }
-
-  // Konngara Right-Triangle Corridor Cycle (`|` -> `_` -> `/`)
-  const targetX = MO_HOME_X + Math.cos(boss.animTimer * 1.1) * 24;
-  const targetY = MO_HOME_Y + Math.sin(boss.animTimer * 1.45) * 68;
-  boss.x += (targetX - boss.x) * Math.min(1, dt * 3.8);
-  boss.y += (targetY - boss.y) * Math.min(1, dt * 3.8);
+  const hoverX = MO_HOME_X + Math.cos(state.timer * 1.6) * 26;
+  const hoverY = MO_HOME_Y + Math.sin(state.timer * 2.4) * 58;
+  boss.x += (hoverX - boss.x) * Math.min(1, dt * 5.0);
+  boss.y += (hoverY - boss.y) * Math.min(1, dt * 5.0);
   if (playerPos) {
     boss.angle = Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x);
   }
 
-  if (state.upperAnchor) {
-    state.upperAnchor.x += state.upperAnchor.vx * dt;
-    state.upperAnchor.y += state.upperAnchor.vy * dt;
-  }
-  if (state.lowerAnchor) {
-    state.lowerAnchor.x += state.lowerAnchor.vx * dt;
-    state.lowerAnchor.y += state.lowerAnchor.vy * dt;
-  }
-
-  if (state.railShotsLeft > 0) {
-    state.railEmitAccum += dt;
-    const railStep = Math.max(0.036, 0.052 - phase * 0.002);
-    while (state.railShotsLeft > 0 && state.railEmitAccum >= railStep) {
-      state.railEmitAccum -= railStep;
-      const isFirst = state.railShotsLeft === (phase >= 4 ? 10 : 8);
-      emitStroke2CorridorBead(state, emitter, statScale, phase, isFirst);
-      state.railShotsLeft -= 1;
+  state.restShotAccum += dt;
+  if (state.restShotAccum >= Math.max(0.75, 1.15 - phase * 0.06)) {
+    state.restShotAccum = 0;
+    const aim = playerPos ? Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x) : Math.PI;
+    const spread = phase >= 4 ? [-0.28, 0, 0.28] : [-0.22, 0.22];
+    for (const off of spread) {
+      emitter.spawn(boss.x - 20, boss.y, aim + off, 205 * statScale, 4.6, 3.8, Number((4.5 * statScale).toFixed(1)), 0xef4444, {
+        spriteType: 'MObullet1png',
+      });
     }
   }
 
-  if (state.twistShotsLeft > 0) {
-    state.twistEmitAccum += dt;
-    const twistStep = Math.max(0.034, 0.048 - phase * 0.002);
-    while (state.twistShotsLeft > 0 && state.twistEmitAccum >= twistStep) {
-      state.twistEmitAccum -= twistStep;
-      const isFirst = state.twistShotsLeft === (phase >= 4 ? 10 : 8);
-      emitStroke3TwistBead(state, emitter, statScale, phase, isFirst);
-      state.twistShotsLeft -= 1;
-    }
-  }
-
-  const stroke1Dur = Math.max(0.42, 0.56 - phase * 0.02);
-  const stroke2Dur = Math.max(0.56, 0.72 - phase * 0.025);
-  const stroke3Dur = Math.max(0.52, 0.68 - phase * 0.025);
-  const holdDur = Math.max(0.45, 0.75 - phase * 0.05);
-
-  if (state.strokeStage === 0 && state.strokeTimer === 0) {
-    const verts = computeRightTriangleVertices(boss.x, boss.y, state.flipY, phase >= 4 ? 1.1 : 1.0);
-    state.triA = verts.triA;
-    state.triB = verts.triB;
-    state.triC = verts.triC;
-    fireStroke1SplitWall(boss, state, playerPos, emitter, statScale, phase);
-  }
-
-  state.strokeTimer += dt;
-  boss.moDashState = 'triangle';
-
-  const { triA, triB, triC } = state;
-  const drawTime = 0.24;
-
-  if (state.strokeStage === 0) {
-    const p0 = Math.min(1, state.strokeTimer / drawTime);
-    boss.moDashLines = [
-      { x1: triA.x, y1: triA.y, x2: triB.x, y2: triB.y, progress: Number(p0.toFixed(2)), active: true, completed: false, isReturn: false },
-    ];
-    if (state.strokeTimer >= stroke1Dur) {
-      state.strokeStage = 1;
-      state.strokeTimer = 0;
-      const slant = phase >= 4 ? 0.44 : 0.36;
-      state.corridorAngle = Math.PI + state.flipY * slant;
-      state.railShotsLeft = phase >= 4 ? 10 : 8;
-      state.railEmitAccum = 0.05;
-    }
-  } else if (state.strokeStage === 1) {
-    const p1 = Math.min(1, state.strokeTimer / drawTime);
-    boss.moDashLines = [
-      { x1: triA.x, y1: triA.y, x2: triB.x, y2: triB.y, progress: 1, active: false, completed: false, isReturn: false },
-      { x1: triB.x, y1: triB.y, x2: triC.x, y2: triC.y, progress: Number(p1.toFixed(2)), active: true, completed: false, isReturn: false },
-    ];
-    if (state.strokeTimer >= stroke2Dur) {
-      state.strokeStage = 2;
-      state.strokeTimer = 0;
-      if (state.upperAnchor && state.lowerAnchor) {
-        state.twistUpperPivot = { x: state.upperAnchor.x, y: state.upperAnchor.y };
-        state.twistLowerPivot = { x: state.lowerAnchor.x, y: state.lowerAnchor.y };
-      } else {
-        state.twistUpperPivot = { x: 430, y: state.gapY - 58 };
-        state.twistLowerPivot = { x: 430, y: state.gapY + 58 };
-      }
-      const twistSlant = phase >= 4 ? 0.50 : 0.44;
-      state.twistAngle = Math.PI - state.flipY * twistSlant;
-      if (phase >= 2) {
-        state.twistShotsLeft = phase >= 4 ? 10 : 8;
-        state.twistEmitAccum = 0.05;
-      }
-      fireHypotenuseFlourish(boss, state, playerPos, emitter, statScale, phase);
-    }
-  } else if (state.strokeStage === 2) {
-    const p2 = Math.min(1, state.strokeTimer / drawTime);
-    boss.moDashLines = [
-      { x1: triA.x, y1: triA.y, x2: triB.x, y2: triB.y, progress: 1, active: false, completed: false, isReturn: false },
-      { x1: triB.x, y1: triB.y, x2: triC.x, y2: triC.y, progress: 1, active: false, completed: false, isReturn: false },
-      { x1: triC.x, y1: triC.y, x2: triA.x, y2: triA.y, progress: Number(p2.toFixed(2)), active: true, completed: false, isReturn: true },
-    ];
-    if (state.strokeTimer >= stroke3Dur) {
-      state.strokeStage = 3;
-      state.strokeTimer = 0;
-    }
-  } else {
-    const fade = Math.max(0, 1 - state.strokeTimer / Math.max(0.2, holdDur * 0.6));
-    boss.moDashLines =
-      fade > 0.08
-        ? [
-            { x1: triA.x, y1: triA.y, x2: triB.x, y2: triB.y, progress: Number(fade.toFixed(2)), active: false, completed: false, isReturn: false },
-            { x1: triB.x, y1: triB.y, x2: triC.x, y2: triC.y, progress: Number(fade.toFixed(2)), active: false, completed: false, isReturn: false },
-            { x1: triC.x, y1: triC.y, x2: triA.x, y2: triA.y, progress: Number(fade.toFixed(2)), active: false, completed: false, isReturn: true },
-          ]
-        : [];
-
-    if (state.strokeTimer >= holdDur) {
-      state.cycleIndex += 1;
-      state.flipY = state.cycleIndex % 2 === 0 ? 1 : -1;
-      state.strokeStage = 0;
-      state.strokeTimer = 0;
-      if (phase === 5 && state.cycleIndex % 3 === 2) {
-        state.mode = 'dash_telegraph';
-        state.timer = 0;
-        state.dashChain = buildPhysicalRightTriangleDash(state.flipY, playerPos);
-        state.segIndex = 0;
-      }
-    }
+  if (state.timer >= (state.restDuration || 1.5)) {
+    state.cycleIndex += 1;
+    state.flipY = state.cycleIndex % 2 === 0 ? 1 : -1;
+    state.mode = 'telegraph';
+    state.timer = 0;
+    state.dashChain = [];
+    state.segIndex = 0;
   }
 }

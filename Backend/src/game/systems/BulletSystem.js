@@ -133,6 +133,7 @@ class BulletSystem {
       const candidates = this.hash.query(pos.x, pos.y, MAX_QUERY_R);
       for (const b of candidates) {
         if (toKill.has(b)) continue;
+        if (b.delay > 0) continue;
         if (b.ownerId === playerId) continue;
         if (b.ownerId !== 'boss') continue;
 

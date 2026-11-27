@@ -133,6 +133,12 @@ interface SimBullet {
   splitOnImpact?: boolean;
   splitCount?: number;
   age?: number;
+  delay?: number;
+  turnAfter?: number;
+  turnAngle?: number;
+  turnSpeedMult?: number;
+  turnColor?: number;
+  turned?: boolean;
 }
 
 interface SimWall {
@@ -1682,6 +1688,12 @@ class DanmakrewSimulationWorker {
       splitOnImpact: opts?.splitOnImpact,
       splitCount: opts?.splitCount,
       age: 0,
+      delay: Math.max(0, Number(opts?.delay) || 0),
+      turnAfter: Math.max(0, Number(opts?.turnAfter) || 0),
+      turnAngle: Number(opts?.turnAngle) || 0,
+      turnSpeedMult: Number(opts?.turnSpeedMult) || 1,
+      turnColor: opts?.turnColor,
+      turned: false,
     });
   }
 
@@ -1948,7 +1960,22 @@ class DanmakrewSimulationWorker {
 
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
+      if (b.delay && b.delay > 0) {
+        b.delay = Math.max(0, b.delay - dt);
+        continue;
+      }
       b.age = (b.age || 0) + dt;
+
+      if (!b.turned && b.turnAfter && b.turnAfter > 0 && b.age >= b.turnAfter) {
+        b.turned = true;
+        const spd = Math.hypot(b.vx, b.vy) * (b.turnSpeedMult || 1);
+        const nextAngle = Math.atan2(b.vy, b.vx) + (b.turnAngle || 0);
+        b.vx = Math.cos(nextAngle) * spd;
+        b.vy = Math.sin(nextAngle) * spd;
+        if (b.turnColor !== undefined) {
+          b.color = b.turnColor;
+        }
+      }
 
       if (b.expAccel && b.expAccel !== 0) {
         const spd = Math.hypot(b.vx, b.vy);

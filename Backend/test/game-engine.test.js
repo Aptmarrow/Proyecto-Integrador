@@ -175,7 +175,7 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     assert.ok(p2.y - 360 > 215 && p2.y - 360 < 260, `Expected p2 vertical move ~250 (clamped near wall), got ${p2.y - 360}`);
   });
 
-  it('executes M.O. (Mechanical Ophanim) Konngara right-triangle phases P1..P5 cleanly', () => {
+  it('executes M.O. (Mechanical Ophanim) 5 sacred-geometry tackle shapes cleanly', () => {
     const moRoom = new GameRoom('room-mo-rework', 'p1', {
       initialPhase: 'playing',
       difficulty: 'normal',
@@ -189,31 +189,34 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     // Finish M.O. intro (~4s)
     for (let i = 0; i < 250; i++) moRoom.update(1 / 60);
     assert.equal(moRoom.boss.moIntroActive, false);
-    assert.equal(moRoom.boss.moDashState, 'triangle');
+    assert.equal(moRoom.boss.moDashState, 'telegraph');
 
-    // Run full right-triangle cycles across P1 -> P2 (Konngara corridor) -> P3 (physical dash) -> P4 -> P5
+    // Run full cycles across all 5 geometric tackle phases (triangle, hourglass, star, lightning, spiral)
+    const seenShapes = new Set();
     const seenStates = new Set();
-    let sawFullTriangle = false;
-    let sawCorridorBullets = false;
+    let sawTurnedBullet = false;
 
     for (let targetPhase = 1; targetPhase <= 5; targetPhase++) {
       moRoom.boss.phase = targetPhase;
-      for (let i = 0; i < 240; i++) {
+      for (let i = 0; i < 280; i++) {
         moRoom.update(1 / 60);
         seenStates.add(moRoom.boss.moDashState);
-        if (moRoom.boss.moDashState === 'triangle' && moRoom.boss.moDashLines.length === 3) {
-          sawFullTriangle = true;
+        if (moRoom.boss._moState?.shapeKind) {
+          seenShapes.add(moRoom.boss._moState.shapeKind);
         }
-        if (targetPhase === 2 && moRoom.bulletSystem.active.length >= 16) {
-          sawCorridorBullets = true;
+        if (moRoom.bulletSystem.active.some((b) => b._turned)) {
+          sawTurnedBullet = true;
         }
       }
     }
 
-    assert.ok(seenStates.has('triangle'), 'Expected Konngara triangle state');
-    assert.ok(seenStates.has('telegraph') || seenStates.has('dashing'), 'Expected P3 physical triangle dash');
-    assert.equal(sawFullTriangle, true, 'Expected 3-side right triangle lines (|, _, /)');
-    assert.equal(sawCorridorBullets, true, 'Expected P2 Konngara split wall + diagonal corridor bullets');
+    assert.deepEqual(
+      [...seenShapes].sort(),
+      ['hourglass', 'lightning', 'spiral', 'star', 'triangle'],
+      'Expected all 5 geometric tackle shapes'
+    );
+    assert.ok(seenStates.has('telegraph') && seenStates.has('dashing') && seenStates.has('resting'));
+    assert.equal(sawTurnedBullet, true, 'Expected delayed wake bullets to snap-bend mid-flight');
   });
 });
 
