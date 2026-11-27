@@ -7,7 +7,6 @@ import type {
   ServerWall,
   ServerLaser,
   ServerEnemy,
-  ServerItem,
   ServerBoss,
   ServerCampaign,
   ServerBeamStruggle,
@@ -95,6 +94,8 @@ interface SimPlayer {
   angle: number;
   shootCooldown: number;
   skillCooldown: number;
+  pendingSeq: number;
+  lastProcessedSeq: number;
   input: {
     dx: number;
     dy: number;
@@ -170,7 +171,6 @@ interface SimEnemy {
   hp: number;
   maxHp: number;
   radius: number;
-  itemDrop: 'power' | 'point' | 'bomb_frag' | 'life_frag';
   trajectory: string;
   attackPattern: string;
   shootInterval: number;
@@ -183,16 +183,6 @@ interface SimEnemy {
   angle?: number;
   fuseProgress?: number;
   customParams: Record<string, any>;
-}
-
-interface SimItem {
-  id: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  type: 'power' | 'point' | 'bomb_frag' | 'life_frag';
-  magnetizedTo: string | null;
 }
 
 const TOTAL_STAGES_PER_DIFFICULTY = 9; // 3 worlds × 3 stages
@@ -211,7 +201,6 @@ class DanmakrewSimulationWorker {
   private walls: SimWall[] = [];
   private lasers: SimLaser[] = [];
   private enemies: SimEnemy[] = [];
-  private items: SimItem[] = [];
 
   private nextBulletId = 1;
   private nextEntityId = 1;
@@ -383,7 +372,7 @@ class DanmakrewSimulationWorker {
     this.stageIndex = (w - 1) * 3 + (s - 1);
     this.createPhysicsWorld();
     this.players.clear();
-    this.addPlayer(this.myPlayerId, classId, false);
+    this.addPlayer(this.myPlayerId, classId);
     this.resetStageRuntime();
 
     self.postMessage({
@@ -392,13 +381,30 @@ class DanmakrewSimulationWorker {
       myPlayerId: this.myPlayerId,
     });
 
+    const tickMs = 1000 / TICK_RATE;
+    let lastTime = performance.now();
+    let accumulator = 0;
     this.loopTimer = setInterval(() => {
-      this.step(DT);
-      self.postMessage({
-        type: 'SNAPSHOT',
-        payload: this.buildSnapshot(),
-      });
-    }, 1000 / TICK_RATE);
+      const now = performance.now();
+      accumulator = Math.min(accumulator + Math.max(0, now - lastTime), tickMs * 4);
+      lastTime = now;
+
+      let stepped = false;
+      let steps = 0;
+      while (accumulator >= tickMs && steps < 3) {
+        accumulator -= tickMs;
+        steps++;
+        stepped = true;
+        this.step(DT);
+      }
+
+      if (stepped) {
+        self.postMessage({
+          type: 'SNAPSHOT',
+          payload: this.buildSnapshot(),
+        });
+      }
+    }, 4);
   }
 
   public stop(): void {
@@ -453,6 +459,8 @@ class DanmakrewSimulationWorker {
       angle: 0,
       shootCooldown: 0,
       skillCooldown: 0,
+      pendingSeq: -1,
+      lastProcessedSeq: -1,
       input: { dx: 0, dy: 0, action: null, focus: false },
     });
   }
@@ -468,7 +476,7 @@ class DanmakrewSimulationWorker {
     p.sp = stats.spMax;
   }
 
-  public setPlayerInput(playerId: string, dx: number, dy: number, action: string | null, focus: boolean): void {
+  public setPlayerInput(playerId: string, dx: number, dy: number, action: string | null, focus: boolean, seq?: number): void {
     const p = this.players.get(playerId);
     if (!p) return;
     p.input = {
@@ -477,6 +485,9 @@ class DanmakrewSimulationWorker {
       action,
       focus: Boolean(focus),
     };
+    if (typeof seq === 'number' && Number.isInteger(seq) && seq > p.pendingSeq) {
+      p.pendingSeq = seq;
+    }
   }
 
   public triggerSkill(playerId: string): void {
@@ -564,7 +575,6 @@ class DanmakrewSimulationWorker {
     this.walls = [];
     this.lasers = [];
     this.enemies = [];
-    this.items = [];
     this.triggeredEvents.clear();
     this.stageTime = 0;
     this.stageState = 'intro';
@@ -645,7 +655,6 @@ class DanmakrewSimulationWorker {
       hp: scaledHp,
       maxHp: scaledHp,
       radius: mb.radius,
-      itemDrop: mb.itemDrop,
       trajectory: mb.trajectory,
       attackPattern: mb.attackPattern,
       shootInterval: mb.shootInterval,
@@ -660,12 +669,11 @@ class DanmakrewSimulationWorker {
     });
   }
 
-  private handleMinibossDefeated(x: number, y: number): void {
+  private handleMinibossDefeated(): void {
     if (this.stageState === 'stage_clear') return;
     this.stageState = 'stage_clear';
     this.bullets = this.bullets.filter((b) => b.ownerId !== 'boss');
     this.lasers = [];
-    this.spawnItemFountain(x, y, 16);
     if (!this.customStageProfile && this.stageIndex < TOTAL_STAGES_PER_DIFFICULTY - 1) {
       this.autoAdvanceTimer = this.autoAdvanceDuration;
     }
@@ -725,7 +733,6 @@ class DanmakrewSimulationWorker {
     this.world.step(dt);
     this.updateBoss(dt);
     this.updateEnemies(dt);
-    this.updateItems(dt);
     this.updateBullets(dt);
     this.updateLasers(dt);
     this.updateBeamStruggle(dt);
@@ -765,7 +772,6 @@ class DanmakrewSimulationWorker {
               hp: spec.hp ?? 20,
               maxHp: spec.hp ?? 20,
               radius: spec.radius ?? 16,
-              itemDrop: spec.itemDrop || 'power',
               trajectory: spec.trajectory || 'sine',
               attackPattern: spec.attackPattern || 'aimed_single',
               shootInterval: spec.shootInterval ?? 1.5,
@@ -815,7 +821,6 @@ class DanmakrewSimulationWorker {
             hp: scaledHp,
             maxHp: scaledHp,
             radius: spec.radius,
-            itemDrop: spec.itemDrop,
             trajectory: spec.trajectory,
             attackPattern: spec.attackPattern,
             shootInterval: spec.shootInterval,
@@ -1007,6 +1012,9 @@ class DanmakrewSimulationWorker {
         if (nx !== 0 || ny !== 0) p.angle = Math.atan2(ny, nx);
       } else {
         p.body.setLinearVelocity(planck.Vec2(0, 0));
+      }
+      if (p.pendingSeq > p.lastProcessedSeq) {
+        p.lastProcessedSeq = p.pendingSeq;
       }
 
       if (action === 'struggle_push') {
@@ -1739,7 +1747,6 @@ class DanmakrewSimulationWorker {
       hp,
       maxHp: hp,
       radius: 18,
-      itemDrop: 'point',
       trajectory: 'kamikaze_homing',
       attackPattern: 'none',
       shootInterval: 99,
@@ -2014,82 +2021,14 @@ class DanmakrewSimulationWorker {
         this.boss.moTimer = 1.4;
         this.boss.moDashLines = [];
       }
-      this.spawnItemFountain(this.boss.x, this.boss.y, 8);
     } else {
       this.boss.isDefeated = true;
       this.boss.isActive = false;
       this.stageState = 'stage_clear';
       this.lasers = [];
       this.enemies = [];
-      this.spawnItemFountain(this.boss.x, this.boss.y, 18);
       if (!this.customStageProfile && this.stageIndex < TOTAL_STAGES_PER_DIFFICULTY - 1) {
         this.autoAdvanceTimer = this.autoAdvanceDuration;
-      }
-    }
-  }
-
-  private spawnItemFountain(x: number, y: number, count: number): void {
-    const types: Array<'power' | 'point' | 'bomb_frag' | 'life_frag'> = ['power', 'point', 'bomb_frag', 'life_frag'];
-    for (let i = 0; i < count; i++) {
-      const a = (Math.PI * 2 * i) / count;
-      this.items.push({
-        id: `item_${this.nextEntityId++}`,
-        x: x + Math.cos(a) * 20,
-        y: y + Math.sin(a) * 20,
-        vx: -90 + Math.cos(a) * 40,
-        vy: Math.sin(a) * 55,
-        type: types[i % types.length],
-        magnetizedTo: null,
-      });
-    }
-  }
-
-  private updateItems(dt: number): void {
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      const item = this.items[i];
-
-      let closestPlayer: SimPlayer | null = null;
-      let closestDist = Infinity;
-      for (const [, p] of this.players) {
-        if (p.hp <= 0) continue;
-        const pos = p.body.getPosition();
-        const dist = Math.hypot(pos.x - item.x, pos.y - item.y);
-        if (dist < closestDist) {
-          closestDist = dist;
-          closestPlayer = p;
-        }
-        if (dist < 115 || pos.x > 520) {
-          item.magnetizedTo = p.id;
-        }
-      }
-
-      if (item.magnetizedTo) {
-        const targetPlayer = this.players.get(item.magnetizedTo) || closestPlayer;
-        if (targetPlayer && targetPlayer.hp > 0) {
-          const pos = targetPlayer.body.getPosition();
-          const a = Math.atan2(pos.y - item.y, pos.x - item.x);
-          item.vx = Math.cos(a) * 480;
-          item.vy = Math.sin(a) * 480;
-        }
-      } else {
-        item.vx = Math.max(-140, item.vx - 80 * dt);
-        item.vy *= 0.96;
-      }
-
-      item.x += item.vx * dt;
-      item.y += item.vy * dt;
-
-      if (closestPlayer && closestDist < 24) {
-        if (item.type === 'power') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 50);
-        else if (item.type === 'point') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 30);
-        else if (item.type === 'bomb_frag') closestPlayer.sp = Math.min(closestPlayer.stats.spMax, closestPlayer.sp + 165);
-        else if (item.type === 'life_frag') closestPlayer.hp = Math.min(closestPlayer.stats.hpMax, closestPlayer.hp + 28);
-        this.items.splice(i, 1);
-        continue;
-      }
-
-      if (item.x < -50 || item.x > WORLD_WIDTH + 80 || item.y < -60 || item.y > WORLD_HEIGHT + 60) {
-        this.items.splice(i, 1);
       }
     }
   }
@@ -2184,23 +2123,12 @@ class DanmakrewSimulationWorker {
             const owner = this.players.get(b.ownerId);
             if (owner) owner.sp = Math.min(owner.stats.spMax, owner.sp + owner.stats.spChargePerHit);
             if (e.hp <= 0) {
-              this.items.push({
-                id: `item_${this.nextEntityId++}`,
-                x: e.x,
-                y: e.y,
-                vx: -60,
-                vy: 0,
-                type: e.itemDrop,
-                magnetizedTo: null,
-              });
               for (const [, p] of this.players) {
                 if (p.hp > 0) p.sp = Math.min(p.stats.spMax, p.sp + 65);
               }
               const wasMiniboss = Boolean(e.isMiniboss);
-              const ex = e.x;
-              const ey = e.y;
               this.enemies.splice(j, 1);
-              if (wasMiniboss) this.handleMinibossDefeated(ex, ey);
+              if (wasMiniboss) this.handleMinibossDefeated();
             }
             consumed = true;
             break;
@@ -2292,20 +2220,12 @@ class DanmakrewSimulationWorker {
           if (e.x >= l.sourceX && Math.abs(e.y - l.sourceY) <= halfW + e.radius) {
             e.hp -= 95 * dt;
             if (e.hp <= 0) {
-              this.items.push({
-                id: `item_${this.nextEntityId++}`,
-                x: e.x,
-                y: e.y,
-                vx: -60,
-                vy: 0,
-                type: e.itemDrop,
-                magnetizedTo: null,
-              });
+              for (const [, p] of this.players) {
+                if (p.hp > 0) p.sp = Math.min(p.stats.spMax, p.sp + 65);
+              }
               const wasMb = Boolean(e.isMiniboss);
-              const ex = e.x;
-              const ey = e.y;
               this.enemies.splice(eIdx, 1);
-              if (wasMb) this.handleMinibossDefeated(ex, ey);
+              if (wasMb) this.handleMinibossDefeated();
             }
           }
         }
@@ -2453,6 +2373,7 @@ class DanmakrewSimulationWorker {
         maxHp: p.stats.hpMax,
         maxSp: p.stats.spMax,
         defensePercent: p.stats.defensePercent,
+        lastProcessedSeq: p.lastProcessedSeq,
       };
     });
 
@@ -2510,13 +2431,6 @@ class DanmakrewSimulationWorker {
       sprite: e.sprite,
       minibossName: e.minibossName,
       fuseProgress: e.fuseProgress,
-    }));
-
-    const items: ServerItem[] = this.items.map((item) => ({
-      id: item.id,
-      x: item.x,
-      y: item.y,
-      type: item.type,
     }));
 
     const activeMb = !this.boss.isActive && !this.boss.isDefeated ? this.enemies.find((e) => e.isMiniboss) : undefined;
@@ -2609,7 +2523,6 @@ class DanmakrewSimulationWorker {
       walls,
       lasers,
       enemies,
-      items,
       boss,
       campaign,
       struggle: { ...this.struggle },
@@ -2639,7 +2552,8 @@ self.onmessage = (e: MessageEvent) => {
         payload?.dx ?? 0,
         payload?.dy ?? 0,
         payload?.action ?? null,
-        Boolean(payload?.isFocus)
+        Boolean(payload?.isFocus),
+        typeof payload?.seq === 'number' ? payload.seq : undefined
       );
       break;
     case 'SET_ROLE':

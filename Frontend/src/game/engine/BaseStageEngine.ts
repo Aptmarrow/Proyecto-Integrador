@@ -51,7 +51,6 @@ export class BaseStageEngine {
   public hiScore: number = 90039210;
   public playerLives: number = 3;
   public playerBombs: number = 3;
-  public power: number = 0;
   public graze: number = 0;
   public shakeTimer: number = 0;
   public freezeTimer: number = 0;
@@ -70,6 +69,7 @@ export class BaseStageEngine {
       backgroundColor: 0x06040a,
       resolution: cappedResolution,
       autoDensity: true,
+      autoStart: false,
       antialias: false,
       powerPreference: 'high-performance',
     });

@@ -6,7 +6,6 @@ const { LaserSystem } = require('./systems/LaserSystem');
 const { WallSystem } = require('./systems/WallSystem');
 const { BeamStruggleAuthority } = require('./systems/BeamStruggleAuthority');
 const { EnemySystem } = require('./systems/EnemySystem');
-const { ItemSystem } = require('./systems/ItemSystem');
 const { TimelineManager } = require('./systems/TimelineManager');
 const { RoomPhaseController } = require('./RoomPhaseController');
 const { CampaignManager } = require('./campaign/CampaignManager');
@@ -37,7 +36,6 @@ class GameRoom {
     this.laserSystem   = new LaserSystem();
     this.wallSystem    = new WallSystem();
     this.enemySystem   = new EnemySystem();
-    this.itemSystem    = new ItemSystem();
     this.timeline      = new TimelineManager();
     this.campaign      = new CampaignManager(options.difficulty, options.world, options.stage);
     this.boss          = new BossController();
@@ -56,7 +54,6 @@ class GameRoom {
     // Setup boss callbacks
     this.boss.onPhaseChange = (_phase, _spellName, _isSpellCard) => {
       this.bulletSystem.clearByOwner('boss');
-      this.itemSystem.spawnItemFountain(this.boss.x, this.boss.y, 8);
     };
 
     this.boss.onDefeated = () => {
@@ -64,7 +61,6 @@ class GameRoom {
       this.bulletSystem.clearByOwner('boss');
       this.laserSystem.lasers = [];
       this.enemySystem.clear();
-      this.itemSystem.spawnItemFountain(this.boss.x, this.boss.y, 20);
       if (this.campaign.hasNextStage()) {
         this._autoAdvanceTimer = AUTO_ADVANCE_DURATION;
       }
@@ -92,12 +88,11 @@ class GameRoom {
     });
   }
 
-  _handleMinibossDefeated(x, y) {
+  _handleMinibossDefeated() {
     if (this.campaign.stageState === 'stage_clear') return;
     this.campaign.markStageCleared();
     this.bulletSystem.clearByOwner('boss');
     this.laserSystem.lasers = [];
-    this.itemSystem.spawnItemFountain(x, y, 16);
     if (this.campaign.hasNextStage()) {
       this._autoAdvanceTimer = AUTO_ADVANCE_DURATION;
     }
@@ -232,6 +227,8 @@ class GameRoom {
       stats,
       hp:            stats.hpMax,
       sp:            stats.spMax,
+      pendingSeq:    -1,
+      lastProcessedSeq: -1,
     });
   }
 
@@ -269,6 +266,9 @@ class GameRoom {
     const player = this.players.get(playerId);
     if (player && player.active && this.phase === 'playing') {
       player.input = input;
+      if (Number.isInteger(input?.seq) && input.seq > player.pendingSeq) {
+        player.pendingSeq = input.seq;
+      }
     }
   }
 
@@ -394,11 +394,10 @@ class GameRoom {
       },
     });
 
-    // 6. Spawn items from defeated enemies and grant squad SP
+    // 6. Grant squad SP from defeated enemies and check miniboss clear
     for (const defeat of enemyDefeats) {
-      this.itemSystem.spawnItem(defeat.x, defeat.y, defeat.itemDrop);
       if (defeat.isMiniboss) {
-        this._handleMinibossDefeated(defeat.x, defeat.y);
+        this._handleMinibossDefeated();
       }
       for (const [, p] of this.players) {
         if (p.active && p.hp > 0) {
@@ -408,11 +407,7 @@ class GameRoom {
       }
     }
 
-    // 7. Update items
-    const itemPickups = this.itemSystem.update(deltaTime, this.players);
-    this._applyItemPickups(itemPickups);
-
-    // 8. Physics step
+    // 7. Physics step
     this.world.step(deltaTime);
 
     // 9. Bullet collision
@@ -480,10 +475,15 @@ class GameRoom {
             e.hp -= deltaTime * 95;
             if (e.hp <= 0) {
               e.isDead = true;
-              this.itemSystem.spawnItem(e.x, e.y, e.itemDrop);
               this.enemySystem.active.splice(i, 1);
+              for (const [, p] of this.players) {
+                if (p.active && p.hp > 0) {
+                  const stats = p.stats || DEFAULT_PLAYER_STATS;
+                  p.sp = Math.min(stats.spMax, p.sp + 65);
+                }
+              }
               if (e.isMiniboss) {
-                this._handleMinibossDefeated(e.x, e.y);
+                this._handleMinibossDefeated();
               }
             }
           }
@@ -561,6 +561,9 @@ class GameRoom {
 
     if (this._weaponsDisabled) {
       applyInput(player.body, player.input);
+      if (player.pendingSeq > player.lastProcessedSeq) {
+        player.lastProcessedSeq = player.pendingSeq;
+      }
       return;
     }
 
@@ -633,6 +636,9 @@ class GameRoom {
     }
 
     applyInput(player.body, player.input);
+    if (player.pendingSeq > player.lastProcessedSeq) {
+      player.lastProcessedSeq = player.pendingSeq;
+    }
   }
 
   _applyBulletHits(bulletHits) {
@@ -640,29 +646,6 @@ class GameRoom {
       const player = this.players.get(hit.playerId);
       if (!player || player.hp <= 0) continue;
       this.applyDamageToPlayer(player, hit.damage || 5);
-    }
-  }
-
-  _applyItemPickups(pickups) {
-    for (const pickup of pickups) {
-      const player = this.players.get(pickup.playerId);
-      if (!player || player.hp <= 0) continue;
-
-      const stats = player.stats || DEFAULT_PLAYER_STATS;
-      switch (pickup.type) {
-        case 'power':
-          player.sp = Math.min(stats.spMax, player.sp + 50);
-          break;
-        case 'point':
-          player.sp = Math.min(stats.spMax, player.sp + 30);
-          break;
-        case 'bomb_frag':
-          player.sp = Math.min(stats.spMax, player.sp + 165);
-          break;
-        case 'life_frag':
-          player.hp = Math.min(stats.hpMax, player.hp + 28);
-          break;
-      }
     }
   }
 
@@ -738,7 +721,6 @@ class GameRoom {
     this.laserSystem = new LaserSystem();
     this.wallSystem = new WallSystem();
     this.enemySystem.clear();
-    this.itemSystem.clear();
     this.boss.reset();
     this.timeline.reset();
     this.stageTime = 0;

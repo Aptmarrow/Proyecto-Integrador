@@ -12,6 +12,7 @@ export interface ServerPlayer {
   maxSp?: number;
   defensePercent?: number;
   focus?: boolean;
+  lastProcessedSeq?: number;
 }
 
 export interface ServerBullet {
@@ -109,13 +110,6 @@ export interface ServerEnemy {
   fuseProgress?: number;
 }
 
-export interface ServerItem {
-  id: string;
-  x: number;
-  y: number;
-  type: 'power' | 'point' | 'bomb_frag' | 'life_frag' | string;
-}
-
 import type { SpaceThemeSpec } from '../campaign/spaceCampaignCatalog';
 
 export interface ServerCampaign {
@@ -170,7 +164,6 @@ export interface GameSnapshot {
   lasers?: ServerLaser[];
   walls?: ServerWall[];
   enemies?: ServerEnemy[];
-  items?: ServerItem[];
   boss?: ServerBoss;
   campaign?: ServerCampaign;
   struggle?: ServerBeamStruggle;
@@ -334,10 +327,11 @@ export class GameWSClient {
     });
   }
 
-  public sendInput(dx: number, dy: number, action: string | null = null, focus: boolean = false): void {
+  public sendInput(dx: number, dy: number, action: string | null = null, focus: boolean = false): number {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       const clampedDx = Math.max(-1, Math.min(1, dx));
       const clampedDy = Math.max(-1, Math.min(1, dy));
+      const seq = this.inputSequence++;
       this.socket.send(
         JSON.stringify({
           type: 'input',
@@ -345,11 +339,13 @@ export class GameWSClient {
           dy: clampedDy,
           action: action ?? null,
           focus: Boolean(focus),
-          seq: this.inputSequence++,
+          seq,
           clientTs: Date.now(),
         })
       );
+      return seq;
     }
+    return -1;
   }
 
   public sendAdvanceStage(): void {

@@ -9,6 +9,7 @@ const redis    = require('../config/redis');
 
 const TICK_RATE = 60;
 const TICK_DELTA = 1 / TICK_RATE;
+const TICK_MS = 1000 / TICK_RATE;
 const BROADCAST_EVERY = 1; // broadcast snapshot every tick (60 Hz) for buttery smooth movement
 const DISCONNECT_TIMEOUT_MS = 12_000;
 const MAX_CLIENT_MESSAGE_BYTES = 1024;
@@ -64,6 +65,9 @@ function startGameLoop(roomId) {
   if (gameLoops.has(roomId)) return;
 
   let tickCounter = 0;
+  let lastTime = performance.now();
+  let accumulator = 0;
+
   const interval = setInterval(() => {
     const room = gameRooms.get(roomId);
     if (!room) {
@@ -72,20 +76,32 @@ function startGameLoop(roomId) {
       return;
     }
 
-    const { hits, phaseChanged } = room.update(TICK_DELTA);
-    for (const hit of hits) {
-      broadcastRoom(roomId, { type: 'hit', ...hit });
-    }
-    if (phaseChanged) {
-      broadcastRoom(roomId, { type: 'phase', phase: phaseChanged });
-    }
-    tickCounter++;
+    const now = performance.now();
+    accumulator = Math.min(accumulator + Math.max(0, now - lastTime), TICK_MS * 4);
+    lastTime = now;
 
-    if (tickCounter >= BROADCAST_EVERY) {
+    let stepped = false;
+    let steps = 0;
+    while (accumulator >= TICK_MS && steps < 3) {
+      accumulator -= TICK_MS;
+      steps++;
+      stepped = true;
+
+      const { hits, phaseChanged } = room.update(TICK_DELTA);
+      for (const hit of hits) {
+        broadcastRoom(roomId, { type: 'hit', ...hit });
+      }
+      if (phaseChanged) {
+        broadcastRoom(roomId, { type: 'phase', phase: phaseChanged });
+      }
+      tickCounter++;
+    }
+
+    if (stepped && tickCounter >= BROADCAST_EVERY) {
       broadcastRoom(roomId, room.getState());
       tickCounter = 0;
     }
-  }, 1000 / TICK_RATE);
+  }, 4);
 
   gameLoops.set(roomId, interval);
   console.info('[Game] Loop started roomId=%s', roomId);

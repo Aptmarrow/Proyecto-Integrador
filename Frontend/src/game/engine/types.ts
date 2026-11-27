@@ -30,6 +30,7 @@ export interface RemotePlayer {
   maxSp?: number;
   defensePercent?: number;
   characterColor?: string;
+  lastProcessedSeq?: number;
 }
 
 export type EnemyType = 'green_fairy' | 'red_fairy' | 'big_fairy' | 'purple_fairy' | 'yellow_fairy' | 'spirit_orb';
@@ -45,19 +46,6 @@ export type AttackPatternType =
   | 'cross_spread' 
   | 'star_rings' 
   | 'none';
-
-export type ItemType = 'power' | 'point' | 'bomb_frag' | 'life_frag';
-
-export interface ItemDrop {
-  id: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  type: ItemType;
-  value: number;
-  magnetized: boolean;
-}
 
 export type StageState = 'intro' | 'waves' | 'boss_warning' | 'boss_battle' | 'stage_clear';
 export type BossPhase = 1 | 2 | 3 | 4 | 5;

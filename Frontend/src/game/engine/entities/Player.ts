@@ -12,6 +12,32 @@ const PLAYER_CANVAS_SPEED = 480;
 const FOCUS_SPEED_MULT = 0.40;
 const BOUND_PAD_X = 10 * SCALE_X;
 const BOUND_PAD_Y = 10 * SCALE_Y;
+const MAX_PENDING_INPUTS = 90;
+
+interface PredictedInput {
+  seq: number;
+  dx: number;
+  dy: number;
+  focus: boolean;
+  dt: number;
+}
+
+function integrateCanvasStep(
+  x: number,
+  y: number,
+  dx: number,
+  dy: number,
+  focus: boolean,
+  dt: number
+): { x: number; y: number } {
+  const len = Math.hypot(dx, dy);
+  if (len > 0.01) {
+    const speed = PLAYER_CANVAS_SPEED * (focus ? FOCUS_SPEED_MULT : 1.0);
+    x = Math.max(BOUND_PAD_X, Math.min(CANVAS_WIDTH - BOUND_PAD_X, x + (dx / len) * speed * dt));
+    y = Math.max(BOUND_PAD_Y, Math.min(CANVAS_HEIGHT - BOUND_PAD_Y, y + (dy / len) * speed * dt));
+  }
+  return { x, y };
+}
 
 export class Player {
   public pos = { x: 100, y: 300 };
@@ -28,6 +54,10 @@ export class Player {
   private focusRingInner = new PIXI.Graphics();
   private hitbox = new PIXI.Graphics();
   private focusAlpha = 0;
+
+  private pendingInputs: PredictedInput[] = [];
+  private reconciledTarget: { x: number; y: number } | null = null;
+  private hasAckedSeq = false;
 
   private baseScale = 0.25;
   private shootTimer = 0;
@@ -160,7 +190,52 @@ export class Player {
     this.pos.y = y;
     this.targetPos.x = x;
     this.targetPos.y = y;
+    this.reconciledTarget = { x, y };
+    this.pendingInputs.length = 0;
     this.container.position.set(x, y);
+  }
+
+  public clearPendingInputs(): void {
+    this.pendingInputs.length = 0;
+    this.reconciledTarget = null;
+    this.hasAckedSeq = false;
+  }
+
+  public recordPredictedInput(seq: number, dx: number, dy: number, focus: boolean, dt: number): void {
+    if (seq < 0 || dt <= 0) return;
+    this.pendingInputs.push({ seq, dx, dy, focus, dt });
+    if (this.pendingInputs.length > MAX_PENDING_INPUTS) {
+      this.pendingInputs.splice(0, this.pendingInputs.length - MAX_PENDING_INPUTS);
+    }
+  }
+
+  public reconcileAuthoritative(serverX: number, serverY: number, lastProcessedSeq?: number): void {
+    this.targetPos.x = serverX;
+    this.targetPos.y = serverY;
+
+    if (typeof lastProcessedSeq === 'number' && lastProcessedSeq >= 0) {
+      this.hasAckedSeq = true;
+      let dropCount = 0;
+      while (dropCount < this.pendingInputs.length && this.pendingInputs[dropCount].seq <= lastProcessedSeq) {
+        dropCount++;
+      }
+      if (dropCount > 0) {
+        this.pendingInputs.splice(0, dropCount);
+      }
+
+      // Replay still-in-flight inputs from the server's authoritative state to get present-time truth
+      let rx = serverX;
+      let ry = serverY;
+      for (let i = 0; i < this.pendingInputs.length; i++) {
+        const p = this.pendingInputs[i];
+        const next = integrateCanvasStep(rx, ry, p.dx, p.dy, p.focus, p.dt);
+        rx = next.x;
+        ry = next.y;
+      }
+      this.reconciledTarget = { x: rx, y: ry };
+    } else {
+      this.reconciledTarget = null;
+    }
   }
 
   public setCharacterClass(classId: CharacterClass): void {
@@ -228,39 +303,67 @@ export class Player {
     const inputLen = Math.hypot(rawDx, rawDy);
     const hasInput = inputLen > 0.01;
 
-    // 0ms client-side prediction matching authoritative isotropic velocity, with jitter-free reconciliation
+    // 0ms client-side prediction matching authoritative isotropic velocity
     if (hasInput) {
-      const nx = rawDx / inputLen;
-      const ny = rawDy / inputLen;
-      const speed = PLAYER_CANVAS_SPEED * (this.isFocus ? FOCUS_SPEED_MULT : 1.0);
-      this.pos.x += nx * speed * dt;
-      this.pos.y += ny * speed * dt;
-      this.pos.x = Math.max(BOUND_PAD_X, Math.min(CANVAS_WIDTH - BOUND_PAD_X, this.pos.x));
-      this.pos.y = Math.max(BOUND_PAD_Y, Math.min(CANVAS_HEIGHT - BOUND_PAD_Y, this.pos.y));
+      const next = integrateCanvasStep(this.pos.x, this.pos.y, rawDx, rawDy, this.isFocus, dt);
+      this.pos.x = next.x;
+      this.pos.y = next.y;
+
+      // Advance reconciled reference in lockstep between incoming server snapshots
+      if (this.reconciledTarget) {
+        const nextRef = integrateCanvasStep(
+          this.reconciledTarget.x,
+          this.reconciledTarget.y,
+          rawDx,
+          rawDy,
+          this.isFocus,
+          dt
+        );
+        this.reconciledTarget.x = nextRef.x;
+        this.reconciledTarget.y = nextRef.y;
+      }
     }
 
     if (isBackendControlled) {
-      const errX = this.targetPos.x - this.pos.x;
-      const errY = this.targetPos.y - this.pos.y;
+      const ref = this.reconciledTarget ?? this.targetPos;
+      const errX = ref.x - this.pos.x;
+      const errY = ref.y - this.pos.y;
       const errDist = Math.hypot(errX, errY);
 
-      if (errDist > 260) {
-        // Hard snap only on real teleports (stage restart / beam struggle alignment)
-        this.pos.x = this.targetPos.x;
-        this.pos.y = this.targetPos.y;
+      if (errDist > 220) {
+        // Hard snap only on real server teleports (stage restart / beam struggle alignment)
+        this.pos.x = ref.x;
+        this.pos.y = ref.y;
+        this.pendingInputs.length = 0;
+      } else if (this.hasAckedSeq) {
+        if (this.pendingInputs.length === 0 && !hasInput) {
+          // Server has acknowledged our stop input: settle any sub-tick offset imperceptibly
+          if (errDist < 0.4) {
+            this.pos.x = ref.x;
+            this.pos.y = ref.y;
+          } else {
+            const settle = 1 - Math.exp(-10 * dt);
+            this.pos.x += errX * settle;
+            this.pos.y += errY * settle;
+          }
+        } else if (errDist > 16) {
+          // Ignore ±2 ticks of network arrival jitter completely; softly bleed only excess drift
+          const excessRatio = (errDist - 16) / errDist;
+          const blend = 1 - Math.exp(-6.5 * dt);
+          this.pos.x += errX * excessRatio * blend;
+          this.pos.y += errY * excessRatio * blend;
+        }
       } else if (!hasInput) {
-        // When idle, settle smoothly onto authoritative server coordinates
-        if (errDist < 1.5) {
-          this.pos.x = this.targetPos.x;
-          this.pos.y = this.targetPos.y;
+        // Fallback if server/worker has not sent a sequence ack yet
+        if (errDist < 1.0) {
+          this.pos.x = ref.x;
+          this.pos.y = ref.y;
         } else {
-          const settle = 1 - Math.exp(-14 * dt);
+          const settle = 1 - Math.exp(-10 * dt);
           this.pos.x += errX * settle;
           this.pos.y += errY * settle;
         }
-      } else if (errDist > 135) {
-        // While actively dodging, tolerate normal RTT lead (~45-95px) with zero pullback;
-        // only blend gently if genuine drift exceeds 135px
+      } else if (errDist > 140) {
         const drift = 1 - Math.exp(-4.5 * dt);
         this.pos.x += errX * drift;
         this.pos.y += errY * drift;

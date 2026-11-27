@@ -2,7 +2,6 @@ import * as PIXI from 'pixi.js';
 import { Enemy, type EnemyConfig } from '../entities/Enemy';
 import type { BulletSystem } from './BulletSystem';
 import type { LaserSystem } from './LaserSystem';
-import type { ItemType } from '../types';
 import type { ServerEnemy } from '../../network/wsClient';
 
 const ENEMY_SPRITE_URLS: Record<string, string> = {
@@ -278,7 +277,6 @@ export class EnemySystem {
         startY,
         speed: 160,
         hp: 12,
-        itemDrop: i % 2 === 0 ? 'power' : 'point',
         customParams: { freq: 2.8, amp, phase: i * 0.4 },
       });
     }
@@ -298,7 +296,6 @@ export class EnemySystem {
         startY: 200,
         speed: 170,
         hp: 14,
-        itemDrop: i % 2 === 0 ? 'power' : 'point',
         customParams: { freq: 3.2, amp: 85, phase: i * 0.4 },
       });
 
@@ -311,7 +308,6 @@ export class EnemySystem {
         startY: 376,
         speed: 170,
         hp: 16,
-        itemDrop: 'power',
         customParams: { freq: 3.2, amp: 85, phase: i * 0.4 + Math.PI },
       });
     }
@@ -331,7 +327,6 @@ export class EnemySystem {
         startY: 120 + i * 25,
         speed: 190,
         hp: 28,
-        itemDrop: 'power',
         shootInterval: 1.1,
         customParams: { hoverX: 740 - i * 40, hoverTime: 3.8 },
       });
@@ -345,7 +340,6 @@ export class EnemySystem {
         startY: 440 - i * 25,
         speed: 190,
         hp: 28,
-        itemDrop: 'point',
         shootInterval: 1.1,
         customParams: { hoverX: 740 - i * 40, hoverTime: 3.8 },
       });
@@ -367,7 +361,6 @@ export class EnemySystem {
       hp: 130,
       radius: 30,
       scoreValue: 1200,
-      itemDrop: 'life_frag',
       shootInterval: 0.75,
       customParams: { hoverX: 680, hoverTime: 7.5 },
     });
@@ -383,7 +376,6 @@ export class EnemySystem {
         startY: startY + (k % 2 === 0 ? -120 : 120),
         speed: 140,
         hp: 35,
-        itemDrop: k % 2 === 0 ? 'power' : 'bomb_frag',
         shootInterval: 0.95,
         customParams: { phase },
       });
@@ -404,7 +396,6 @@ export class EnemySystem {
         startY: yPositions[i],
         speed: 150,
         hp: 38,
-        itemDrop: i % 2 === 0 ? 'power' : 'point',
         shootInterval: 0.9,
         customParams: { hoverX: 710 - (i % 2) * 50, hoverTime: 4.2 },
       });
@@ -425,7 +416,6 @@ export class EnemySystem {
         startY: isTop ? 40 : 530,
         speed: 230,
         hp: 18,
-        itemDrop: i % 3 === 0 ? 'power' : 'point',
         shootInterval: 0.8,
         shootDelay: 0.15 + i * 0.1,
       });
@@ -449,7 +439,7 @@ export class EnemySystem {
     animTimer: number,
     playerPos: { x: number; y: number },
     bulletSystem: BulletSystem,
-    onEnemyDefeated?: (x: number, y: number, score: number, itemDrop: ItemType) => void,
+    onEnemyDefeated?: (x: number, y: number, score: number) => void,
     onEnemyHit?: (damage: number) => void
   ): void {
     // 1. Actualizar enemigos y limpiar muertos / fuera de pantalla
@@ -483,7 +473,7 @@ export class EnemySystem {
 
           if (isKilled) {
             if (onEnemyDefeated) {
-              onEnemyDefeated(enemy.pos.x, enemy.pos.y, enemy.scoreValue, enemy.itemDrop);
+              onEnemyDefeated(enemy.pos.x, enemy.pos.y, enemy.scoreValue);
             }
             enemy.destroy();
             this.enemies.splice(j, 1);
@@ -500,7 +490,7 @@ export class EnemySystem {
 
   public checkLaserHits(
     laserSystem: LaserSystem,
-    onEnemyDefeated?: (x: number, y: number, score: number, itemDrop: ItemType) => void
+    onEnemyDefeated?: (x: number, y: number, score: number) => void
   ): void {
     for (const laser of laserSystem.lasers) {
       if (laser.state !== 'firing' || laser.ownerId !== 'player') continue;
@@ -517,7 +507,7 @@ export class EnemySystem {
           const isKilled = enemy.takeDamage(8.0);
           if (isKilled) {
             if (onEnemyDefeated) {
-              onEnemyDefeated(enemy.pos.x, enemy.pos.y, enemy.scoreValue, enemy.itemDrop);
+              onEnemyDefeated(enemy.pos.x, enemy.pos.y, enemy.scoreValue);
             }
             enemy.destroy();
             this.enemies.splice(j, 1);

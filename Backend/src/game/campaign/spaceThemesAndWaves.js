@@ -10,7 +10,7 @@
  * 4-Player Role Synergy Built Into Wave & Boss Design:
  *   - Tank (Wall Barrier): Siege lanes & rhythmic artillery curtains with blockable corridors
  *   - Support (Auto-Aim + Squad Heal): Top/bottom peripheral satellites (y ≈ 52 / 548) & healing economy
- *   - DPS (Twin Rapid + 8-Shot Shotgun): High-HP Dreadnought/Reactor cores dropping life_frag & bomb_frag
+ *   - DPS (Twin Rapid + 8-Shot Shotgun): High-HP Dreadnought/Reactor cores
  *   - Special_Attack (Piercing Laser + Beam Struggle): Dense convoy columns, slow orb walls & Boss Mega-Beams
  */
 
@@ -51,7 +51,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(138),
           hp: hp(rank === 0 ? 28 : 15),
           radius: 16,
-          itemDrop: rank === 0 ? 'bomb_frag' : (i % 2 === 0 ? 'power' : 'point'),
           shootInterval: rank === 0 ? 1.25 : 1.75,
           shootDelay: 0.35 + rank * 0.22,
           bulletColor: rank === 0 ? c1 : c0,
@@ -74,7 +73,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(132),
           hp: hp(15),
           radius: 16,
-          itemDrop: i % 2 === 0 ? 'power' : 'point',
           shootInterval: 1.75,
           shootDelay: 0.25 + i * 0.2,
           bulletColor: c0,
@@ -89,7 +87,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(132),
           hp: hp(17),
           radius: 16,
-          itemDrop: i === count - 1 ? 'bomb_frag' : 'power',
           shootInterval: 1.85,
           shootDelay: 0.35 + i * 0.2,
           bulletColor: c2,
@@ -112,7 +109,6 @@ function buildWaveEnemies(archetype, opts = {}) {
             speed: spd(124),
             hp: hp(20),
             radius: 16,
-            itemDrop: i === 3 && isTop ? 'life_frag' : 'power',
             shootInterval: 1.45,
             shootDelay: 0.3 + i * 0.25,
             bulletColor: isTop ? c0 : c2,
@@ -136,7 +132,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(135),
           hp: hp(38),
           radius: 18,
-          itemDrop: idx % 2 === 0 ? 'bomb_frag' : 'power',
           shootInterval: 1.15,
           shootDelay: 0.35 + idx * 0.18,
           bulletColor: c1,
@@ -159,7 +154,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(126),
           hp: hp(22),
           radius: 16,
-          itemDrop: i === 7 ? 'bomb_frag' : 'power',
           shootInterval: 1.55,
           shootDelay: 0.25 + i * 0.14,
           bulletColor: i % 2 === 0 ? c1 : c0,
@@ -170,7 +164,7 @@ function buildWaveEnemies(archetype, opts = {}) {
     }
 
     case 'dreadnought_core': {
-      // High-HP Armored Core + 3 escorts — DPS 8-shot shotgun melts the core for life_frag!
+      // High-HP Armored Core + 3 escorts — DPS 8-shot shotgun melts the core!
       const coreY = variant % 2 === 0 ? 300 : 265;
       out.push({
         type: 'big_fairy',
@@ -182,7 +176,6 @@ function buildWaveEnemies(archetype, opts = {}) {
         hp: hp(145),
         radius: 30,
         scoreValue: 1500,
-        itemDrop: 'life_frag',
         shootInterval: 1.05,
         shootDelay: 0.45,
         bulletColor: c2,
@@ -198,7 +191,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(115),
           hp: hp(30),
           radius: 16,
-          itemDrop: k === 1 ? 'bomb_frag' : 'power',
           shootInterval: 1.45,
           shootDelay: 0.5 + k * 0.25,
           bulletColor: c0,
@@ -222,7 +214,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(168),
           hp: hp(18),
           radius: 16,
-          itemDrop: i % 3 === 0 ? 'power' : 'point',
           shootInterval: 1.15,
           shootDelay: 0.2 + i * 0.12,
           bulletColor: isTop ? c0 : c1,
@@ -245,7 +236,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(115),
           hp: hp(idx === 1 ? 95 : 40),
           radius: idx === 1 ? 26 : 17,
-          itemDrop: idx === 1 ? 'bomb_frag' : 'power',
           shootInterval: 0.72,
           shootDelay: 0.35 + idx * 0.15,
           bulletColor: idx === 1 ? c2 : c0,
@@ -273,7 +263,6 @@ function buildWaveEnemies(archetype, opts = {}) {
             speed: spd(146),
             hp: hp(28),
             radius: 17,
-            itemDrop: top ? 'power' : 'point',
             shootInterval: 1.25,
             shootDelay: 0.25 + i * 0.18,
             bulletColor: top ? c1 : c2,
@@ -296,7 +285,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(118),
           hp: hp(26),
           radius: 16,
-          itemDrop: k === 5 ? 'bomb_frag' : 'power',
           shootInterval: 1.05,
           shootDelay: 0.25 + k * 0.15,
           bulletColor: k % 2 === 0 ? c0 : c2,
@@ -319,7 +307,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           hp: hp(115),
           radius: 28,
           scoreValue: 1400,
-          itemDrop: idx === 0 ? 'life_frag' : 'bomb_frag',
           shootInterval: 0.95,
           shootDelay: 0.4 + idx * 0.25,
           bulletColor: idx === 0 ? c0 : c1,
@@ -336,7 +323,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(130),
           hp: hp(22),
           radius: 15,
-          itemDrop: 'power',
           shootInterval: 1.5,
           shootDelay: 0.6,
           bulletColor: c2,
@@ -358,7 +344,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(122),
           hp: hp(26),
           radius: 16,
-          itemDrop: i === 2 ? 'bomb_frag' : 'power',
           shootInterval: 1.35,
           shootDelay: 0.3 + i * 0.2,
           bulletColor: i % 2 === 0 ? c0 : c2,
@@ -381,7 +366,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(136),
           hp: hp(20),
           radius: 16,
-          itemDrop: i % 2 === 0 ? 'power' : 'point',
           shootInterval: 1.4,
           shootDelay: 0.25 + i * 0.16,
           bulletColor: i % 2 === 0 ? c0 : c1,
@@ -408,7 +392,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(140),
           hp: hp(30),
           radius: 17,
-          itemDrop: k === 0 ? 'bomb_frag' : 'power',
           shootInterval: 1.3,
           shootDelay: 0.35 + k * 0.14,
           bulletColor: k % 2 === 0 ? c2 : c0,
@@ -431,7 +414,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(112),
           hp: hp(idx === 1 ? 105 : 42),
           radius: idx === 1 ? 27 : 18,
-          itemDrop: idx === 1 ? 'life_frag' : 'power',
           shootInterval: 1.1,
           shootDelay: 0.3 + idx * 0.2,
           bulletColor: c1,
@@ -448,7 +430,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(145),
           hp: hp(18),
           radius: 15,
-          itemDrop: 'point',
           shootInterval: 1.35,
           shootDelay: 0.45,
           bulletColor: c0,
@@ -471,7 +452,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(158),
           hp: hp(22),
           radius: 16,
-          itemDrop: i === 5 ? 'bomb_frag' : 'power',
           shootInterval: 1.15,
           shootDelay: 0.45 + i * 0.12,
           bulletColor: fromTop ? c2 : c0,
@@ -493,7 +473,6 @@ function buildWaveEnemies(archetype, opts = {}) {
         hp: hp(150),
         radius: 30,
         scoreValue: 1600,
-        itemDrop: 'life_frag',
         shootInterval: 1.0,
         shootDelay: 0.4,
         bulletColor: c1,
@@ -509,7 +488,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(120),
           hp: hp(28),
           radius: 16,
-          itemDrop: k === 0 ? 'bomb_frag' : 'power',
           shootInterval: 1.25,
           shootDelay: 0.45 + k * 0.18,
           bulletColor: c0,
@@ -531,7 +509,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(145),
           hp: hp(24),
           radius: 16,
-          itemDrop: i === 4 ? 'bomb_frag' : 'power',
           shootInterval: 1.15,
           shootDelay: 0.2 + i * 0.15,
           bulletColor: c0,
@@ -548,7 +525,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(135),
           hp: hp(36),
           radius: 17,
-          itemDrop: 'power',
           shootInterval: 1.35,
           shootDelay: 0.4,
           bulletColor: c2,
@@ -570,7 +546,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(142),
           hp: hp(21),
           radius: 16,
-          itemDrop: i === 6 ? 'bomb_frag' : (i % 2 === 0 ? 'power' : 'point'),
           shootInterval: 1.25,
           shootDelay: 0.25 + i * 0.14,
           bulletColor: i % 2 === 0 ? c1 : c0,
@@ -582,7 +557,7 @@ function buildWaveEnemies(archetype, opts = {}) {
 
     case 'supernova_grand_choir':
     default: {
-      // Grand climax set-piece before the Boss Warning — rewards life_frag & bomb_frag!
+      // Grand climax set-piece before the Boss Warning
       out.push({
         type: 'big_fairy',
         trajectory: 'hover_retreat',
@@ -593,7 +568,6 @@ function buildWaveEnemies(archetype, opts = {}) {
         hp: hp(155),
         radius: 30,
         scoreValue: 1800,
-        itemDrop: 'life_frag',
         shootInterval: 0.92,
         shootDelay: 0.35,
         bulletColor: c2,
@@ -609,7 +583,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(130),
           hp: hp(38),
           radius: 17,
-          itemDrop: idx === 0 ? 'bomb_frag' : 'power',
           shootInterval: 1.3,
           shootDelay: 0.5,
           bulletColor: c0,
@@ -626,7 +599,6 @@ function buildWaveEnemies(archetype, opts = {}) {
           speed: spd(132),
           hp: hp(20),
           radius: 15,
-          itemDrop: 'power',
           shootInterval: 1.45,
           shootDelay: 0.55,
           bulletColor: c1,

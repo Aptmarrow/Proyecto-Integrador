@@ -6,7 +6,6 @@ import type {
   ServerBullet,
   ServerWall,
   ServerEnemy,
-  ServerItem,
   ServerBoss,
   ServerBeamStruggle,
 } from '../network/wsClient';
@@ -17,7 +16,7 @@ interface TimedSnapshot {
 }
 
 const MAX_BUFFER_SIZE = 24;
-const RENDER_DELAY_MS = 22;
+const RENDER_DELAY_MS = 45;
 
 let snapshotBuffer: TimedSnapshot[] = [];
 
@@ -83,23 +82,6 @@ function interpolateEnemies(e0: ServerEnemy[] | undefined, e1: ServerEnemy[] | u
   for (const e of e0) prevById.set(e.id, e);
 
   return e1.map((curr) => {
-    const prev = prevById.get(curr.id);
-    if (!prev) return curr;
-    return {
-      ...curr,
-      x: lerp(prev.x, curr.x, alpha),
-      y: lerp(prev.y, curr.y, alpha),
-    };
-  });
-}
-
-function interpolateItems(i0: ServerItem[] | undefined, i1: ServerItem[] | undefined, alpha: number): ServerItem[] | undefined {
-  if (!i1) return undefined;
-  if (!i0 || !i0.length) return i1;
-  const prevById = new Map<string, ServerItem>();
-  for (const item of i0) prevById.set(item.id, item);
-
-  return i1.map((curr) => {
     const prev = prevById.get(curr.id);
     if (!prev) return curr;
     return {
@@ -176,7 +158,6 @@ function computeInterpolatedFrame(): GameSnapshot | null {
     bullets: interpolateBullets(s0.snapshot.bullets, s1.snapshot.bullets, alpha),
     walls: interpolateWalls(s0.snapshot.walls, s1.snapshot.walls, alpha),
     enemies: interpolateEnemies(s0.snapshot.enemies, s1.snapshot.enemies, alpha),
-    items: interpolateItems(s0.snapshot.items, s1.snapshot.items, alpha),
     boss: interpolateBoss(s0.snapshot.boss, s1.snapshot.boss, alpha),
     struggle: interpolateStruggle(s0.snapshot.struggle, s1.snapshot.struggle, alpha),
   };

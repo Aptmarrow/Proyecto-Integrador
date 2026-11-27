@@ -47,32 +47,63 @@ export function createDefaultCompanionSlots(): CompanionSlot[] {
 }
 
 export function mergeCompanionSnapshot(
-  _slots: CompanionSlot[],
+  prevSlots: CompanionSlot[],
   players: ServerPlayer[],
   myPlayerId: string,
   usernamesById?: Record<string, string>
 ): CompanionSlot[] {
-  if (!Array.isArray(players)) return [];
+  if (!Array.isArray(players)) return prevSlots.length === 0 ? prevSlots : [];
 
   const teammates = players.filter((p) => p.id && p.id !== myPlayerId);
+  if (teammates.length === 0) {
+    return prevSlots.length === 0 ? prevSlots : [];
+  }
 
-  return teammates.map((remote) => {
+  let changed = teammates.length !== prevSlots.length;
+  const nextSlots: CompanionSlot[] = new Array(teammates.length);
+
+  for (let i = 0; i < teammates.length; i++) {
+    const remote = teammates[i];
     const role = normalizeRole(remote.character);
-    const nextMaxHp = remote.maxHp ?? 100;
-    const nextMaxSp = remote.maxSp ?? 1000;
+    const nextMaxHp = Math.round(remote.maxHp ?? 100);
+    const nextMaxSp = Math.round(remote.maxSp ?? 1000);
+    const nextHp = Math.round(typeof remote.hp === 'number' ? remote.hp : nextMaxHp);
+    const nextSp = Math.round(typeof remote.sp === 'number' ? remote.sp : 0);
     const displayName = usernamesById?.[remote.id] || `P-${remote.id.slice(0, 4)}`;
+    const nextRole = roleLabel(role);
+    const nextIcon = roleIcon(role);
+    const nextColor = remote.characterColor || roleColor(role);
 
-    return {
-      id: remote.id,
-      name: displayName,
-      role: roleLabel(role),
-      icon: roleIcon(role),
-      hp: typeof remote.hp === 'number' ? remote.hp : nextMaxHp,
-      maxHp: nextMaxHp,
-      sp: typeof remote.sp === 'number' ? remote.sp : 0,
-      maxSp: nextMaxSp,
-      color: remote.characterColor || roleColor(role),
-    };
-  });
+    const prev = prevSlots[i];
+    if (
+      !changed &&
+      prev &&
+      prev.id === remote.id &&
+      prev.name === displayName &&
+      prev.role === nextRole &&
+      prev.hp === nextHp &&
+      prev.maxHp === nextMaxHp &&
+      prev.sp === nextSp &&
+      prev.maxSp === nextMaxSp &&
+      prev.color === nextColor
+    ) {
+      nextSlots[i] = prev;
+    } else {
+      changed = true;
+      nextSlots[i] = {
+        id: remote.id,
+        name: displayName,
+        role: nextRole,
+        icon: nextIcon,
+        hp: nextHp,
+        maxHp: nextMaxHp,
+        sp: nextSp,
+        maxSp: nextMaxSp,
+        color: nextColor,
+      };
+    }
+  }
+
+  return changed ? nextSlots : prevSlots;
 }
 

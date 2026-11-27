@@ -18,6 +18,7 @@ function serializePlayers(players, fallbackStats) {
       maxHp: stats.hpMax,
       maxSp: stats.spMax,
       defensePercent: stats.defensePercent,
+      lastProcessedSeq: typeof player.lastProcessedSeq === 'number' ? player.lastProcessedSeq : -1,
     });
   }
   return result;
@@ -64,7 +65,6 @@ function buildRoomSnapshot(room, options) {
     lasers: room.laserSystem.getState(),
     walls: room.wallSystem.getState(),
     enemies: room.enemySystem.getState(),
-    items: room.itemSystem.getState(),
     boss: serializeBossHud(room),
     campaign: room.campaign.toSnapshot(),
     struggle: room._beamStruggleController.toSnapshot(),

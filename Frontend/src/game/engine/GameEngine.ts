@@ -1,10 +1,9 @@
-import type { CharacterClass, RemotePlayer, Bullet, LaserBeam, WallBarrier, SparkParticle, StageState, BossPhase, ItemType, GameDifficulty } from './types';
-import type { ServerBullet, ServerLaser, ServerBoss, ServerBeamStruggle, ServerEnemy, ServerItem, ServerCampaign } from '../network/wsClient';
+import type { CharacterClass, RemotePlayer, Bullet, LaserBeam, WallBarrier, SparkParticle, StageState, BossPhase, GameDifficulty } from './types';
+import type { ServerBullet, ServerLaser, ServerBoss, ServerBeamStruggle, ServerEnemy, ServerCampaign } from '../network/wsClient';
 import { BaseStageEngine } from './BaseStageEngine';
 import { Player } from './entities/Player';
 import { Boss } from './entities/Boss';
 import { EnemySystem } from './systems/EnemySystem';
-import { ItemSystem } from './systems/ItemSystem';
 import { BeamStruggleSystem } from './systems/BeamStruggleSystem';
 import { getCachedLutProfile } from './SpriteLutCache';
 import { getSpaceStageConfig } from '../campaign/spaceCampaignCatalog';
@@ -16,7 +15,6 @@ export class GameEngine extends BaseStageEngine {
   public player: Player;
   public boss: Boss;
   public enemySystem: EnemySystem;
-  public itemSystem: ItemSystem;
   private networkSync = new NetworkSyncController();
 
   // Estado del Nivel y HUD
@@ -101,7 +99,6 @@ export class GameEngine extends BaseStageEngine {
       );
       this.shakeTimer = Math.max(this.shakeTimer, armed ? 0.3 : 0.14);
     };
-    this.itemSystem = new ItemSystem(this.playfieldContainer);
     this.applyDifficultyVisuals(options?.difficulty);
 
     const activeLut = getCachedLutProfile();
@@ -471,10 +468,10 @@ export class GameEngine extends BaseStageEngine {
     this.hasSyncedStageTime = false;
     this.boss.reset();
     this.enemySystem.clear();
-    this.itemSystem.clear();
     this.bulletSystem.clear();
     this.laserSystem.clear();
     this.wallSystem.clear();
+    this.player.clearPendingInputs();
   }
 
   public goToNextStage(): boolean {
@@ -492,20 +489,44 @@ export class GameEngine extends BaseStageEngine {
 
   // ── Sincronización de Red ───────────────────────────────────────────────────
 
-  public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string): void {
+  public reconcileLocalPlayer(players: RemotePlayer[], myPlayerId: string): void {
+    if (!myPlayerId || !Array.isArray(players)) return;
+    const me = players.find((p) => p.id === myPlayerId);
+    if (!me) return;
+
+    const scaledX = me.x * this.SCALE_X;
+    const scaledY = me.y * this.SCALE_Y;
+    if (!this.hasReceivedInitialPos) {
+      this.hasReceivedInitialPos = true;
+      this.player.setPosition(scaledX, scaledY);
+    } else {
+      this.player.reconcileAuthoritative(scaledX, scaledY, me.lastProcessedSeq);
+    }
+    this.networkSync.applySnapshot(players, myPlayerId, this.player);
+  }
+
+  public applyBackendSnapshot(
+    players: RemotePlayer[],
+    myPlayerId: string,
+    skipLocalPos: boolean = false
+  ): void {
     super.applyBackendSnapshot(players, myPlayerId, (x, y, characterRole) => {
-      if (!this.hasReceivedInitialPos) {
-        this.hasReceivedInitialPos = true;
-        this.player.setPosition(x, y);
-      } else {
-        this.player.targetPos.x = x;
-        this.player.targetPos.y = y;
+      if (!skipLocalPos) {
+        if (!this.hasReceivedInitialPos) {
+          this.hasReceivedInitialPos = true;
+          this.player.setPosition(x, y);
+        } else {
+          const me = players.find((p) => p.id === myPlayerId);
+          this.player.reconcileAuthoritative(x, y, me?.lastProcessedSeq);
+        }
       }
       if (characterRole && this.player.characterClassId !== characterRole) {
         this.player.setCharacterClass(characterRole as CharacterClass);
       }
     });
-    this.networkSync.applySnapshot(players, myPlayerId, this.player);
+    if (!skipLocalPos) {
+      this.networkSync.applySnapshot(players, myPlayerId, this.player);
+    }
   }
 
   public applyBackendBoss(boss: ServerBoss): void {
@@ -542,11 +563,6 @@ export class GameEngine extends BaseStageEngine {
   public applyBackendEnemies(enemies?: ServerEnemy[]): void {
     if (!enemies) return;
     this.enemySystem.applyBackendEnemies(enemies, this.SCALE_X, this.SCALE_Y);
-  }
-
-  public applyBackendItems(items?: ServerItem[]): void {
-    if (!items) return;
-    this.itemSystem.applyBackendItems(items, this.SCALE_X, this.SCALE_Y);
   }
 
   private applyDifficultyVisuals(difficulty?: string): void {
@@ -769,7 +785,6 @@ export class GameEngine extends BaseStageEngine {
     }
     this.boss.syncVisuals(dt, this.animTimer, this.SCALE_X, this.SCALE_Y);
     this.enemySystem.syncRemoteVisuals(this.animTimer, this.player.pos, dt);
-    this.itemSystem.render(this.animTimer);
 
     // 6. Actualizar Láseres y Renderizado de Choque (reutilizando objetos sin asignaciones por frame)
     const authoritativeStruggleState = this.networkSync.getStruggleState();
@@ -810,10 +825,12 @@ export class GameEngine extends BaseStageEngine {
 
     // 10. Aplicar Temblor de Pantalla
     this.applyScreenShake(dt, 8);
+
+    // 11. Renderizar WebGL en sincronía exacta 1:1 con este frame de requestAnimationFrame
+    this.app.renderer.render(this.app.stage);
   }
 
   public override destroy(): void {
-    this.itemSystem.destroy();
     super.destroy();
   }
 }
