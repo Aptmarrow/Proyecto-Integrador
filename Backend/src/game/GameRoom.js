@@ -682,8 +682,9 @@ class GameRoom {
     if (!this.boss.isActive || this.boss.isDefeated || this.boss.hp <= 0) return;
 
     for (let i = this.bulletSystem.active.length - 1; i >= 0; i--) {
+      if (i >= this.bulletSystem.active.length) continue;
       const b = this.bulletSystem.active[i];
-      if (b.ownerId === 'boss') continue;
+      if (!b || b.ownerId === 'boss') continue;
 
       const dx = b.x - this.boss.x;
       const dy = b.y - this.boss.y;
@@ -696,10 +697,12 @@ class GameRoom {
         owner.sp = Math.min(stats.spMax, owner.sp + Math.max(8, stats.spChargePerHit || 0));
       }
 
-      this.boss.takeDamage(damage * 0.14);
       this.bulletSystem.hash.remove(b);
       releaseBullet(b);
       this.bulletSystem.active.splice(i, 1);
+
+      this.boss.takeDamage(damage * 0.14);
+      if (!this.boss.isActive || this.boss.isDefeated || this.boss.isRefilling) break;
     }
   }
 

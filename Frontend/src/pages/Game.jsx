@@ -170,6 +170,12 @@ export default function Game({ isDevMode = false }) {
   );
   const [devTelemetry, setDevTelemetry] = useState(null);
   const [debugHitboxes, setDebugHitboxes] = useState(false);
+  const [recordingMode, setRecordingMode] = useState(null);
+  const [recordElapsed, setRecordElapsed] = useState(0);
+  const [recordStatus, setRecordStatus] = useState('');
+  const [autoStopRecOnClear, setAutoStopRecOnClear] = useState(true);
+  const recorderRef = useRef(null);
+  const autoStopTimerRef = useRef(null);
   const [canAdvanceStage, setCanAdvanceStage] = useState(false);
   const [isCampaignComplete, setIsCampaignComplete] = useState(false);
 
@@ -650,6 +656,83 @@ export default function Game({ isDevMode = false }) {
   const handleDevRestartStage = useCallback(() => sessionRef.current?.restartStage(), []);
   const handleDevNextStage = useCallback(() => sessionRef.current?.goToNextStage(), []);
 
+  const handleStopRecording = useCallback(() => {
+    if (autoStopTimerRef.current) {
+      clearTimeout(autoStopTimerRef.current);
+      autoStopTimerRef.current = null;
+    }
+    recorderRef.current?.stop();
+  }, []);
+
+  const handleStartRecording = useCallback(async (mode) => {
+    if (!DEV_TOOLS_ENABLED) return;
+    const session = sessionRef.current;
+    if (!session) return;
+    const { ShowcaseRecorder } = await import('../game/devtools/showcaseRecorder');
+    if (!recorderRef.current) {
+      recorderRef.current = new ShowcaseRecorder();
+    }
+    setRecordStatus('');
+    const canvas = session.getCanvasElement();
+    const label = `${devTelemetry?.bossId || 'boss'}-w${currentWorld}-${currentStage}-${mode}`;
+    const ok = await recorderRef.current.start(mode, canvas, label, (st) => {
+      setRecordingMode(st.recording ? st.mode : null);
+      if (!st.recording) {
+        setRecordElapsed(0);
+        if (st.savedFile) {
+          setRecordStatus(`Descargado: ${st.savedFile}`);
+        } else if (st.error) {
+          setRecordStatus(st.error);
+        }
+      }
+    });
+    if (ok && mode === 'screen') {
+      // Collapse Dev Lab completely so zero debug chrome appears in the HUD capture!
+      setDevPanelOpen(false);
+    }
+  }, [currentStage, currentWorld, devTelemetry?.bossId]);
+
+  const handleStartMoBotShowcase = useCallback(() => {
+    const session = sessionRef.current;
+    if (!session) return;
+    const diff = devTelemetry?.difficulty || 'normal';
+    session.devJumpLevel(diff, 3, 3, true);
+    session.devResetHits();
+    session.devHealPlayer();
+    session.devSetFlags({ botPlay: true, paused: false, timeScale: 1 });
+    setRecordStatus('M.O. Full Run + Bot Play activado. Tocá Rec Canvas o Rec + HUD.');
+  }, [devTelemetry?.difficulty]);
+
+  useEffect(() => {
+    if (!recordingMode) return undefined;
+    const id = setInterval(() => {
+      if (recorderRef.current?.isRecording()) {
+        setRecordElapsed(recorderRef.current.getElapsedSeconds());
+      }
+    }, 250);
+    return () => clearInterval(id);
+  }, [recordingMode]);
+
+  useEffect(() => {
+    if (!recordingMode || !autoStopRecOnClear || !isStageClear) return undefined;
+    if (autoStopTimerRef.current) return undefined;
+    autoStopTimerRef.current = setTimeout(() => {
+      autoStopTimerRef.current = null;
+      recorderRef.current?.stop();
+    }, 2200);
+    return () => {
+      if (autoStopTimerRef.current) {
+        clearTimeout(autoStopTimerRef.current);
+        autoStopTimerRef.current = null;
+      }
+    };
+  }, [autoStopRecOnClear, isStageClear, recordingMode]);
+
+  useEffect(() => () => {
+    if (autoStopTimerRef.current) clearTimeout(autoStopTimerRef.current);
+    recorderRef.current?.stop();
+  }, []);
+
   const playerHpPercent = Math.max(0, Math.min(100, (playerHp / (playerMaxHp || 100)) * 100));
   const playerSpPercent = Math.max(0, Math.min(100, (playerSp / (playerMaxSp || 1000)) * 100));
   const minSkillThreshold =
@@ -744,7 +827,7 @@ export default function Game({ isDevMode = false }) {
 
         <AdFooter />
 
-        {(!isTouchDevice || isSandboxRoute) && (
+        {(!isTouchDevice || isSandboxRoute) && recordingMode !== 'screen' && (
           <FloatingControlsBar
             selectedClass={selectedClass}
             isFullscreen={isFullscreen}
@@ -768,6 +851,14 @@ export default function Game({ isDevMode = false }) {
               telemetry={devTelemetry}
               selectedClass={selectedClass}
               debugHitboxes={debugHitboxes}
+              recordingMode={recordingMode}
+              recordElapsed={recordElapsed}
+              recordStatus={recordStatus}
+              autoStopRecOnClear={autoStopRecOnClear}
+              onToggleAutoStopRec={setAutoStopRecOnClear}
+              onStartRecording={handleStartRecording}
+              onStopRecording={handleStopRecording}
+              onStartMoBotShowcase={handleStartMoBotShowcase}
               onJumpLevel={handleDevJumpLevel}
               onJumpPhase={handleDevJumpPhase}
               onDamageBoss={handleDevDamageBoss}

@@ -15,12 +15,27 @@ const ROLES = [
   { id: 'Special_Attack', label: 'SpAtk' },
 ];
 
+function formatRecTime(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  const mm = String(Math.floor(s / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return `${mm}:${ss}`;
+}
+
 export default function BossDevPanel({
   isOpen,
   onToggleOpen,
   telemetry,
   selectedClass,
   debugHitboxes,
+  recordingMode,
+  recordElapsed,
+  recordStatus,
+  autoStopRecOnClear,
+  onToggleAutoStopRec,
+  onStartRecording,
+  onStopRecording,
+  onStartMoBotShowcase,
   onJumpLevel,
   onJumpPhase,
   onDamageBoss,
@@ -42,6 +57,7 @@ export default function BossDevPanel({
     godMode: false,
     infiniteSp: false,
     paused: false,
+    botPlay: false,
     timeScale: 1,
     hitsTaken: 0,
     bulletCount: 0,
@@ -60,6 +76,11 @@ export default function BossDevPanel({
     stage: 1,
   };
 
+  // When capturing full screen+HUD, hide the entire Dev Lab pill so zero dev UI appears in the video!
+  if (recordingMode === 'screen' && !isOpen) {
+    return null;
+  }
+
   const phaseCount = Math.max(1, Math.min(8, t.bossPhaseCount || 5));
   const phaseList = Array.from({ length: phaseCount }, (_, i) => i + 1);
   const hpPct = t.bossMaxHp > 0 ? Math.max(0, Math.min(100, (t.bossHp / t.bossMaxHp) * 100)) : 0;
@@ -72,8 +93,10 @@ export default function BossDevPanel({
         onClick={onToggleOpen}
         title="Abrir/Cerrar Boss Dev Lab [F2]"
       >
-        <span className={`dk-devlab-dot ${t.paused ? 'paused' : t.godMode ? 'god' : ''}`} />
+        <span className={`dk-devlab-dot ${recordingMode ? 'rec' : t.paused ? 'paused' : t.botPlay ? 'bot' : t.godMode ? 'god' : ''}`} />
         <span>DEV LAB [F2]</span>
+        {t.botPlay && <span className="dk-devlab-mini-tag bot">BOT</span>}
+        {recordingMode && <span className="dk-devlab-mini-tag rec">● {formatRecTime(recordElapsed)}</span>}
         {t.godMode && <span className="dk-devlab-mini-tag">GOD</span>}
         {t.paused && <span className="dk-devlab-mini-tag warn">PAUSED</span>}
       </button>
@@ -277,7 +300,74 @@ export default function BossDevPanel({
             </div>
           </section>
 
-          {/* 5. Player & Debug Overlay */}
+          {/* 5. Touhou Autopilot Bot & 60fps Video Recorder */}
+          <section className="dk-devlab-section">
+            <div className="dk-devlab-sec-title">
+              <span>BOT PLAY &amp; REC 60FPS</span>
+              <label className="dk-devlab-check" title="Detiene y descarga el video automáticamente al derrotar al jefe">
+                <input
+                  type="checkbox"
+                  checked={autoStopRecOnClear}
+                  onChange={(e) => onToggleAutoStopRec(e.target.checked)}
+                />
+                <span>Auto-Stop</span>
+              </label>
+            </div>
+
+            <div className="dk-devlab-row">
+              <button
+                type="button"
+                className={`dk-devlab-btn ${t.botPlay ? 'bot-active' : 'accent'}`}
+                onClick={() => onSetFlags({ botPlay: !t.botPlay })}
+                title="Activa/Desactiva la IA Touhou predictiva [I]"
+              >
+                {t.botPlay ? '🤖 Bot: ON [I]' : '🤖 Bot Play [I]'}
+              </button>
+              <button
+                type="button"
+                className="dk-devlab-btn"
+                onClick={onStartMoBotShowcase}
+                title="Reinicia M.O. desde la intro con Bot Play listo para grabar"
+              >
+                ★ Run M.O.
+              </button>
+            </div>
+
+            <div className="dk-devlab-row">
+              {recordingMode ? (
+                <button
+                  type="button"
+                  className="dk-devlab-btn danger"
+                  onClick={onStopRecording}
+                >
+                  ■ Parar y Descargar ({formatRecTime(recordElapsed)})
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="dk-devlab-btn"
+                    onClick={() => onStartRecording('canvas')}
+                    title="Graba el canvas del juego directo a 60fps (.webm) sin paneles ni HUD"
+                  >
+                    🎬 Rec Canvas
+                  </button>
+                  <button
+                    type="button"
+                    className="dk-devlab-btn"
+                    onClick={() => onStartRecording('screen')}
+                    title="Graba la pestaña con Intro de M.O., Spell Cards y barra de vida (oculta Dev Lab; F2 para frenar)"
+                  >
+                    📺 Rec + HUD
+                  </button>
+                </>
+              )}
+            </div>
+
+            {recordStatus && <div className="dk-devlab-rec-status">{recordStatus}</div>}
+          </section>
+
+          {/* 6. Player & Debug Overlay */}
           <section className="dk-devlab-section">
             <div className="dk-devlab-sec-title">
               <span>PLAYER &amp; VISUALS</span>

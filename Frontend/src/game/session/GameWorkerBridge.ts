@@ -163,6 +163,7 @@ export class GameWorkerBridge {
     godMode?: boolean;
     infiniteSp?: boolean;
     paused?: boolean;
+    botPlay?: boolean;
     timeScale?: number;
   }): void {
     if (this.worker && this.isInitialized) {

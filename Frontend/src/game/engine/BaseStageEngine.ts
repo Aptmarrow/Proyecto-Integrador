@@ -78,6 +78,7 @@ export class BaseStageEngine {
       autoDensity: true,
       autoStart: false,
       antialias: false,
+      preserveDrawingBuffer: Boolean(import.meta.env.DEV),
       powerPreference: 'high-performance',
     });
 

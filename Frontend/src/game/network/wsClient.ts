@@ -164,6 +164,7 @@ export interface DevTelemetrySnapshot {
   godMode: boolean;
   infiniteSp: boolean;
   paused: boolean;
+  botPlay?: boolean;
   timeScale: number;
   hitsTaken: number;
   bulletCount: number;

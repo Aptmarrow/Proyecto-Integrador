@@ -115,6 +115,7 @@ export class GameRuntimeSession {
   private lastNumpad6At = 0;
   private lastDevTelemetry: DevTelemetrySnapshot | null = null;
   private lastDevTelemetryEmitAt = 0;
+  private lastBotFocus = false;
 
   private readonly onWindowBlur = () => {
     for (const k of Object.keys(this.keys)) {
@@ -197,6 +198,9 @@ export class GameRuntimeSession {
       if (e.code === 'KeyN' && !e.repeat) this.goToNextStage();
       if (e.code === 'KeyG' && !e.repeat) {
         this.devSetFlags({ godMode: !this.lastDevTelemetry?.godMode });
+      }
+      if (e.code === 'KeyI' && !e.repeat) {
+        this.devSetFlags({ botPlay: !this.lastDevTelemetry?.botPlay });
       }
       if (e.code === 'KeyH' && !e.repeat) {
         this.toggleDebugHitboxes();
@@ -525,10 +529,18 @@ export class GameRuntimeSession {
     godMode?: boolean;
     infiniteSp?: boolean;
     paused?: boolean;
+    botPlay?: boolean;
     timeScale?: number;
   }): void {
     if (!this.options.allowDebugHotkeys || !this.workerBridge?.isActive()) return;
+    if (flags.botPlay === false) {
+      this.lastBotFocus = false;
+    }
     this.workerBridge.devSetFlags(flags);
+  }
+
+  public getCanvasElement(): HTMLCanvasElement | null {
+    return (this.engine?.app?.view as HTMLCanvasElement) || null;
   }
 
   public devStepFrame(frames: number = 1): void {
@@ -583,27 +595,30 @@ export class GameRuntimeSession {
       frameInput.touchFocus
     );
 
+    const isBotActive = this.runtimeMode === 'local-worker' && Boolean(this.lastDevTelemetry?.botPlay);
+    const effectiveFocus = isBotActive ? this.lastBotFocus : isFocusing;
+
     const ek = this.effectiveKeys;
-    ek.ArrowLeft = !!this.keys.ArrowLeft;
-    ek.ArrowRight = !!this.keys.ArrowRight;
-    ek.ArrowUp = !!this.keys.ArrowUp;
-    ek.ArrowDown = !!this.keys.ArrowDown;
-    ek.KeyA = !!this.keys.KeyA;
-    ek.KeyD = !!this.keys.KeyD;
-    ek.KeyW = !!this.keys.KeyW;
-    ek.KeyS = !!this.keys.KeyS;
-    ek.KeyZ = isShooting;
-    ek.Space = isShooting;
-    ek.ShiftLeft = isFocusing;
-    ek.ShiftRight = isFocusing;
-    ek.Shift = isFocusing;
-    ek.focus = isFocusing;
-    ek.isFocus = isFocusing;
+    ek.ArrowLeft = !isBotActive && !!this.keys.ArrowLeft;
+    ek.ArrowRight = !isBotActive && !!this.keys.ArrowRight;
+    ek.ArrowUp = !isBotActive && !!this.keys.ArrowUp;
+    ek.ArrowDown = !isBotActive && !!this.keys.ArrowDown;
+    ek.KeyA = !isBotActive && !!this.keys.KeyA;
+    ek.KeyD = !isBotActive && !!this.keys.KeyD;
+    ek.KeyW = !isBotActive && !!this.keys.KeyW;
+    ek.KeyS = !isBotActive && !!this.keys.KeyS;
+    ek.KeyZ = isBotActive || isShooting;
+    ek.Space = isBotActive || isShooting;
+    ek.ShiftLeft = effectiveFocus;
+    ek.ShiftRight = effectiveFocus;
+    ek.Shift = effectiveFocus;
+    ek.focus = effectiveFocus;
+    ek.isFocus = effectiveFocus;
 
     const action = isShooting && !this.engine.isBeamStruggle ? 'shoot' : null;
     const isMovementLocked = this.engine.isStruggleActive;
-    const sentDx = isMovementLocked ? 0 : dx;
-    const sentDy = isMovementLocked ? 0 : dy;
+    const sentDx = isMovementLocked || isBotActive ? 0 : dx;
+    const sentDy = isMovementLocked || isBotActive ? 0 : dy;
 
     if (this.gameClient && this.runtimeMode === 'backend-worker') {
       const seq = this.gameClient.sendInput(sentDx, sentDy, action, isFocusing);
@@ -614,15 +629,15 @@ export class GameRuntimeSession {
       if (interpolated) {
         this.applySnapshot(interpolated, true);
       }
-    } else if (this.workerBridge?.isActive()) {
+    } else if (this.workerBridge?.isActive() && !isBotActive) {
       const seq = this.workerBridge.sendInput(sentDx, sentDy, action, isFocusing);
       if (seq >= 0 && this.engine.player.hp > 0) {
         this.engine.player.recordPredictedInput(seq, sentDx, sentDy, isFocusing, dt);
       }
     }
 
-    this.moveVec.dx = dx;
-    this.moveVec.dy = dy;
+    this.moveVec.dx = isBotActive ? 0 : dx;
+    this.moveVec.dy = isBotActive ? 0 : dy;
     this.engine.update(dt, ek, this.moveVec);
     this.options.onEngineFrame(this.engine);
     this.animFrameId = requestAnimationFrame(this.loop);
@@ -645,6 +660,14 @@ export class GameRuntimeSession {
     if (!snapshot) return;
     if (snapshot.players) {
       this.engine.applyBackendSnapshot(snapshot.players, this.myPlayerId, skipLocalPos);
+      // Pixel-locked 60Hz autopilot sync: zero interpolation lag so recordings match true worker hitbox 1:1!
+      if (snapshot.devTelemetry?.botPlay && this.runtimeMode === 'local-worker') {
+        const mySnap = snapshot.players.find((p) => p.id === this.myPlayerId) || snapshot.players[0];
+        if (mySnap) {
+          this.lastBotFocus = Boolean(mySnap.focus);
+          this.engine.player.setPosition(mySnap.x * this.engine.SCALE_X, mySnap.y * this.engine.SCALE_Y);
+        }
+      }
       this.options.onPlayersSnapshot?.(snapshot.players, this.myPlayerId);
     }
     if (snapshot.bullets) this.engine.applyBackendBullets(snapshot.bullets);
@@ -666,6 +689,7 @@ export class GameRuntimeSession {
         prev.godMode !== next.godMode ||
         prev.infiniteSp !== next.infiniteSp ||
         prev.paused !== next.paused ||
+        prev.botPlay !== next.botPlay ||
         prev.timeScale !== next.timeScale ||
         prev.hitsTaken !== next.hitsTaken ||
         prev.bossPhase !== next.bossPhase ||

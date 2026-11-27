@@ -27,6 +27,8 @@ import {
   updateWorkerMechanicalOphanim,
   type MoBossRuntimeState,
 } from '../campaign/moBossEngine';
+import { TouhouAutoplayBot } from '../devtools/touhouAutoplayBot';
+import { DEV_TOOLS_ENABLED } from '../../config/devTools';
 
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
@@ -245,8 +247,10 @@ class DanmakrewSimulationWorker {
   private devGodMode = false;
   private devInfiniteSp = false;
   private devPaused = false;
+  private devBotPlay = false;
   private devTimeScale = 1.0;
   private devHitsTaken = 0;
+  private readonly autoplayBot = new TouhouAutoplayBot();
 
   private boss = {
     x: 685,
@@ -730,6 +734,7 @@ class DanmakrewSimulationWorker {
     godMode?: boolean;
     infiniteSp?: boolean;
     paused?: boolean;
+    botPlay?: boolean;
     timeScale?: number;
   }): void {
     if (typeof flags.godMode === 'boolean') this.devGodMode = flags.godMode;
@@ -743,6 +748,16 @@ class DanmakrewSimulationWorker {
       }
     }
     if (typeof flags.paused === 'boolean') this.devPaused = flags.paused;
+    if (typeof flags.botPlay === 'boolean' && DEV_TOOLS_ENABLED) {
+      this.devBotPlay = flags.botPlay;
+      this.autoplayBot.reset();
+      if (!this.devBotPlay) {
+        const localPlayer = this.players.get(this.myPlayerId);
+        if (localPlayer) {
+          localPlayer.input = { dx: 0, dy: 0, action: null, focus: false };
+        }
+      }
+    }
     if (typeof flags.timeScale === 'number' && Number.isFinite(flags.timeScale)) {
       this.devTimeScale = Math.max(0.1, Math.min(4.0, flags.timeScale));
     }
@@ -915,6 +930,9 @@ class DanmakrewSimulationWorker {
     this.stageTime += dt;
 
     this.updateTimeline();
+    if (this.devBotPlay) {
+      this.applyBotPlayInput(dt);
+    }
     this.updatePlayers(dt);
     this.world.step(dt);
     this.updateBoss(dt);
@@ -930,6 +948,28 @@ class DanmakrewSimulationWorker {
         this.advanceStage();
       }
     }
+  }
+
+  private applyBotPlayInput(dt: number): void {
+    const p = this.players.get(this.myPlayerId) || [...this.players.values()].find((pl) => pl.hp > 0);
+    if (!p || p.hp <= 0) return;
+    const pos = p.body.getPosition();
+    const decision = this.autoplayBot.computeInput(
+      pos.x,
+      pos.y,
+      this.bullets,
+      this.enemies,
+      this.lasers,
+      this.boss,
+      Boolean(this.struggle.active),
+      dt
+    );
+    p.input = {
+      dx: decision.dx,
+      dy: decision.dy,
+      action: decision.action,
+      focus: decision.focus,
+    };
   }
 
   private updateTimeline(): void {
@@ -2153,8 +2193,11 @@ class DanmakrewSimulationWorker {
           if (dx * dx + dy * dy <= (42 + b.radius) * (42 + b.radius)) {
             const owner = this.players.get(b.ownerId);
             if (owner) owner.sp = Math.min(owner.stats.spMax, owner.sp + owner.stats.spChargePerHit);
-            this.damageBoss(b.damage * 0.35);
             this.bullets.splice(i, 1);
+            this.damageBoss(b.damage * 0.35);
+            if (!this.boss.isActive || this.boss.isDefeated || this.boss.isRefilling) {
+              break;
+            }
           }
         }
       }
@@ -2530,6 +2573,7 @@ class DanmakrewSimulationWorker {
       godMode: this.devGodMode,
       infiniteSp: this.devInfiniteSp,
       paused: this.devPaused,
+      botPlay: this.devBotPlay,
       timeScale: this.devTimeScale,
       hitsTaken: this.devHitsTaken,
       bulletCount: bullets.length,
