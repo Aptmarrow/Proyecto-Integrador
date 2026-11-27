@@ -36,6 +36,7 @@ class LaserSystem {
       color:          options.color !== undefined ? options.color : 0xff2b5b,
       podType:        options.podType || 'top',
       dps:            options.dps !== undefined ? options.dps : LASER_DPS,
+      isMegaBeam:     Boolean(options.isMegaBeam),
     };
     this.lasers.push(laser);
     return laser;
@@ -214,6 +215,7 @@ class LaserSystem {
       fadeDuration:   l.fadeDuration,
       maxWidth:       l.maxWidth,
       color:          l.color,
+      isMegaBeam:     Boolean(l.isMegaBeam),
     }));
   }
 }

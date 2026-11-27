@@ -419,7 +419,20 @@ class GameRoom {
     const bulletHits = this.bulletSystem.update(deltaTime, this.players);
     this._applyBulletHits(bulletHits);
 
-    // 10. Laser updates
+    // 10. Laser updates (anchor player beams to their caster when not in beam struggle)
+    if (!this._beamStruggleController.isSuppressingLaserDamage()) {
+      for (const laser of this.laserSystem.lasers) {
+        if (laser.ownerId && laser.ownerId !== 'boss') {
+          const owner = this.players.get(laser.ownerId);
+          if (owner && owner.active && owner.hp > 0) {
+            const pPos = owner.body.getPosition();
+            laser.sourceX = pPos.x + 18;
+            laser.sourceY = pPos.y;
+            laser.targetY = pPos.y;
+          }
+        }
+      }
+    }
     this.laserSystem.update(deltaTime);
     this.laserSystem.clearBulletsInPath(this.bulletSystem);
 
@@ -554,12 +567,12 @@ class GameRoom {
     if (action === 'shoot' && player.shootCooldown <= 0) {
       if (normClass === 'support' || normClass === 'healer') {
         const targets = this._getAutoAimTargets();
-        spawnAutoAimBullet(this.bulletSystem, id, pos.x + 16, pos.y, targets, 660, 4, 2.6, stats.bulletDamage, 'autoaim');
+        spawnAutoAimBullet(this.bulletSystem, id, pos.x + 16, pos.y, targets, 780, 4, 2.6, stats.bulletDamage, 'autoaim');
       } else if (normClass === 'tank' || normClass === 'defense') {
-        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y, 620, 0, 5, 2.5, 'normal', stats.bulletDamage, 0x00ff88);
+        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y, 760, 0, 5, 2.5, 'normal', stats.bulletDamage, 0x00ff88);
       } else {
-        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y - 6, 760, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
-        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y + 6, 760, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
+        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y - 6, 960, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
+        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y + 6, 960, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
       }
       player.shootCooldown = shootCooldown;
     }
@@ -578,14 +591,15 @@ class GameRoom {
 
     // Special_Attack: Piercing Master Spark laser (clears enemy bullets + triggers Beam Struggle vs Boss Mega-Beams)
     if ((action === 'laser' || ((normClass === 'special_attack' || normClass === 'attack') && action === 'special')) && player.skillCooldown <= 0 && player.sp >= laserCost) {
-      this.laserSystem.spawnLaser(pos.x + 16, pos.y, pos.y, {
+      this.laserSystem.spawnLaser(pos.x + 18, pos.y, pos.y, {
         ownerId: id,
         direction: 'right',
-        chargeDuration: 0.28,
-        fireDuration: 1.15,
-        fadeDuration: 0.22,
-        maxWidth: 34,
-        color: 0x00f0ff,
+        chargeDuration: 0.42,
+        fireDuration: 1.35,
+        fadeDuration: 0.30,
+        maxWidth: 72,
+        color: 0x00f2fe,
+        dps: 85,
       });
       player.skillCooldown = SKILL_COOLDOWN * 2;
       player.sp = Math.max(0, player.sp - laserCost);

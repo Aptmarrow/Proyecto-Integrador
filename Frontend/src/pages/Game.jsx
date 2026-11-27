@@ -108,7 +108,6 @@ export default function Game({ isDevMode = false }) {
   const [selectedClass, setSelectedClass] = useState(launchConfig.role);
   const selectedClassRef = useRef(launchConfig.role);
   const [workerMode, setWorkerMode] = useState('connecting');
-  const [workerModeLabel, setWorkerModeLabel] = useState('Iniciando Web Workers...');
   const [isHost, setIsHost] = useState(() =>
     Boolean(launchConfig.hostId && launchConfig.userId && launchConfig.hostId === launchConfig.userId)
   );
@@ -287,6 +286,7 @@ export default function Game({ isDevMode = false }) {
       world: launchConfig.world,
       stage: launchConfig.stage,
       testMode: launchConfig.testMode,
+      allowDebugHotkeys: isSandboxRoute,
       initialRoster: launchConfig.playerCharacters,
       getSelectedRole: () => selectedClassRef.current,
       setSelectedRole: (role) => updateSelectedRole(role),
@@ -300,9 +300,8 @@ export default function Game({ isDevMode = false }) {
       onOrientationChange: () => {},
       onFullscreenChange: () => setIsFullscreen(Boolean(document.fullscreenElement)),
       onToggleFullscreen: toggleFullscreen,
-      onWorkerModeChange: (mode, label) => {
+      onWorkerModeChange: (mode) => {
         setWorkerMode(mode);
-        setWorkerModeLabel(label);
       },
       onHostStatusChange: (hostFlag) => {
         isHostRef.current = hostFlag;
@@ -679,12 +678,12 @@ export default function Game({ isDevMode = false }) {
   const playerAvatarSrc = roleIcon(selectedClass);
   const isLocalWorkerMode = workerMode === 'local-worker';
 
-  const stageClearMetaText = `Dificultad: ${currentDifficultyLabel} | Mundo ${currentWorld} | Stage ${currentStage}`;
+  const stageClearMetaText = `${currentDifficultyLabel} · Mundo ${currentWorld}-${currentStage}`;
   const stageClearButtonText = canAdvanceStage
-    ? '▶ SIGUIENTE STAGE'
+    ? 'SIGUIENTE NIVEL'
     : isCampaignComplete
-      ? '🏆 REINICIAR CAMPAÑA'
-      : '🔄 JUGAR OTRA VEZ (REPLAY)';
+      ? 'REINICIAR CAMPAÑA'
+      : 'JUGAR DE NUEVO';
 
   return (
     <div className="dk-game-viewport" role="application" aria-label="Danmakrew Arena de Combate">
@@ -703,7 +702,6 @@ export default function Game({ isDevMode = false }) {
           isMiniboss={isMinibossEncounter}
           isBossRefilling={isBossRefilling}
           bossDisplayHpPercent={bossDisplayHpPercent}
-          workerModeLabel={workerModeLabel}
           difficultyLabel={currentDifficultyLabel}
           world={currentWorld}
           stage={currentStage}
@@ -770,8 +768,8 @@ export default function Game({ isDevMode = false }) {
         <FloatingControlsBar
           selectedClass={selectedClass}
           isFullscreen={isFullscreen}
-          canSwitchRole={isLocalWorkerMode}
-          showDebugActions={true}
+          canSwitchRole={isSandboxRoute && isLocalWorkerMode}
+          showDebugActions={isSandboxRoute}
           stagePreviewVariants={stagePreviewVariants}
           activeStagePreviewIdx={activeStagePreviewIdx}
           onSelectRole={handleSelectRole}

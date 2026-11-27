@@ -42,7 +42,7 @@ export function getBossHitDamage(
   dt: number,
   isClashing: boolean
 ): number {
-  if (laser.ownerId !== 'player' || isClashing) return 0;
+  if (laser.ownerId === 'boss' || isClashing) return 0;
   if (bossPos.x <= laser.sourceX || bossPos.hp <= 0) return 0;
 
   const dy = Math.abs(bossPos.y - laser.sourceY);

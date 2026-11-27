@@ -5,6 +5,12 @@ import type { WallSystem } from '../systems/WallSystem';
 import type { LaserSystem } from '../systems/LaserSystem';
 import type { ParticleSystem } from '../systems/ParticleSystem';
 import { getCharacterStats, type CharacterCombatStats } from '../CharacterStats';
+import { SCALE_X, SCALE_Y, CANVAS_WIDTH, CANVAS_HEIGHT } from '../physics/RenderConstants';
+
+const PLAYER_WORLD_SPEED = 510;
+const FOCUS_SPEED_MULT = 0.38;
+const BOUND_PAD_X = 10 * SCALE_X;
+const BOUND_PAD_Y = 10 * SCALE_Y;
 
 export class Player {
   public pos = { x: 100, y: 300 };
@@ -17,7 +23,10 @@ export class Player {
 
   public container = new PIXI.Container();
   private sprite: PIXI.Sprite | PIXI.Graphics = new PIXI.Graphics();
+  private focusRingOuter = new PIXI.Graphics();
+  private focusRingInner = new PIXI.Graphics();
   private hitbox = new PIXI.Graphics();
+  private focusAlpha = 0;
 
   private baseScale = 0.25;
   private shootTimer = 0;
@@ -80,6 +89,55 @@ export class Player {
     this.hp = Math.min(this.maxHp, this.hp + amount);
   }
 
+  private buildFocusVisuals(): void {
+    // Classic Touhou counter-rotating arcane focus rings + crystal-clear red-rimmed hitbox core
+    this.focusRingOuter.clear();
+    this.focusRingOuter.lineStyle(1.4, 0xff5577, 0.72);
+    this.focusRingOuter.drawCircle(0, 0, 27);
+    this.focusRingOuter.lineStyle(1, 0x00f2fe, 0.52);
+    for (let i = 0; i < 6; i++) {
+      const a1 = (Math.PI / 3) * i;
+      const a2 = (Math.PI / 3) * (i + 2);
+      this.focusRingOuter.moveTo(Math.cos(a1) * 26, Math.sin(a1) * 26);
+      this.focusRingOuter.lineTo(Math.cos(a2) * 26, Math.sin(a2) * 26);
+    }
+    this.focusRingOuter.lineStyle(1.4, 0xffffff, 0.65);
+    for (let i = 0; i < 8; i++) {
+      const a = (Math.PI / 4) * i;
+      this.focusRingOuter.moveTo(Math.cos(a) * 24, Math.sin(a) * 24);
+      this.focusRingOuter.lineTo(Math.cos(a) * 30, Math.sin(a) * 30);
+    }
+    this.focusRingOuter.blendMode = PIXI.BLEND_MODES.ADD;
+    this.focusRingOuter.alpha = 0;
+    this.focusRingOuter.visible = false;
+
+    this.focusRingInner.clear();
+    this.focusRingInner.lineStyle(1.2, 0xff88aa, 0.75);
+    this.focusRingInner.drawCircle(0, 0, 16);
+    for (let i = 0; i < 4; i++) {
+      const a1 = (Math.PI / 2) * i;
+      const a2 = (Math.PI / 2) * (i + 1);
+      this.focusRingInner.moveTo(Math.cos(a1) * 16, Math.sin(a1) * 16);
+      this.focusRingInner.lineTo(Math.cos(a2) * 16, Math.sin(a2) * 16);
+    }
+    this.focusRingInner.blendMode = PIXI.BLEND_MODES.ADD;
+    this.focusRingInner.alpha = 0;
+    this.focusRingInner.visible = false;
+
+    this.hitbox.clear();
+    this.hitbox.beginFill(0xff2b5b, 0.32);
+    this.hitbox.drawCircle(0, 0, 9.5);
+    this.hitbox.endFill();
+    this.hitbox.beginFill(0xff2b5b, 0.95);
+    this.hitbox.drawCircle(0, 0, 5.6);
+    this.hitbox.endFill();
+    this.hitbox.beginFill(0xffffff, 1.0);
+    this.hitbox.drawCircle(0, 0, 3.6);
+    this.hitbox.endFill();
+    this.hitbox.alpha = 0;
+    this.hitbox.visible = false;
+  }
+
   private initGraphics(): void {
     const defaultGraphic = new PIXI.Graphics();
     defaultGraphic.beginFill(0xff2b5b);
@@ -87,14 +145,10 @@ export class Player {
     defaultGraphic.endFill();
     this.sprite = defaultGraphic;
 
-    this.hitbox.clear();
-    this.hitbox.beginFill(0xffffff);
-    this.hitbox.drawCircle(0, 0, 4);
-    this.hitbox.endFill();
-    this.hitbox.lineStyle(1.5, 0x00f2fe, 1);
-    this.hitbox.drawCircle(0, 0, 7);
-    this.hitbox.visible = false;
+    this.buildFocusVisuals();
 
+    this.container.addChild(this.focusRingOuter);
+    this.container.addChild(this.focusRingInner);
     this.container.addChild(this.sprite);
     this.container.addChild(this.hitbox);
     this.container.position.set(this.pos.x, this.pos.y);
@@ -126,6 +180,8 @@ export class Player {
       sprite.rotation = 0;
 
       this.sprite = sprite;
+      this.container.addChild(this.focusRingOuter);
+      this.container.addChild(this.focusRingInner);
       this.container.addChild(sprite);
       this.container.addChild(this.hitbox);
     } catch {
@@ -158,17 +214,80 @@ export class Player {
     this.shootTimer += dt;
     this.skillCooldownTimer = Math.max(0, this.skillCooldownTimer - dt);
 
-    const prevX = this.pos.x;
-    const prevY = this.pos.y;
-    this.pos.x += (this.targetPos.x - this.pos.x) * 0.75;
-    this.pos.y += (this.targetPos.y - this.pos.y) * 0.75;
-    const dx = Math.sign(this.pos.x - prevX);
-    const dy = Math.sign(this.pos.y - prevY);
+    this.isFocus = !!(
+      keys['ShiftLeft'] ||
+      keys['ShiftRight'] ||
+      keys['Shift'] ||
+      keys['focus'] ||
+      (keys as any).isFocus
+    );
 
-    this.isFocus = !!(keys['ShiftLeft'] || keys['ShiftRight'] || keys['Shift'] || keys['focus'] || (keys as any).isFocus);
+    const rawDx = this.hp > 0 ? (moveVec?.dx ?? 0) : 0;
+    const rawDy = this.hp > 0 ? (moveVec?.dy ?? 0) : 0;
+    const inputLen = Math.hypot(rawDx, rawDy);
+    const hasInput = inputLen > 0.01;
+
+    // 0ms client-side prediction matching authoritative Planck velocity, with smooth server reconciliation
+    if (hasInput) {
+      const nx = inputLen > 1 ? rawDx / inputLen : rawDx;
+      const ny = inputLen > 1 ? rawDy / inputLen : rawDy;
+      const speedMult = this.isFocus ? FOCUS_SPEED_MULT : 1.0;
+      this.pos.x += nx * PLAYER_WORLD_SPEED * speedMult * SCALE_X * dt;
+      this.pos.y += ny * PLAYER_WORLD_SPEED * speedMult * SCALE_Y * dt;
+      this.pos.x = Math.max(BOUND_PAD_X, Math.min(CANVAS_WIDTH - BOUND_PAD_X, this.pos.x));
+      this.pos.y = Math.max(BOUND_PAD_Y, Math.min(CANVAS_HEIGHT - BOUND_PAD_Y, this.pos.y));
+    }
+
+    if (isBackendControlled) {
+      const errX = this.targetPos.x - this.pos.x;
+      const errY = this.targetPos.y - this.pos.y;
+      const errDist = Math.hypot(errX, errY);
+
+      if (errDist > 155) {
+        // Hard snap on teleports, stage restarts, or beam struggle alignment
+        this.pos.x = this.targetPos.x;
+        this.pos.y = this.targetPos.y;
+      } else if (!hasInput) {
+        const settle = 1 - Math.exp(-20 * dt);
+        this.pos.x += errX * settle;
+        this.pos.y += errY * settle;
+      } else if (errDist > 56) {
+        // Gentle background reconciliation while actively dodging so input stays crisp with zero rubber-band
+        const drift = 1 - Math.exp(-5.5 * dt);
+        this.pos.x += errX * drift;
+        this.pos.y += errY * drift;
+      }
+    }
+
+    const dx = hasInput ? Math.sign(rawDx) : 0;
+    const dy = hasInput ? Math.sign(rawDy) : 0;
+
     this.container.position.set(this.pos.x, this.pos.y);
-    this.hitbox.visible = this.isFocus;
-    if (this.isFocus) this.hitbox.rotation += 0.08;
+
+    // Smooth Touhou focus ring & hitbox core reveal
+    const targetFocusAlpha = this.isFocus && this.hp > 0 ? 1 : 0;
+    this.focusAlpha += (targetFocusAlpha - this.focusAlpha) * Math.min(1, 18 * dt);
+    const showFocus = this.focusAlpha > 0.02;
+    this.focusRingOuter.visible = showFocus;
+    this.focusRingInner.visible = showFocus;
+    this.hitbox.visible = showFocus;
+    if (showFocus) {
+      const pulse = 1 + Math.sin(animTimer * 10) * 0.04;
+      this.focusRingOuter.alpha = this.focusAlpha * 0.9;
+      this.focusRingOuter.rotation += 1.65 * dt;
+      this.focusRingOuter.scale.set((0.88 + this.focusAlpha * 0.12) * pulse);
+
+      this.focusRingInner.alpha = this.focusAlpha * 0.85;
+      this.focusRingInner.rotation -= 2.4 * dt;
+      this.focusRingInner.scale.set(0.86 + this.focusAlpha * 0.14);
+
+      this.hitbox.alpha = this.focusAlpha;
+      this.hitbox.scale.set(0.95 + Math.sin(animTimer * 16) * 0.08);
+    }
+
+    if (this.sprite) {
+      this.sprite.alpha = this.hp <= 0 ? 0.25 : 1 - this.focusAlpha * 0.18;
+    }
 
     this.applySquashAndStretch(dt, animTimer, dx, dy);
 
@@ -183,31 +302,34 @@ export class Player {
     let targetRotation = 0;
 
     if (dx !== 0 || dy !== 0) {
+      const leanMult = this.isFocus ? 0.45 : 1.0;
       if (dx > 0) {
-        targetScaleX = this.baseScale * 1.04;
-        targetScaleY = this.baseScale * 0.96;
-        targetRotation = 0.05;
+        targetScaleX = this.baseScale * (1 + 0.07 * leanMult);
+        targetScaleY = this.baseScale * (1 - 0.06 * leanMult);
+        targetRotation = 0.09 * leanMult;
       } else if (dx < 0) {
-        targetScaleX = this.baseScale * 0.96;
-        targetScaleY = this.baseScale * 1.04;
-        targetRotation = -0.05;
+        targetScaleX = this.baseScale * (1 - 0.06 * leanMult);
+        targetScaleY = this.baseScale * (1 + 0.06 * leanMult);
+        targetRotation = -0.09 * leanMult;
       }
 
       if (dy < 0) {
-        targetScaleY *= 1.04;
-        targetScaleX *= 0.96;
+        targetScaleY *= 1 + 0.05 * leanMult;
+        targetScaleX *= 1 - 0.04 * leanMult;
+        targetRotation -= 0.06 * leanMult;
       } else if (dy > 0) {
-        targetScaleY *= 0.96;
-        targetScaleX *= 1.04;
+        targetScaleY *= 1 - 0.05 * leanMult;
+        targetScaleX *= 1 + 0.04 * leanMult;
+        targetRotation += 0.06 * leanMult;
       }
     } else {
-      const breath = Math.sin(animTimer * 4) * 0.003;
+      const breath = Math.sin(animTimer * 4.5) * 0.003;
       targetScaleX = this.baseScale + breath;
       targetScaleY = this.baseScale - breath;
       targetRotation = 0;
     }
 
-    const lerpSpeed = Math.min(1, 24 * dt);
+    const lerpSpeed = Math.min(1, 30 * dt);
     this.sprite.scale.x += (targetScaleX - this.sprite.scale.x) * lerpSpeed;
     this.sprite.scale.y += (targetScaleY - this.sprite.scale.y) * lerpSpeed;
     this.sprite.rotation += (targetRotation - this.sprite.rotation) * lerpSpeed;

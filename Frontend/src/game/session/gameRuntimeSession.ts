@@ -35,6 +35,7 @@ export type RuntimeSessionOptions = {
   world?: number;
   stage?: number;
   testMode?: string | null;
+  allowDebugHotkeys?: boolean;
   initialRoster?: Record<string, string>;
   getSelectedRole: () => PlayerRole;
   setSelectedRole: (role: PlayerRole) => void;
@@ -123,7 +124,7 @@ export class GameRuntimeSession {
       this.pushStruggle();
     }
 
-    if (!e.repeat) {
+    if (this.options.allowDebugHotkeys && !e.repeat) {
       const isNumpad6 = e.code === 'Numpad6' || (e.location === 3 && e.key === '6');
       if (isNumpad6) {
         const nowMs = performance.now();
@@ -141,7 +142,7 @@ export class GameRuntimeSession {
       }
     }
 
-    if (!e.repeat && this.engine.hasStagePreviewVariants()) {
+    if (this.options.allowDebugHotkeys && !e.repeat && this.engine.hasStagePreviewVariants()) {
       const codeDigit = /^(?:Digit|Numpad)([0-9])$/.exec(e.code)?.[1];
       const keyDigit = /^[0-9]$/.test(e.key) ? e.key : undefined;
       const digit = codeDigit ?? keyDigit;
@@ -158,7 +159,7 @@ export class GameRuntimeSession {
       }
     }
 
-    if (this.runtimeMode === 'local-worker') {
+    if (this.options.allowDebugHotkeys && this.runtimeMode === 'local-worker') {
       if (e.code === 'Digit1') this.selectRole('DPS');
       if (e.code === 'Digit2') this.selectRole('Tank');
       if (e.code === 'Digit3') this.selectRole('Support');
@@ -167,8 +168,8 @@ export class GameRuntimeSession {
       if (e.code === 'KeyN' && !e.repeat) this.goToNextStage();
     }
 
-    if (e.code === 'KeyT' && !e.repeat) this.startBeamStruggleTest();
-    if (e.code === 'KeyB' && !e.repeat) this.spawnBossNow();
+    if (this.options.allowDebugHotkeys && e.code === 'KeyT' && !e.repeat) this.startBeamStruggleTest();
+    if (this.options.allowDebugHotkeys && e.code === 'KeyB' && !e.repeat) this.spawnBossNow();
     if (e.code === 'KeyX' && !e.repeat) this.triggerSkill();
     if (e.code === 'KeyF' && !e.repeat) this.options.onToggleFullscreen();
   };
@@ -234,7 +235,7 @@ export class GameRuntimeSession {
         this.snapshotWorker = null;
       }
 
-      this.setMode('connecting', 'Sincronizando sala multijugador...');
+      this.setMode('connecting', 'Conectando...');
       this.gameClient = new GameWSClient(this.options.token);
       this.gameClient
         .connect(
@@ -245,7 +246,7 @@ export class GameRuntimeSession {
             if (typeof isHost === 'boolean') {
               this.options.onHostStatusChange?.(isHost);
             }
-            this.setMode('backend-worker', 'Servidor Autoritativo + Snapshot Worker (60Hz)');
+            this.setMode('backend-worker', 'ONLINE');
             if (initialState) this.handleIncomingSnapshot(initialState);
             if (this.options.testMode === 'beam' || this.options.testMode === 'struggle') {
               setTimeout(() => this.startBeamStruggleTest(), 150);
@@ -329,7 +330,7 @@ export class GameRuntimeSession {
       .then((resolvedId) => {
         if (this.stopped) return;
         this.myPlayerId = resolvedId;
-        this.setMode('local-worker', 'Físicas Planck.js en Web Worker Local (60Hz)');
+        this.setMode('local-worker', 'LOCAL');
 
         if (this.options.testMode === 'beam' || this.options.testMode === 'struggle') {
           setTimeout(() => this.startBeamStruggleTest(), 120);

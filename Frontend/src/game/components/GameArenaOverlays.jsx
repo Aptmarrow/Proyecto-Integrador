@@ -17,10 +17,10 @@ function GameArenaOverlays({
   stageFlashAlpha = 0,
   isPlayerDefeated = false,
   roomClosedMessage = null,
-  stageClearTitle = 'STAGE 1 CLEARED!',
-  stageClearSubtext = '¡Misión completada con éxito!',
+  stageClearTitle = 'STAGE CLEAR',
+  stageClearSubtext = '',
   stageClearMeta = '',
-  stageClearButtonText = '🔄 JUGAR OTRA VEZ (REPLAY)',
+  stageClearButtonText = 'JUGAR DE NUEVO',
   onPushStruggle,
   onRestartStage,
   onLeaveMatch,
@@ -30,7 +30,7 @@ function GameArenaOverlays({
       {stageBanner && (
         <div className="dk-stage-banner-overlay">
           <div className="dk-stage-banner-card">
-            <div className="dk-stage-banner-badge">DANMAKREW STAGE</div>
+            <div className="dk-stage-banner-badge">STAGE</div>
             <h1 className="dk-stage-banner-title">{stageBanner.text}</h1>
             <div className="dk-stage-banner-divider" />
             <p className="dk-stage-banner-subtext">{stageBanner.subtext}</p>
@@ -42,9 +42,7 @@ function GameArenaOverlays({
         <div className="dk-boss-warning-overlay">
           <div className="dk-hazard-bar" />
           <div className="dk-warning-content">
-            <span className="dk-warning-siren">⚠️</span>
-            <span className="dk-warning-text">WARNING! HIGH-ENERGY BOSS APPROACHING</span>
-            <span className="dk-warning-siren">⚠️</span>
+            <span className="dk-warning-text">WARNING — BOSS APPROACHING</span>
           </div>
           <div className="dk-hazard-bar" />
         </div>
@@ -103,14 +101,14 @@ function GameArenaOverlays({
               <div className="dk-mo-flash-veil" style={{ opacity: lockFlash * 0.55 }} />
             )}
             <div className="dk-mo-intro-badge">
-              {compress < 0.75 ? 'OMEGA SERAPH UNIT // FINAL SECTOR 3-3' : '◈ DESIGNATION LOCKED // THREAT MAX ◈'}
+              {compress < 0.75 ? 'SECTOR 3-3 · JEFE FINAL' : 'OBJETIVO FIJADO'}
             </div>
             <div
               className={`dk-mo-morph-title ${finalBurst > 0.2 ? 'locked' : ''}`}
               style={{ transform: `scale(${titleScale})` }}
             >
               <span className="dk-mo-keep">M</span>
-              <span className="dk-mo-collapse" style={collapseStyle}>ECANICAL&nbsp;</span>
+              <span className="dk-mo-collapse" style={collapseStyle}>ECHANICAL&nbsp;</span>
               <span
                 className="dk-mo-dot"
                 style={{
@@ -125,7 +123,7 @@ function GameArenaOverlays({
               <span className="dk-mo-collapse" style={collapseStyle}>PHANIM</span>
             </div>
             <div className="dk-mo-intro-sub">
-              {finalBurst > 0.3 ? '⚠ PROTOCOLO DE ASALTO LINEAL ACTIVO ⚠' : 'MECANICAL OPHANIM · DESPLEGANDO SELLOS DEL TRONO'}
+              {finalBurst > 0.3 ? 'ASALTO LINEAL ACTIVO' : 'MECHANICAL OPHANIM'}
             </div>
           </div>
         );
@@ -133,8 +131,8 @@ function GameArenaOverlays({
 
       {isStruggleAligning && (
         <div className="dk-beam-clash-intro-banner">
-          <div className="dk-clash-intro-badge">⚡ BEAM CLASH INCOMING ⚡</div>
-          <div className="dk-clash-intro-sub">¡PREPÁRATE PARA MACHACAR [Z]!</div>
+          <div className="dk-clash-intro-badge">BEAM CLASH</div>
+          <div className="dk-clash-intro-sub">PRESIONÁ [Z] RÁPIDO</div>
         </div>
       )}
 
@@ -142,24 +140,24 @@ function GameArenaOverlays({
         <div className="dk-beam-struggle-clean-overlay">
           <div className="dk-struggle-top-bar">
             <div className="dk-struggle-balance-line">
-              <span className="dk-stream-badge player">⚡ SPARK</span>
+              <span className="dk-stream-badge player">SPARK</span>
               <div className="dk-slim-tug-track">
                 <div className="dk-slim-tug-fill player" style={{ width: `${struggleProgress}%` }} />
                 <div className="dk-slim-tug-fill boss" style={{ width: `${100 - struggleProgress}%` }} />
-                <div className="dk-slim-clash-icon" style={{ left: `${struggleProgress}%` }}>⚔️</div>
+                <div className="dk-slim-clash-icon" style={{ left: `${struggleProgress}%` }} />
               </div>
-              <span className="dk-stream-badge boss">RAY ☀️</span>
+              <span className="dk-stream-badge boss">BOSS</span>
             </div>
 
             <div className="dk-mash-key-box">
               <div className="dk-animated-mash-key">
                 <span className="dk-key-letter">Z</span>
               </div>
-              <span className="dk-mash-text">¡MASH!</span>
+              <span className="dk-mash-text">MASH</span>
             </div>
 
             <div className="dk-struggle-timer-badge">
-              ⏱️ {struggleTimeLeft.toFixed(1)}s
+              {struggleTimeLeft.toFixed(1)}s
             </div>
           </div>
 
@@ -174,7 +172,7 @@ function GameArenaOverlays({
               onClick={onPushStruggle}
               aria-label="Push Struggle button"
             >
-              ⚡<br /><small>MASH</small>
+              MASH
             </button>
           )}
         </div>
@@ -198,12 +196,12 @@ function GameArenaOverlays({
       {!roomClosedMessage && isPlayerDefeated && !isStageClear && (
         <div className="dk-stage-clear-overlay">
           <div className="dk-stage-clear-card defeated">
-            <div className="dk-clear-badge defeated">SQUAD DOWN</div>
+            <div className="dk-clear-badge defeated">DERROTA</div>
             <h1 className="dk-clear-title">CAÍSTE EN COMBATE</h1>
-            <p className="dk-clear-sub">Reintenta el escenario o abandona la partida.</p>
+            <p className="dk-clear-sub">Reintentá el nivel o abandoná la partida.</p>
             <div className="dk-overlay-actions">
               <button type="button" className="dk-stage-replay-btn" onClick={onRestartStage}>
-                🔄 REINTENTAR STAGE
+                REINTENTAR
               </button>
               <button type="button" className="dk-stage-exit-btn" onClick={onLeaveMatch}>
                 ✕ ABANDONAR PARTIDA
@@ -222,7 +220,7 @@ function GameArenaOverlays({
           {isAutoAdvancingStage && stageBlackAlpha > 0.45 && (
             <div className="dk-stage-transition-caption">
               <span className="dk-transition-dot" />
-              <span>SALTANDO AL SIGUIENTE SECTOR...</span>
+              <span>SIGUIENTE SECTOR...</span>
             </div>
           )}
         </div>
@@ -239,9 +237,9 @@ function GameArenaOverlays({
       {!roomClosedMessage && isStageClear && (
         <div className="dk-stage-clear-overlay">
           <div className="dk-stage-clear-card">
-            <div className="dk-clear-badge">STAGE COMPLETE</div>
+            <div className="dk-clear-badge">STAGE CLEAR</div>
             <h1 className="dk-clear-title">{stageClearTitle}</h1>
-            <p className="dk-clear-sub">{stageClearSubtext}</p>
+            {stageClearSubtext && <p className="dk-clear-sub">{stageClearSubtext}</p>}
             {stageClearMeta && <p className="dk-clear-meta">{stageClearMeta}</p>}
             <div className="dk-overlay-actions">
               <button type="button" className="dk-stage-replay-btn" onClick={onRestartStage}>
@@ -259,4 +257,3 @@ function GameArenaOverlays({
 }
 
 export default memo(GameArenaOverlays);
-

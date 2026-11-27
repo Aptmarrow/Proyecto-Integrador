@@ -113,9 +113,8 @@ class CampaignManager {
 
   get clearTitle() {
     if (!this.isStandard) return '';
-    const label = DIFFICULTY_LABELS[this.difficulty] || this.difficulty;
-    if (this.campaignComplete) return `¡EXPEDICIÓN ${label.toUpperCase()} COMPLETADA!`;
-    return `¡SECTOR ${this.worldIndex + 1}-${this.stageIndex + 1} DESPEJADO!`;
+    if (this.campaignComplete) return 'CAMPAÑA COMPLETADA';
+    return `SECTOR ${this.worldIndex + 1}-${this.stageIndex + 1} COMPLETADO`;
   }
 
   get clearSubtext() {
@@ -123,12 +122,12 @@ class CampaignManager {
     const config = this.getStageConfig();
     const label = DIFFICULTY_LABELS[this.difficulty] || this.difficulty;
     if (this.campaignComplete) {
-      return `Conquistaste los ${WORLDS_PER_DIFFICULTY * STAGES_PER_WORLD} sectores espaciales de ${label}.`;
+      return `Completaste los ${WORLDS_PER_DIFFICULTY * STAGES_PER_WORLD} sectores en ${label}.`;
     }
     const endFoeName = config.hasBoss === false && config.miniboss
       ? (config.miniboss.minibossName || 'Minijefe')
       : (config.bossProfile?.bossName || 'Jefe');
-    return `${endFoeName} derrotado en ${config.stageTitle}.`;
+    return `${endFoeName} derrotado.`;
   }
 
   toSnapshot() {

@@ -5,7 +5,8 @@ const planck = require('planck');
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
 const PLAYER_RADIUS = 10;
-const PLAYER_SPEED = 380; // units per second (snappy Danmaku movement)
+const PLAYER_SPEED = 510; // units per second (snappy Touhou-style movement)
+const FOCUS_SPEED_MULTIPLIER = 0.38; // razor-sharp micro-dodge focus speed
 
 /**
  * Create a Planck.js world with no gravity and boundary walls.
@@ -57,7 +58,7 @@ function addPlayerBody(world, x, y) {
 function applyInput(body, input) {
   const { dx = 0, dy = 0, focus = false } = input;
   const len = Math.sqrt(dx * dx + dy * dy);
-  const speed = focus ? PLAYER_SPEED * 0.45 : PLAYER_SPEED;
+  const speed = focus ? PLAYER_SPEED * FOCUS_SPEED_MULTIPLIER : PLAYER_SPEED;
   if (len > 0) {
     body.setLinearVelocity(planck.Vec2(
       (dx / len) * speed,
@@ -68,4 +69,13 @@ function applyInput(body, input) {
   }
 }
 
-module.exports = { createWorld, addPlayerBody, applyInput, WORLD_WIDTH, WORLD_HEIGHT, PLAYER_RADIUS };
+module.exports = {
+  createWorld,
+  addPlayerBody,
+  applyInput,
+  WORLD_WIDTH,
+  WORLD_HEIGHT,
+  PLAYER_RADIUS,
+  PLAYER_SPEED,
+  FOCUS_SPEED_MULTIPLIER,
+};

@@ -39,6 +39,7 @@ export class BaseStageEngine {
   // Sprites de jugadores remotos (Multijugador)
   protected remotePlayerSprites = new Map<string, PIXI.Container>();
   protected playerRoleMap = new Map<string, string>();
+  protected localPlayerId: string = '';
   private activePlayerIds = new Set<string>();
   private soundPool = new Map<string, HTMLAudioElement[]>();
   private lastSoundTime = new Map<string, number>();
@@ -182,6 +183,7 @@ export class BaseStageEngine {
   public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string, onTargetPlayerPos?: (x: number, y: number, characterRole?: string) => void): void {
     this.isBackendConnected = true;
     this.useBackendBullets = true;
+    this.localPlayerId = myPlayerId || this.localPlayerId;
     this.activePlayerIds.clear();
     for (let i = 0; i < players.length; i++) {
       this.activePlayerIds.add(players[i].id);
@@ -318,7 +320,7 @@ export class BaseStageEngine {
     if (!lasers) return;
     this.laserSystem.lasers = lasers.map((l) => ({
       id: l.id,
-      ownerId: l.ownerId === 'boss' ? 'boss' : 'player',
+      ownerId: l.ownerId || 'boss',
       direction: l.direction || (l.ownerId === 'boss' ? 'left' : 'right'),
       sourceX: l.sourceX * this.SCALE_X,
       sourceY: l.sourceY * this.SCALE_Y,
@@ -332,6 +334,7 @@ export class BaseStageEngine {
       currentWidth: l.maxWidth * this.SCALE_Y,
       alpha: 1.0,
       color: l.color || 0xff2b5b,
+      isMegaBeam: Boolean(l.isMegaBeam),
       podType: (l.sourceY < 300 ? 'top' : 'bottom') as 'top' | 'bottom',
     }));
   }
@@ -339,6 +342,7 @@ export class BaseStageEngine {
   public destroy(): void {
     this.backgroundRenderer.destroy();
     this.bulletSystem.destroy();
+    this.laserSystem.destroy();
     this.particleSystem.destroy();
     this.soundPool.clear();
     this.app.destroy(true, { children: true, texture: false });

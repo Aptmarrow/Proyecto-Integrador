@@ -656,8 +656,12 @@
 .dk-slim-clash-icon {
   position: absolute;
   top: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 0.9rem;
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border: 2px solid #ffd000;
+  box-shadow: 0 0 10px #ffd000, 0 0 14px #00f2fe;
+  transform: translate(-50%, -50%) rotate(45deg);
 }
 
 .dk-stream-badge {

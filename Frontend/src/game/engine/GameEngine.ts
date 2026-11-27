@@ -55,10 +55,20 @@ export class GameEngine extends BaseStageEngine {
     onPlayerHit: () => {},
     onBossHit: () => {},
     onShake: (mag: number) => {
-      this.shakeTimer = mag;
+      this.shakeTimer = Math.max(this.shakeTimer, mag);
     },
     onSound: (path: string, vol: number) => {
       this.playSound(path, vol);
+    },
+    resolveOwnerPos: (ownerId: string) => {
+      if (!ownerId || ownerId === 'player' || ownerId === this.localPlayerId) {
+        return this.player.pos;
+      }
+      const remote = this.remotePlayerSprites.get(ownerId);
+      if (remote) {
+        return { x: remote.position.x, y: remote.position.y };
+      }
+      return null;
     },
   };
 
@@ -641,10 +651,13 @@ export class GameEngine extends BaseStageEngine {
     this.animTimer += dt;
     this.difficultyGlintFilter?.advance(dt);
 
-    // Detectar si el Master Spark está en fase de carga o de disparo
-    const masterSpark = this.laserSystem.lasers.find(l => l.ownerId === 'player');
-    const isMasterSparkCharging = masterSpark && masterSpark.state === 'charging';
-    this.isLaserFiring = !!(masterSpark && masterSpark.state === 'firing');
+    // Detectar si el Master Spark propio está en fase de carga o de disparo
+    const mySpark = this.laserSystem.lasers.find(
+      (l) => l.ownerId !== 'boss' && (l.ownerId === 'player' || !this.localPlayerId || l.ownerId === this.localPlayerId)
+    );
+    const anySparkFiring = this.laserSystem.lasers.some((l) => l.ownerId !== 'boss' && l.state === 'firing');
+    const isMasterSparkCharging = Boolean(mySpark && mySpark.state === 'charging');
+    this.isLaserFiring = anySparkFiring;
 
     if (!this.hasSyncedStageTime && !isMasterSparkCharging) {
       this.stageTime += dt;

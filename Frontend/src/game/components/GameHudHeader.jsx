@@ -14,7 +14,6 @@ function GameHudHeader({
   isMiniboss = false,
   isBossRefilling,
   bossDisplayHpPercent,
-  workerModeLabel,
   difficultyLabel = 'Normal',
   world = 1,
   stage = 1,
@@ -169,11 +168,11 @@ function GameHudHeader({
         <div className="dk-hud-status-cluster">
           <div
             className="dk-stage-hud-pill"
-            title={`Dificultad ${difficultyLabel} — Mundo ${world}-${stage}${stageTitle ? `: ${stageTitle}` : ''}`}
+            title={`${difficultyLabel} · ${world}-${stage}${stageTitle ? ` · ${stageTitle}` : ''}`}
           >
             <span>{String(difficultyLabel).toUpperCase()}</span>
             <span className="dk-stage-hud-sep">·</span>
-            <span>NIVEL {world}-{stage}</span>
+            <span>{world}-{stage}</span>
             {stageTitle && (
               <>
                 <span className="dk-stage-hud-sep">·</span>
@@ -183,16 +182,10 @@ function GameHudHeader({
             {bossEtaSeconds > 0 && (
               <>
                 <span className="dk-stage-hud-sep">·</span>
-                <span>JEFE EN {formatEta(bossEtaSeconds)}</span>
+                <span>JEFE {formatEta(bossEtaSeconds)}</span>
               </>
             )}
           </div>
-          {workerModeLabel && (
-            <div className="dk-worker-status-pill" title={workerModeLabel}>
-              <span className="dk-worker-dot" />
-              <span>{workerModeLabel}</span>
-            </div>
-          )}
         </div>
       )}
 

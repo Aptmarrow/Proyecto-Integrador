@@ -1656,13 +1656,13 @@ export default function CharacterSelection() {
       {launchCountdown !== null && (
         <div className="cs-launch-overlay">
           <div className="cs-launch-card">
-            <div className="cs-launch-title">¡TODOS LOS JUGADORES LISTOS!</div>
+            <div className="cs-launch-title">INICIANDO PARTIDA</div>
             <div className="cs-launch-countdown">{launchCountdown}</div>
             <div style={{ color: '#00f0ff', fontSize: '0.78rem', marginTop: '0.9rem', letterSpacing: '0.08em' }}>
-              {difficultyMeta.label} · NIVEL {selectedWorld}-{selectedStage} ({currentWorldName})
+              {difficultyMeta.label} · {selectedWorld}-{selectedStage} ({currentWorldName})
             </div>
             <div style={{ color: '#aaa', fontSize: '0.72rem', marginTop: '0.5rem', letterSpacing: '0.08em' }}>
-              CARGANDO ARENA DE COMBATE...
+              ENTRANDO AL NIVEL...
             </div>
           </div>
         </div>

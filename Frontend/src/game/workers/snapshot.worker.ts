@@ -17,7 +17,7 @@ interface TimedSnapshot {
 }
 
 const MAX_BUFFER_SIZE = 24;
-const RENDER_DELAY_MS = 38;
+const RENDER_DELAY_MS = 22;
 
 let snapshotBuffer: TimedSnapshot[] = [];
 

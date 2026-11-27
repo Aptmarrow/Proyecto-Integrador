@@ -680,12 +680,12 @@ export function getNormalWorldBossProfile(
     { name: 'Sello Ophanim "Trazos del Trono"', pattern: 'mo_dash_pattern', shootInterval: 0.45, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 8.5 },
     { name: 'Fase 3 "Aceleración Axial"', pattern: 'mo_dash_pattern', shootInterval: 0.4, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 0 },
     { name: 'Protocolo Serafín "Cruce Mecánico"', pattern: 'mo_dash_pattern', shootInterval: 0.35, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 7.5 },
-    { name: 'Protocolo Final "MECANICAL OPHANIM"', pattern: 'mo_dash_pattern', shootInterval: 0.3, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 6.8 },
+    { name: 'Protocolo Final "MECHANICAL OPHANIM"', pattern: 'mo_dash_pattern', shootInterval: 0.3, laserMode: 'none' as const, laserInterval: 99, megaLaserInterval: 6.8 },
   ];
   return {
     bossId: 'mo',
     bossName: 'M.O',
-    fullBossName: 'Mecanical Ophanim',
+    fullBossName: 'Mechanical Ophanim',
     sprite: '/assets/sprites/M.O.png',
     introDuration: 3.8,
     moveArchetype: 'mo_ophanim_dash',

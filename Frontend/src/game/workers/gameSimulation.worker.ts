@@ -24,7 +24,8 @@ import type { BulletSpawnOpts } from '../campaign/normalCampaignOverhaul';
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
 const PLAYER_RADIUS = 10;
-const PLAYER_SPEED = 380;
+const PLAYER_SPEED = 510;
+const FOCUS_SPEED_MULTIPLIER = 0.38;
 const TICK_RATE = 60;
 const DT = 1 / TICK_RATE;
 const SKILL_COOLDOWN = 1.5;
@@ -68,12 +69,15 @@ function canonicalRoleName(role: string): string {
 function getCharacterStats(role: string): CharacterStats {
   const k = normalizeRoleKey(role);
   if (k === 'tank') {
-    return { ...DEFAULT_STATS, hpMax: 140, defensePercent: 65, shotsPerSecond: 3, bulletDamage: 4, bombDamage: 500, spChargePerHit: 8 };
+    return { ...DEFAULT_STATS, hpMax: 140, defensePercent: 65, shotsPerSecond: 5.8, bulletDamage: 3.0, bombDamage: 500, spChargePerHit: 8 };
   }
   if (k === 'support') {
-    return { ...DEFAULT_STATS, hpMax: 90, defensePercent: 40, shotsPerSecond: 4, bulletDamage: 4, bombDamage: 600, spChargePerHit: 12 };
+    return { ...DEFAULT_STATS, hpMax: 90, defensePercent: 40, shotsPerSecond: 7.2, bulletDamage: 2.7, bombDamage: 600, spChargePerHit: 12 };
   }
-  return { ...DEFAULT_STATS };
+  if (k === 'special_attack') {
+    return { ...DEFAULT_STATS, shotsPerSecond: 8.2, bulletDamage: 3.4 };
+  }
+  return { ...DEFAULT_STATS, shotsPerSecond: 9.5, bulletDamage: 3.1 };
 }
 
 interface SimPlayer {
@@ -323,11 +327,11 @@ class DanmakrewSimulationWorker {
       bannerText: `MUNDO ${cfg.world}-${cfg.stage} · ${cfg.worldName.toUpperCase()}`,
       bannerSubtext: `${diffLabel} — ${cfg.stageTitle}`,
       clearTitle: isFinal
-        ? `¡EXPEDICIÓN ${diffLabel.toUpperCase()} COMPLETADA!`
-        : `¡SECTOR ${cfg.world}-${cfg.stage} DESPEJADO!`,
+        ? 'CAMPAÑA COMPLETADA'
+        : `SECTOR ${cfg.world}-${cfg.stage} COMPLETADO`,
       clearSubtext: isFinal
-        ? '¡El escuadrón Danmakrew conquistó los 9 sectores espaciales!'
-        : `${cfg.bossProfile.bossName} derrotado · Preparando siguiente sector...`,
+        ? `Completaste los 9 sectores en ${diffLabel}.`
+        : `${cfg.bossProfile.bossName} derrotado.`,
       bossSpawnAt: cfg.bossSpawnAt,
       bossWarningAt: cfg.bossWarningAt,
       spaceTheme: cfg.spaceTheme,
@@ -934,7 +938,7 @@ class DanmakrewSimulationWorker {
     }
 
     if ((action === 'laser' || (roleKey === 'special_attack' && action === 'special')) && p.sp >= 500) {
-      this.spawnLaser(p.id, 'right', pos.x + 16, pos.y, pos.y, 0.28, 1.15, 0.22, 34, 0x00f0ff, false);
+      this.spawnLaser(p.id, 'right', pos.x + 18, pos.y, pos.y, 0.42, 1.35, 0.30, 72, 0x00f2fe, false);
       p.skillCooldown = SKILL_COOLDOWN * 2;
       p.sp = Math.max(0, p.sp - 500);
       return;
@@ -993,7 +997,7 @@ class DanmakrewSimulationWorker {
         const len = Math.hypot(dx, dy);
         const nx = len > 1 ? dx / len : dx;
         const ny = len > 1 ? dy / len : dy;
-        const speed = focus ? PLAYER_SPEED * 0.45 : PLAYER_SPEED;
+        const speed = focus ? PLAYER_SPEED * FOCUS_SPEED_MULTIPLIER : PLAYER_SPEED;
         p.body.setLinearVelocity(planck.Vec2(nx * speed, ny * speed));
         if (nx !== 0 || ny !== 0) p.angle = Math.atan2(ny, nx);
       } else {
@@ -1008,14 +1012,14 @@ class DanmakrewSimulationWorker {
         const pos = p.body.getPosition();
         const roleKey = normalizeRoleKey(p.character);
         if (roleKey === 'support') {
-          this.spawnAutoAimShot(p.id, pos.x + 16, pos.y, 660, p.stats.bulletDamage);
+          this.spawnAutoAimShot(p.id, pos.x + 16, pos.y, 780, p.stats.bulletDamage);
         } else if (roleKey === 'tank') {
           this.bullets.push({
             id: this.nextBulletId++,
             ownerId: p.id,
             x: pos.x + 16,
             y: pos.y,
-            vx: 620,
+            vx: 760,
             vy: 0,
             radius: 5,
             ttl: 2.5,
@@ -1030,7 +1034,7 @@ class DanmakrewSimulationWorker {
               ownerId: p.id,
               x: pos.x + 16,
               y: pos.y + offsetY,
-              vx: 760,
+              vx: 960,
               vy: 0,
               radius: 4,
               ttl: 2.5,
