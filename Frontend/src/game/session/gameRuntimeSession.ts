@@ -302,15 +302,6 @@ export class GameRuntimeSession {
         this.myPlayerId = resolvedId;
         this.setMode('local-worker', 'Físicas Planck.js en Web Worker Local (60Hz)');
 
-        // Populate companion roster if coming from a demo/offline room
-        if (this.options.initialRoster) {
-          for (const [pid, role] of Object.entries(this.options.initialRoster)) {
-            if (pid !== resolvedId && pid !== localId) {
-              this.workerBridge?.addTeammate(pid, normalizeRole(role), true);
-            }
-          }
-        }
-
         if (this.options.testMode === 'beam' || this.options.testMode === 'struggle') {
           setTimeout(() => this.startBeamStruggleTest(), 120);
         } else if (this.options.testMode === 'boss') {

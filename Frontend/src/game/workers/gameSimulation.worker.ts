@@ -86,7 +86,6 @@ interface SimPlayer {
   angle: number;
   shootCooldown: number;
   skillCooldown: number;
-  isBot: boolean;
   input: {
     dx: number;
     dy: number;
@@ -414,7 +413,7 @@ class DanmakrewSimulationWorker {
     }
   }
 
-  public addPlayer(playerId: string, role: string, isBot: boolean = false): void {
+  public addPlayer(playerId: string, role: string): void {
     if (this.players.has(playerId)) {
       this.setPlayerRole(playerId, role);
       return;
@@ -445,7 +444,6 @@ class DanmakrewSimulationWorker {
       angle: 0,
       shootCooldown: 0,
       skillCooldown: 0,
-      isBot,
       input: { dx: 0, dy: 0, action: null, focus: false },
     });
   }
@@ -986,23 +984,6 @@ class DanmakrewSimulationWorker {
         continue;
       }
 
-      if (p.isBot) {
-        const pos = p.body.getPosition();
-        const desiredY = 300 + Math.sin(this.stageTime * 1.7 + pos.x * 0.02) * 145;
-        p.input.dx = Math.cos(this.stageTime * 1.05) * 0.25;
-        p.input.dy = Math.max(-1, Math.min(1, (desiredY - pos.y) / 80));
-        if (this.customStageProfile?.disableWeapons) {
-          p.input.action = null;
-        } else if (this.struggle.active) {
-          p.input.action = 'struggle_push';
-        } else if (p.skillCooldown <= 0 && p.sp >= 520 && (this.enemies.length >= 4 || this.boss.isActive)) {
-          const rk = normalizeRoleKey(p.character);
-          p.input.action = rk === 'tank' ? 'wall' : rk === 'special_attack' ? 'laser' : 'special';
-        } else {
-          p.input.action = 'shoot';
-        }
-      }
-
       p.shootCooldown = Math.max(0, p.shootCooldown - dt);
       p.skillCooldown = Math.max(0, p.skillCooldown - dt);
       p.sp = Math.min(p.stats.spMax, p.sp + dt * 50);
@@ -1020,7 +1001,7 @@ class DanmakrewSimulationWorker {
       }
 
       if (action === 'struggle_push') {
-        if (!p.isBot) this.pushStruggle();
+        this.pushStruggle();
       } else if (action === 'wall' || action === 'laser' || action === 'special') {
         this.executePlayerSkill(p, action);
       } else if (!this.customStageProfile?.disableWeapons && action === 'shoot' && p.shootCooldown <= 0 && !locked) {
@@ -2386,11 +2367,7 @@ class DanmakrewSimulationWorker {
 
       this.struggle.timer = Math.max(0, this.struggle.timer - dt);
       const bossPush = this.difficulty === 'no_mercy' ? 19 : this.difficulty === 'difficult' ? 16.5 : 14;
-      let allyAssist = 0;
-      for (const [, p] of this.players) {
-        if (p.isBot && p.hp > 0) allyAssist += 4.5;
-      }
-      this.struggle.balance = Math.max(0, Math.min(100, this.struggle.balance + (allyAssist - bossPush) * dt));
+      this.struggle.balance = Math.max(0, Math.min(100, this.struggle.balance - bossPush * dt));
 
       const minX = playerLaser.sourceX + 40;
       const maxX = bossMega.sourceX - 40;
@@ -2655,11 +2632,6 @@ self.onmessage = (e: MessageEvent) => {
         payload?.action ?? null,
         Boolean(payload?.isFocus)
       );
-      break;
-    case 'ADD_PLAYER':
-      if (payload?.playerId) {
-        sim.addPlayer(payload.playerId, payload.character || 'DPS', payload.isBot !== false);
-      }
       break;
     case 'SET_ROLE':
       if (payload?.playerId && payload?.role) {

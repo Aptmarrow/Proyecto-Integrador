@@ -74,15 +74,6 @@ export class GameWorkerBridge {
     }
   }
 
-  public addTeammate(playerId: string, character: string, isBot: boolean = true): void {
-    if (this.worker && this.isInitialized) {
-      this.worker.postMessage({
-        type: 'ADD_PLAYER',
-        payload: { playerId, character, isBot },
-      });
-    }
-  }
-
   public setRole(role: string): void {
     if (this.worker && this.isInitialized) {
       this.worker.postMessage({

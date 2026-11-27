@@ -1153,9 +1153,9 @@ export default function CharacterSelection() {
             world: 1,
             stage: 1,
             hostId: 'demo-host',
-            players: ['demo-host', 'player-2'],
-            playerCharacters: { 'demo-host': 'Special_Attack', 'player-2': 'DPS' },
-            playerReady: { 'demo-host': false, 'player-2': true },
+            players: ['demo-host'],
+            playerCharacters: { 'demo-host': 'Special_Attack' },
+            playerReady: { 'demo-host': false },
             isPublic: true,
           };
           activeRoomIdRef.current = demoRoom.id;
@@ -1164,7 +1164,6 @@ export default function CharacterSelection() {
           setLobbyCode('DEMO01');
           setCurrentUserId('demo-host');
           setPlayerName('PLAYER 1');
-          setUsernamesById((prev) => ({ ...prev, 'player-2': 'ALLY BOT' }));
         }
       }
     };
