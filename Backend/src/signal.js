@@ -393,6 +393,7 @@ app.ws('/signal', {
         if (allReady) {
           room.status = 'in_game';
           markRoomTransitioningToGame(roomId);
+          await redis.zrem('rooms:public', roomId).catch(() => {});
         }
 
         await redis.set(`room:${roomId}`, JSON.stringify(room), 'KEEPTTL');
@@ -410,9 +411,11 @@ app.ws('/signal', {
           broadcast(roomId, {
             type: 'game-start',
             roomId,
+            hostId: room.hostId,
             players: room.players,
             playerCharacters: room.playerCharacters || {},
             difficulty: room.difficulty || 'normal',
+            calKey: room.calKey || null,
             world: room.world || 1,
             stage: room.stage || 1,
           });

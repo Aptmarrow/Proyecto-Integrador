@@ -21,10 +21,10 @@ const STRUGGLE_BOSS_WIN_PLAYER_DAMAGE = 35;
 const AUTO_ADVANCE_DURATION = 2.0; // 0.7s victory beat -> 0.9s fade-to-black -> 0.4s hold -> auto next level
 
 const SPAWN_POSITIONS = [
-  { x: 100, y: 100 },
-  { x: 700, y: 100 },
-  { x: 100, y: 500 },
-  { x: 700, y: 500 },
+  { x: 110, y: 240 },
+  { x: 110, y: 360 },
+  { x: 165, y: 180 },
+  { x: 165, y: 420 },
 ];
 
 class GameRoom {
@@ -105,6 +105,7 @@ class GameRoom {
 
   spawnBossNow() {
     const config = this.campaign.getStageConfig();
+    if (config.disableBoss) return;
     this.enemySystem.clear();
     this.bulletSystem.clearByOwner('boss');
     this.campaign.stageState = 'boss_battle';
@@ -129,6 +130,7 @@ class GameRoom {
   }
 
   startBeamStruggleTest(playerId) {
+    if (this.campaign.getStageConfig().disableBoss) return;
     if (!this.boss.isActive || this.boss.isDefeated) {
       this.spawnBossNow();
     }
@@ -172,7 +174,10 @@ class GameRoom {
 
   _setupTimeline() {
     const config = this.campaign.getStageConfig();
-    this.boss.configure(config.bossProfile, this._getSquadHpScale());
+    this._weaponsDisabled = Boolean(config.disableWeapons);
+    if (!config.disableBoss && config.bossProfile) {
+      this.boss.configure(config.bossProfile, this._getSquadHpScale());
+    }
     this.timeline.loadFromStageConfig(config, this.campaign.bannerText, this.campaign.bannerSubtext);
 
     this.timeline
@@ -187,13 +192,16 @@ class GameRoom {
         }
       })
       .on('boss_warning', () => {
+        if (config.disableBoss) return;
         this.campaign.stageState = 'boss_warning';
       })
       .on('spawn_miniboss', (payload) => {
+        if (config.disableBoss) return;
         this.campaign.stageState = 'boss_battle';
         this._spawnEndMiniboss(payload?.miniboss || config.miniboss);
       })
       .on('spawn_boss', () => {
+        if (config.disableBoss) return;
         this.campaign.stageState = 'boss_battle';
         this.boss.configure(config.bossProfile, this._getSquadHpScale());
         this.boss.spawn(685, 300);
@@ -537,6 +545,11 @@ class GameRoom {
 
     // Passive SP regeneration so tactical 4-player skills stay responsive across waves & boss phases
     player.sp = Math.min(stats.spMax, player.sp + deltaTime * 50);
+
+    if (this._weaponsDisabled) {
+      applyInput(player.body, player.input);
+      return;
+    }
 
     if (action === 'shoot' && player.shootCooldown <= 0) {
       if (normClass === 'support' || normClass === 'healer') {

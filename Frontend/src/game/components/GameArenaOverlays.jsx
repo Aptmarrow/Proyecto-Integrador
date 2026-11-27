@@ -16,13 +16,14 @@ function GameArenaOverlays({
   stageBlackAlpha = 0,
   stageFlashAlpha = 0,
   isPlayerDefeated = false,
+  roomClosedMessage = null,
   stageClearTitle = 'STAGE 1 CLEARED!',
   stageClearSubtext = '¡Misión completada con éxito!',
   stageClearMeta = '',
   stageClearButtonText = '🔄 JUGAR OTRA VEZ (REPLAY)',
   onPushStruggle,
   onRestartStage,
-  onExitLobby,
+  onLeaveMatch,
 }) {
   return (
     <>
@@ -179,18 +180,33 @@ function GameArenaOverlays({
         </div>
       )}
 
-      {isPlayerDefeated && !isStageClear && (
+      {roomClosedMessage && (
+        <div className="dk-stage-clear-overlay">
+          <div className="dk-stage-clear-card defeated">
+            <div className="dk-clear-badge defeated">SALA CERRADA</div>
+            <h1 className="dk-clear-title">PARTIDA FINALIZADA</h1>
+            <p className="dk-clear-sub">{roomClosedMessage}</p>
+            <div className="dk-overlay-actions">
+              <button type="button" className="dk-stage-exit-btn" onClick={onLeaveMatch}>
+                SALIR AL MENÚ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!roomClosedMessage && isPlayerDefeated && !isStageClear && (
         <div className="dk-stage-clear-overlay">
           <div className="dk-stage-clear-card defeated">
             <div className="dk-clear-badge defeated">SQUAD DOWN</div>
             <h1 className="dk-clear-title">CAÍSTE EN COMBATE</h1>
-            <p className="dk-clear-sub">Reintenta el escenario o vuelve al lobby de selección.</p>
+            <p className="dk-clear-sub">Reintenta el escenario o abandona la partida.</p>
             <div className="dk-overlay-actions">
               <button type="button" className="dk-stage-replay-btn" onClick={onRestartStage}>
                 🔄 REINTENTAR STAGE
               </button>
-              <button type="button" className="dk-stage-exit-btn" onClick={onExitLobby}>
-                ← VOLVER AL LOBBY
+              <button type="button" className="dk-stage-exit-btn" onClick={onLeaveMatch}>
+                ✕ ABANDONAR PARTIDA
               </button>
             </div>
           </div>
@@ -220,7 +236,7 @@ function GameArenaOverlays({
         />
       )}
 
-      {isStageClear && (
+      {!roomClosedMessage && isStageClear && (
         <div className="dk-stage-clear-overlay">
           <div className="dk-stage-clear-card">
             <div className="dk-clear-badge">STAGE COMPLETE</div>
@@ -231,8 +247,8 @@ function GameArenaOverlays({
               <button type="button" className="dk-stage-replay-btn" onClick={onRestartStage}>
                 {stageClearButtonText}
               </button>
-              <button type="button" className="dk-stage-exit-btn" onClick={onExitLobby}>
-                ← VOLVER AL LOBBY
+              <button type="button" className="dk-stage-exit-btn" onClick={onLeaveMatch}>
+                ✕ ABANDONAR PARTIDA
               </button>
             </div>
           </div>

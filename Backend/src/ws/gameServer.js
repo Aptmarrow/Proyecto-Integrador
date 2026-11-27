@@ -4,13 +4,13 @@ const GameRoom = require('../game/GameRoom');
 const { verifyToken } = require('../config/auth');
 const { RoomInputGuard } = require('./gameInputGuard');
 const { parseAllowedOrigins, isOriginAllowed, validateClientMessage } = require('./gameSecurity');
-const { CHARACTER_ROLES, getAvailableCharacterRole } = require('../utils/roomUtils');
+const { CHARACTER_ROLES, getAvailableCharacterRole, removePlayer: removeRedisPlayer } = require('../utils/roomUtils');
 const redis    = require('../config/redis');
 
 const TICK_RATE = 60;
 const TICK_DELTA = 1 / TICK_RATE;
 const BROADCAST_EVERY = 1; // broadcast snapshot every tick (60 Hz) for buttery smooth movement
-const DISCONNECT_TIMEOUT_MS = 25_000;
+const DISCONNECT_TIMEOUT_MS = 12_000;
 const MAX_CLIENT_MESSAGE_BYTES = 1024;
 
 const allowedOrigins = parseAllowedOrigins();
@@ -100,11 +100,178 @@ function stopGameLoop(roomId) {
   }
 }
 
+function roomCodeFromRoomId(roomId) {
+  return String(roomId || '')
+    .replace(/-/g, '')
+    .slice(0, 6)
+    .toUpperCase();
+}
+
+function clearRoomDisconnectTimers(roomId) {
+  const prefix = `${roomId}:`;
+  for (const [key, timer] of disconnectTimers.entries()) {
+    if (key.startsWith(prefix)) {
+      clearTimeout(timer);
+      disconnectTimers.delete(key);
+    }
+  }
+}
+
+async function cleanupRedisRoom(roomId, extraPlayerIds = []) {
+  try {
+    const playerIds = new Set(extraPlayerIds);
+    const raw = await redis.get(`room:${roomId}`);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.players)) {
+          for (const pid of parsed.players) playerIds.add(pid);
+        }
+        if (parsed.hostId) playerIds.add(parsed.hostId);
+      } catch {
+        // ignore corrupted JSON
+      }
+    }
+
+    const pipeline = redis.pipeline();
+    pipeline.del(`room:${roomId}`);
+    pipeline.del(`room:${roomId}:pwd`);
+    pipeline.del(`room:code:${roomCodeFromRoomId(roomId)}`);
+    pipeline.zrem('rooms:public', roomId);
+    for (const pid of playerIds) {
+      pipeline.del(`player:${pid}:room`);
+    }
+    await pipeline.exec();
+  } catch (err) {
+    console.error('[Game] Redis cleanup error roomId=%s', roomId, err?.message || err);
+  }
+}
+
 function teardownRoom(roomId) {
   stopGameLoop(roomId);
+  clearRoomDisconnectTimers(roomId);
   gameRooms.delete(roomId);
   gameClients.delete(roomId);
   roomInputGuards.delete(roomId);
+}
+
+async function closeGameRoom(
+  roomId,
+  reason = 'host-left',
+  message = 'El host abandonó la partida. La sala fue cerrada.'
+) {
+  const room = gameRooms.get(roomId);
+  const clients = gameClients.get(roomId);
+  const peersSnapshot = clients ? [...clients] : [];
+  const knownPlayers = room ? [...room.players.keys()] : [];
+
+  for (const peer of peersSnapshot) {
+    peer.explicitLeave = true;
+    send(peer, {
+      type: 'room-closed',
+      roomId,
+      reason,
+      message,
+    });
+  }
+
+  teardownRoom(roomId);
+
+  // Close peer sockets after brief flush so every client receives 'room-closed'
+  if (peersSnapshot.length > 0) {
+    const closeTimer = setTimeout(() => {
+      for (const peer of peersSnapshot) {
+        try {
+          peer.close();
+        } catch {
+          // socket already closed
+        }
+      }
+    }, 60);
+    if (typeof closeTimer.unref === 'function') closeTimer.unref();
+  }
+
+  // Also notify any lingering signaling peers in this room
+  try {
+    const signalPath = require.resolve('../signal');
+    const signalExports = require.cache[signalPath]?.exports;
+    if (signalExports?.broadcast) {
+      signalExports.broadcast(roomId, {
+        type: 'host-disconnected',
+        message,
+      });
+    }
+  } catch {
+    // ignore if signal module is not loaded
+  }
+
+  await cleanupRedisRoom(roomId, knownPlayers);
+  console.info('[Game] Room closed roomId=%s reason=%s', roomId, reason);
+}
+
+async function removePlayerFromGameRoom(roomId, userId, { died = true } = {}) {
+  const timerKey = `${roomId}:${userId}`;
+  const pending = disconnectTimers.get(timerKey);
+  if (pending) {
+    clearTimeout(pending);
+    disconnectTimers.delete(timerKey);
+  }
+
+  const room = gameRooms.get(roomId);
+  const inputGuard = roomInputGuards.get(roomId);
+  const clients = gameClients.get(roomId);
+
+  let lastPos = null;
+  if (room) {
+    const player = room.players.get(userId);
+    if (player) {
+      const pos = player.body?.getPosition?.();
+      if (pos) lastPos = { x: pos.x, y: pos.y };
+      player.hp = 0;
+      player.active = false;
+      player.input = { dx: 0, dy: 0, action: null, focus: false };
+    }
+    room.removePlayer(userId);
+  }
+  if (inputGuard) inputGuard.unregisterPlayer(userId);
+
+  const departingSockets = [];
+  if (clients) {
+    for (const peer of [...clients]) {
+      if (peer.userId === userId) {
+        peer.explicitLeave = true;
+        clients.delete(peer);
+        departingSockets.push(peer);
+      }
+    }
+  }
+
+  for (const peer of departingSockets) {
+    try {
+      peer.close();
+    } catch {
+      // ignore close errors
+    }
+  }
+
+  if (room) {
+    broadcastRoom(roomId, {
+      type: 'player-left',
+      playerId: userId,
+      died: Boolean(died),
+      x: lastPos?.x,
+      y: lastPos?.y,
+    });
+    broadcastRoom(roomId, room.getState());
+    console.info('[Game] Player left match userId=%s roomId=%s died=%s', userId, roomId, Boolean(died));
+  }
+
+  await removeRedisPlayer(roomId, userId).catch(() => {});
+
+  if (room && room.players.size === 0) {
+    teardownRoom(roomId);
+    await cleanupRedisRoom(roomId, [userId]);
+  }
 }
 
 // ── Route setup ───────────────────────────────────────────────────────────────
@@ -191,26 +358,45 @@ function setupGameRoute(app) {
               disconnectTimers.delete(timerKey);
             }
 
+            // Look up room metadata from Redis before creating or joining
+            let roomData = null;
+            try {
+              const raw = await redis.get(`room:${roomId}`);
+              if (raw) {
+                roomData = JSON.parse(raw);
+              }
+            } catch { /* ignore */ }
+
+            if (!gameRooms.has(roomId) && !roomData) {
+              ws.explicitLeave = true;
+              send(ws, {
+                type: 'room-closed',
+                roomId,
+                reason: 'not-found',
+                message: 'La sala fue cerrada o ya no existe.',
+              });
+              return;
+            }
+
+            if (roomData && Array.isArray(roomData.players) && !roomData.players.includes(ws.userId)) {
+              ws.explicitLeave = true;
+              send(ws, {
+                type: 'room-closed',
+                roomId,
+                reason: 'not-member',
+                message: 'Ya no pertenecés a esta sala.',
+              });
+              return;
+            }
+
             ws.roomId = roomId;
 
-            // Look up hostId from Redis on first room creation
             if (!gameRooms.has(roomId)) {
-              let hostId = ws.userId; // fallback: first joiner is host
-              let difficulty = msg.difficulty || 'normal';
-              let world = msg.world || 1;
-              let stage = msg.stage || 1;
-              let expectedPlayerCount = 1;
-              try {
-                const raw = await redis.get(`room:${roomId}`);
-                if (raw) {
-                  const roomData = JSON.parse(raw);
-                  hostId = roomData.hostId || ws.userId;
-                  difficulty = roomData.difficulty || difficulty;
-                  world = roomData.world || world;
-                  stage = roomData.stage || stage;
-                  expectedPlayerCount = Array.isArray(roomData.players) ? roomData.players.length : 1;
-                }
-              } catch { /* ignore */ }
+              const hostId = roomData?.hostId || ws.userId;
+              const difficulty = roomData?.difficulty || msg.difficulty || 'normal';
+              const world = roomData?.world || msg.world || 1;
+              const stage = roomData?.stage || msg.stage || 1;
+              const expectedPlayerCount = Array.isArray(roomData?.players) ? roomData.players.length : 1;
               gameRooms.set(roomId, new GameRoom(roomId, hostId, {
                 difficulty,
                 world,
@@ -226,21 +412,16 @@ function setupGameRoute(app) {
             const inputGuard = roomInputGuards.get(roomId);
 
             // Update expected player count if Redis has more players now
-            try {
-              const raw = await redis.get(`room:${roomId}`);
-              if (raw) {
-                const roomData = JSON.parse(raw);
-                if (Array.isArray(roomData.players)) {
-                  room.setExpectedPlayerCount(roomData.players.length);
-                }
-              }
-            } catch { /* ignore */ }
+            if (roomData && Array.isArray(roomData.players)) {
+              room.setExpectedPlayerCount(roomData.players.length);
+            }
 
             // If the same user is already connected in this room (duplicate tab / reconnect),
             // drop the previous socket so only one input stream remains active.
             const roomPeers = gameClients.get(roomId);
             for (const peer of roomPeers) {
               if (peer !== ws && peer.userId === ws.userId) {
+                peer.explicitLeave = true;
                 try {
                   peer.close();
                 } catch {
@@ -253,14 +434,7 @@ function setupGameRoute(app) {
             gameClients.get(roomId).add(ws);
 
             // Read character assigned during character selection from Redis room data
-            let character = null;
-            try {
-              const raw = await redis.get(`room:${roomId}`);
-              if (raw) {
-                const roomData = JSON.parse(raw);
-                character = roomData.playerCharacters?.[ws.userId] || null;
-              }
-            } catch { /* ignore */ }
+            let character = roomData?.playerCharacters?.[ws.userId] || null;
 
             if (!character && msg.character && CHARACTER_ROLES.includes(msg.character)) {
               character = msg.character;
@@ -397,6 +571,43 @@ function setupGameRoute(app) {
           break;
         }
 
+        case 'leave-game': {
+          if (!ws.roomId) return;
+          const targetRoomId = ws.roomId;
+          const departingUserId = ws.userId;
+          ws.explicitLeave = true;
+          (async () => {
+            const room = gameRooms.get(targetRoomId);
+            let isHost = Boolean(room && room.hostId === departingUserId);
+            if (!isHost) {
+              try {
+                const raw = await redis.get(`room:${targetRoomId}`);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  if (parsed?.hostId === departingUserId) {
+                    isHost = true;
+                  }
+                }
+              } catch {
+                // ignore
+              }
+            }
+
+            if (isHost) {
+              await closeGameRoom(
+                targetRoomId,
+                'host-left',
+                'El host abandonó la partida. La sala fue cerrada.'
+              );
+            } else {
+              await removePlayerFromGameRoom(targetRoomId, departingUserId, { died: true });
+            }
+          })().catch((err) => {
+            console.error('[Game] leave-game error', err);
+          });
+          break;
+        }
+
         case 'start-struggle': {
           if (!ws.roomId) return;
           const room = gameRooms.get(ws.roomId);
@@ -413,12 +624,14 @@ function setupGameRoute(app) {
 
     close: (ws, _code, _msg) => {
       const { roomId, userId } = ws;
-      console.info('[Game] Disconnected userId=%s roomId=%s', userId, roomId);
+      console.info('[Game] Disconnected userId=%s roomId=%s explicit=%s', userId, roomId, Boolean(ws.explicitLeave));
 
       if (!roomId) return;
 
       const clients = gameClients.get(roomId);
       if (clients) clients.delete(ws);
+
+      if (ws.explicitLeave) return;
 
       const room = gameRooms.get(roomId);
       if (!room) return;
@@ -435,21 +648,25 @@ function setupGameRoute(app) {
         broadcastRoom(roomId, { type: 'phase', phase: 'lobby' });
       }
 
-      // Give the player 15 s to reconnect before removing them
+      // Give the player a brief grace window to reconnect before killing/removing them
       const timerKey = `${roomId}:${userId}`;
       const timer = setTimeout(() => {
         disconnectTimers.delete(timerKey);
         const r = gameRooms.get(roomId);
         if (!r) return;
 
-        r.removePlayer(userId);
-        broadcastRoom(roomId, { type: 'player-left', playerId: userId });
-        console.info('[Game] Player removed after timeout userId=%s roomId=%s', userId, roomId);
-
-        if (r.players.size === 0) {
-          teardownRoom(roomId);
+        if (userId === r.hostId) {
+          closeGameRoom(
+            roomId,
+            'host-disconnected',
+            'El host se desconectó. La sala fue cerrada.'
+          ).catch(() => {});
+          return;
         }
+
+        removePlayerFromGameRoom(roomId, userId, { died: true }).catch(() => {});
       }, DISCONNECT_TIMEOUT_MS);
+      if (typeof timer.unref === 'function') timer.unref();
 
       disconnectTimers.set(timerKey, timer);
     },
@@ -458,4 +675,4 @@ function setupGameRoute(app) {
   console.info('[Game] /game route registered');
 }
 
-module.exports = { setupGameRoute };
+module.exports = { setupGameRoute, closeGameRoom, removePlayerFromGameRoom };

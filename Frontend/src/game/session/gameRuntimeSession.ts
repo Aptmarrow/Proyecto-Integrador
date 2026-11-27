@@ -47,6 +47,8 @@ export type RuntimeSessionOptions = {
   onEngineFrame: (engine: GameEngine) => void;
   onPlayersSnapshot?: (players: ServerPlayer[], myPlayerId: string) => void;
   onWorkerModeChange?: (mode: WorkerRuntimeMode, statusMessage: string) => void;
+  onHostStatusChange?: (isHost: boolean) => void;
+  onRoomClosed?: (message: string) => void;
 };
 
 const UUID_REGEX = /^[0-9a-f-]{36}$/i;
@@ -211,10 +213,8 @@ export class GameRuntimeSession {
     window.addEventListener('keyup', this.onKeyUp);
 
     // 1. Connect to Authoritative Backend WS if valid room UUID + token, with automatic Local Physics Worker fallback
-    const calProfile = getCachedLutProfile();
-    const isCustomCalStage = Boolean(calProfile?.id && this.options.difficulty === calProfile.id);
     const canUseBackendWs = Boolean(
-      !isCustomCalStage && this.options.token && this.options.roomId && UUID_REGEX.test(this.options.roomId)
+      this.options.token && this.options.roomId && UUID_REGEX.test(this.options.roomId)
     );
 
     if (canUseBackendWs) {
@@ -239,9 +239,12 @@ export class GameRuntimeSession {
       this.gameClient
         .connect(
           this.options.roomId,
-          (playerId, initialState) => {
+          (playerId, initialState, isHost) => {
             if (this.stopped) return;
             this.myPlayerId = playerId;
+            if (typeof isHost === 'boolean') {
+              this.options.onHostStatusChange?.(isHost);
+            }
             this.setMode('backend-worker', 'Servidor Autoritativo + Snapshot Worker (60Hz)');
             if (initialState) this.handleIncomingSnapshot(initialState);
             if (this.options.testMode === 'beam' || this.options.testMode === 'struggle') {
@@ -259,10 +262,36 @@ export class GameRuntimeSession {
             difficulty: this.options.difficulty || 'normal',
             world: clampLevelPart(this.options.world, 1),
             stage: clampLevelPart(this.options.stage, 1),
+            onPlayerLeft: (payload) => {
+              if (this.stopped) return;
+              if (payload.playerId && payload.playerId !== this.myPlayerId) {
+                this.engine.spawnPlayerDeathEffect(payload.x, payload.y, payload.playerId);
+              }
+            },
+            onRoomClosed: (payload) => {
+              if (this.stopped) return;
+              const message = payload.message || 'El host abandonó la partida. La sala fue cerrada.';
+              this.stopped = true;
+              cancelAnimationFrame(this.animFrameId);
+              if (this.snapshotWorker) {
+                this.snapshotWorker.terminate();
+                this.snapshotWorker = null;
+              }
+              this.options.onRoomClosed?.(message);
+            },
           }
         )
-        .catch(() => {
+        .catch((err) => {
           if (this.stopped) return;
+          if (err && (err as Error & { roomClosed?: boolean }).roomClosed) {
+            this.gameClient?.disconnect();
+            this.gameClient = null;
+            if (this.snapshotWorker) {
+              this.snapshotWorker.terminate();
+              this.snapshotWorker = null;
+            }
+            return;
+          }
           this.gameClient?.disconnect();
           this.gameClient = null;
           if (this.snapshotWorker) {
@@ -315,6 +344,21 @@ export class GameRuntimeSession {
     this.options.onWorkerModeChange?.(mode, message);
   }
 
+  public leaveMatch(): void {
+    this.stopped = true;
+    this.engine.player.hp = 0;
+    const client = this.gameClient;
+    this.gameClient = null;
+    if (client) {
+      client.sendLeaveGame();
+      // Give the browser WebSocket a brief window to flush leave-game before closing
+      setTimeout(() => {
+        client.disconnect();
+      }, 60);
+    }
+    this.stop();
+  }
+
   public stop(): void {
     this.stopped = true;
     window.removeEventListener('touchstart', this.onFirstTouch);
@@ -335,6 +379,11 @@ export class GameRuntimeSession {
     this.engine.destroy();
   }
 
+  private isCustomStageFlagDisabled(flag: 'disableBoss' | 'disableWeapons'): boolean {
+    const cal = getCachedLutProfile();
+    return Boolean(cal?.id && this.options.difficulty === cal.id && cal?.level?.[flag]);
+  }
+
   public selectRole(role: PlayerRole): void {
     if (this.runtimeMode === 'backend-worker') return;
     this.options.setSelectedRole(role);
@@ -347,6 +396,7 @@ export class GameRuntimeSession {
   }
 
   public triggerSkill(): void {
+    if (this.isCustomStageFlagDisabled('disableWeapons')) return;
     if (this.workerBridge?.isActive()) {
       this.workerBridge.triggerSkill();
     }
@@ -378,6 +428,7 @@ export class GameRuntimeSession {
   }
 
   public startBeamStruggleTest(): void {
+    if (this.isCustomStageFlagDisabled('disableBoss')) return;
     if (this.gameClient && this.runtimeMode === 'backend-worker') {
       this.options.setSelectedRole('Special_Attack');
       this.engine.startBeamStruggleTest();
@@ -390,6 +441,7 @@ export class GameRuntimeSession {
   }
 
   public spawnBossNow(): void {
+    if (this.isCustomStageFlagDisabled('disableBoss')) return;
     if (this.gameClient && this.runtimeMode === 'backend-worker') {
       this.engine.spawnBossDirectly();
       this.gameClient.sendSpawnBoss();

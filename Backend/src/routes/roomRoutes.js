@@ -19,6 +19,17 @@ function getSignalHelpers() {
   return { broadcast: () => {}, markRoomTransitioningToGame: () => {} };
 }
 
+function getGameServerHelpers() {
+  const gameServerPath = require.resolve('../ws/gameServer');
+  if (require.cache[gameServerPath]?.exports) {
+    return require.cache[gameServerPath].exports;
+  }
+  return {
+    closeGameRoom: async () => {},
+    removePlayerFromGameRoom: async () => {},
+  };
+}
+
 const ROOM_TTL = 7200; // seconds
 const PUBLIC_ROOMS_KEY = 'rooms:public';
 const MAX_PUBLIC_LIST = 50;
@@ -488,6 +499,21 @@ async function roomRoutes(fastify) {
     }
 
     const updatedRoom = await removePlayer(roomId, request.user.id);
+
+    const { removePlayerFromGameRoom } = getGameServerHelpers();
+    await removePlayerFromGameRoom(roomId, request.user.id, { died: true }).catch(() => {});
+
+    if (updatedRoom) {
+      const { broadcast: broadcastSignalRoom } = getSignalHelpers();
+      broadcastSignalRoom(roomId, {
+        type: 'room-updated',
+        players: updatedRoom.players,
+        playersCount: updatedRoom.playersCount,
+        playerCharacters: updatedRoom.playerCharacters || {},
+        playerReady: updatedRoom.playerReady || {},
+      });
+    }
+
     return reply.send({ room: updatedRoom ?? room });
   });
 
@@ -532,6 +558,19 @@ async function roomRoutes(fastify) {
     }
 
     await pipeline.exec();
+
+    const { broadcast: broadcastSignalRoom } = getSignalHelpers();
+    broadcastSignalRoom(roomId, {
+      type: 'host-disconnected',
+      message: 'El host cerró la sala.',
+    });
+
+    const { closeGameRoom } = getGameServerHelpers();
+    await closeGameRoom(
+      roomId,
+      'host-left',
+      'El host abandonó la partida. La sala fue cerrada.'
+    ).catch(() => {});
 
     return reply.send({ success: true });
   });
@@ -660,9 +699,11 @@ async function roomRoutes(fastify) {
       broadcastSignalRoom(roomId, {
         type: 'game-start',
         roomId,
+        hostId: room.hostId,
         players: room.players,
         playerCharacters: room.playerCharacters || {},
         difficulty: room.difficulty || 'normal',
+        calKey: room.calKey || null,
         world: room.world || 1,
         stage: room.stage || 1,
       });
@@ -672,8 +713,10 @@ async function roomRoutes(fastify) {
       playerReady: room.playerReady,
       playerCharacters: room.playerCharacters,
       allReady,
+      hostId: room.hostId,
       players: room.players,
       difficulty: room.difficulty || 'normal',
+      calKey: room.calKey || null,
       world: room.world || 1,
       stage: room.stage || 1,
     });

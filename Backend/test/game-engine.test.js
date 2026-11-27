@@ -11,6 +11,7 @@ const SpatialHash = require('../src/game/systems/SpatialHash');
 const { spawnAutoAimBullet } = require('../src/game/autoAim');
 const GameRoom = require('../src/game/GameRoom');
 const { getStageConfig, hasNextStage, getNextStageIndices } = require('../src/game/campaign/stageConfigs');
+const { validateClientMessage } = require('../src/ws/gameSecurity');
 
 describe('Authoritative 60Hz Game Engine & Physics', () => {
   it('validates bullet defaults, pooling, and auto-aim targeting', () => {
@@ -101,6 +102,12 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     room.addPlayer('p3', 'DPS');
     room.addPlayer('p4', 'Special_Attack');
 
+    // All 4 players must spawn on the left side of the 800x600 arena
+    const initialSnap = room.getState();
+    for (const p of initialSnap.players) {
+      assert.ok(p.x >= 50 && p.x <= 220, `Expected left-side spawn for ${p.id}, got x=${p.x}`);
+    }
+
     room.setPlayerReady('p1', true);
     room.setPlayerReady('p2', true);
     room.setPlayerReady('p3', true);
@@ -135,6 +142,30 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     // Remove player and verify clean removal
     room.removePlayer('p4');
     assert.equal(room.getState().players.length, 3);
+  });
+
+  it('supports multiplayer custom calibration stages and leave-game validation', () => {
+    assert.equal(validateClientMessage({ type: 'leave-game' }).ok, true);
+
+    const calRoom = new GameRoom('cal-room', 'p1', { difficulty: 'custom_cal', world: 1, stage: 1 });
+    calRoom.addPlayer('p1', 'DPS');
+    calRoom.addPlayer('p2', 'Support');
+    calRoom.phase = 'playing';
+
+    calRoom.setInput('p1', { dx: 1, dy: 0, action: 'shoot' });
+    calRoom.setInput('p2', { dx: 0, dy: 1, action: 'special' });
+    calRoom.spawnBossNow();
+    for (let i = 0; i < 30; i++) {
+      calRoom.update(1 / 60);
+    }
+
+    const snap = calRoom.getState();
+    assert.equal(snap.players.length, 2);
+    assert.equal(snap.bullets.length, 0);
+    assert.equal(snap.enemies.length, 0);
+    assert.equal(snap.boss.isActive, false);
+    assert.equal(snap.campaign.disableBoss, true);
+    assert.equal(snap.campaign.disableWeapons, true);
   });
 });
 

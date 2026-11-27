@@ -20,7 +20,8 @@ function GameHudHeader({
   stage = 1,
   stageTitle = '',
   bossEtaSeconds = 0,
-  onExitLobby,
+  isHost = false,
+  onLeaveMatch,
 }) {
   const formatEta = (sec) => {
     const m = Math.floor(sec / 60);
@@ -33,10 +34,14 @@ function GameHudHeader({
         <button
           type="button"
           className="dk-exit-lobby-btn"
-          onClick={onExitLobby}
-          title="Salir al Lobby"
+          onClick={onLeaveMatch}
+          title={
+            isHost
+              ? 'Abandonar y cerrar la partida para todos los jugadores'
+              : 'Abandonar la partida y desconectarse de la sala'
+          }
         >
-          ← LOBBY
+          ✕ ABANDONAR PARTIDA
         </button>
 
         <div className="dk-player-hud-card" title={`Tu Personaje: ${selectedClass}`}>

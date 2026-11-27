@@ -151,6 +151,34 @@ export class BaseStageEngine {
     }
   }
 
+  public spawnPlayerDeathEffect(worldX?: number, worldY?: number, playerId?: string): void {
+    let sx = typeof worldX === 'number' ? worldX * this.SCALE_X : null;
+    let sy = typeof worldY === 'number' ? worldY * this.SCALE_Y : null;
+
+    if (playerId) {
+      const sprite = this.remotePlayerSprites.get(playerId);
+      if (sprite) {
+        if (sx === null) sx = sprite.position.x;
+        if (sy === null) sy = sprite.position.y;
+        this.remotePlayersContainer.removeChild(sprite);
+        sprite.destroy({ children: true, texture: false, baseTexture: false });
+        this.remotePlayerSprites.delete(playerId);
+      }
+    }
+
+    if (sx !== null && sy !== null) {
+      this.particleSystem.spawnBurst(
+        sx,
+        sy,
+        28,
+        280,
+        [0xffffff, 0xff2b5b, 0xf97316, 0xfef08a],
+        true
+      );
+      this.shakeTimer = Math.max(this.shakeTimer, 0.25);
+    }
+  }
+
   public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string, onTargetPlayerPos?: (x: number, y: number, characterRole?: string) => void): void {
     this.isBackendConnected = true;
     this.useBackendBullets = true;
@@ -214,6 +242,8 @@ export class BaseStageEngine {
           this.remotePlayersContainer.addChild(sprite);
         }
         sprite.position.set(scaledX, scaledY);
+        const remoteHp = (p as RemotePlayer & { hp?: number }).hp;
+        sprite.alpha = typeof remoteHp === 'number' && remoteHp <= 0 ? 0.22 : 1;
       }
     }
   }

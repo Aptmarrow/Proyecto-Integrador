@@ -44,24 +44,31 @@ class TimelineManager {
 
     const endAction = config.hasBoss === false && config.miniboss ? 'spawn_miniboss' : 'spawn_boss';
 
-    this.loadScript([
+    const events = [
       {
         time: 0.1,
         action: 'stage_banner',
         payload: { text: bannerText, subtext: bannerSubtext },
       },
       ...waveEvents,
-      {
-        time: config.bossWarningAt,
-        action: 'boss_warning',
-        payload: { isMiniboss: endAction === 'spawn_miniboss' },
-      },
-      {
-        time: config.bossSpawnAt,
-        action: endAction,
-        payload: config.miniboss ? { miniboss: config.miniboss } : {},
-      },
-    ]);
+    ];
+
+    if (!config.disableBoss) {
+      events.push(
+        {
+          time: config.bossWarningAt,
+          action: 'boss_warning',
+          payload: { isMiniboss: endAction === 'spawn_miniboss' },
+        },
+        {
+          time: config.bossSpawnAt,
+          action: endAction,
+          payload: config.miniboss ? { miniboss: config.miniboss } : {},
+        }
+      );
+    }
+
+    this.loadScript(events);
   }
 
   on(action, handler) {

@@ -30,6 +30,7 @@ export class GameEngine extends BaseStageEngine {
   private lastSyncedSpellcard: string = '';
   private lastStageKey: string = '';
   private hasSyncedStageTime: boolean = false;
+  private hasReceivedInitialPos: boolean = false;
   public stageTransitionBlackAlpha: number = 0;
   public stageRevealFlashAlpha: number = 0;
   private revealCurtainTimer: number = 0;
@@ -154,8 +155,10 @@ export class GameEngine extends BaseStageEngine {
 
   public get bossEtaSeconds(): number {
     if (this.showBossHpBar || this.isStageClear) return 0;
-    const spawnAt = this.networkSync.campaignState?.bossSpawnAt;
-    if (typeof spawnAt !== 'number' || spawnAt <= 0) return 0;
+    const campaign = this.networkSync.campaignState;
+    if (campaign?.disableBoss) return 0;
+    const spawnAt = campaign?.bossSpawnAt;
+    if (typeof spawnAt !== 'number' || spawnAt <= 0 || spawnAt >= 90000) return 0;
     return Math.max(0, spawnAt - this.stageTime);
   }
 
@@ -481,8 +484,13 @@ export class GameEngine extends BaseStageEngine {
 
   public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string): void {
     super.applyBackendSnapshot(players, myPlayerId, (x, y, characterRole) => {
-      this.player.targetPos.x = x;
-      this.player.targetPos.y = y;
+      if (!this.hasReceivedInitialPos) {
+        this.hasReceivedInitialPos = true;
+        this.player.setPosition(x, y);
+      } else {
+        this.player.targetPos.x = x;
+        this.player.targetPos.y = y;
+      }
       if (characterRole && this.player.characterClassId !== characterRole) {
         this.player.setCharacterClass(characterRole as CharacterClass);
       }
@@ -557,9 +565,28 @@ export class GameEngine extends BaseStageEngine {
 
   public applyBackendCampaign(campaign?: ServerCampaign): void {
     if (!campaign) return;
-    this.networkSync.applyCampaignSnapshot(campaign);
+    const activeLut = getCachedLutProfile();
+    const resolvedCampaign: ServerCampaign =
+      activeLut?.id && campaign.difficulty === activeLut.id && activeLut.level
+        ? {
+            ...campaign,
+            difficultyLabel: activeLut.level.difficultyLabel || campaign.difficultyLabel,
+            worldName: activeLut.level.worldName || campaign.worldName,
+            stageTitle: activeLut.level.stageTitle || campaign.stageTitle,
+            bannerText: activeLut.level.bannerText || campaign.bannerText,
+            bannerSubtext: activeLut.level.bannerSubtext || campaign.bannerSubtext,
+            clearTitle: activeLut.level.clearTitle || campaign.clearTitle,
+            clearSubtext: activeLut.level.clearSubtext || campaign.clearSubtext,
+            bossSpawnAt: activeLut.level.bossSpawnAt ?? campaign.bossSpawnAt,
+            bossWarningAt: activeLut.level.bossWarningAt ?? campaign.bossWarningAt,
+            disableBoss: activeLut.level.disableBoss ?? campaign.disableBoss,
+            disableWeapons: activeLut.level.disableWeapons ?? campaign.disableWeapons,
+          }
+        : campaign;
 
-    const nextStageKey = `${campaign.difficulty}:${campaign.world}-${campaign.stage}`;
+    this.networkSync.applyCampaignSnapshot(resolvedCampaign);
+
+    const nextStageKey = `${resolvedCampaign.difficulty}:${resolvedCampaign.world}-${resolvedCampaign.stage}`;
     if (this.lastStageKey && this.lastStageKey !== nextStageKey) {
       // Seamless arrival in new level: brief black lift + crisp luminous reveal flash!
       this.revealCurtainTimer = 0.36;
@@ -574,32 +601,32 @@ export class GameEngine extends BaseStageEngine {
     }
     this.lastStageKey = nextStageKey;
 
-    if (campaign.autoAdvancing && typeof campaign.transitionBlackAlpha === 'number') {
-      this.stageTransitionBlackAlpha = Math.max(this.stageTransitionBlackAlpha, campaign.transitionBlackAlpha);
+    if (resolvedCampaign.autoAdvancing && typeof resolvedCampaign.transitionBlackAlpha === 'number') {
+      this.stageTransitionBlackAlpha = Math.max(this.stageTransitionBlackAlpha, resolvedCampaign.transitionBlackAlpha);
     }
 
     const theme =
-      campaign.spaceTheme ||
-      getSpaceStageConfig(campaign.difficulty, campaign.world, campaign.stage).spaceTheme;
+      resolvedCampaign.spaceTheme ||
+      getSpaceStageConfig(resolvedCampaign.difficulty, resolvedCampaign.world, resolvedCampaign.stage).spaceTheme;
     this.backgroundRenderer.setSpaceTheme(theme);
-    this.applyDifficultyVisuals(campaign.difficulty);
+    this.applyDifficultyVisuals(resolvedCampaign.difficulty);
 
-    if (campaign.stageState) {
-      this.stageState = campaign.stageState as StageState;
-      this.isStageClear = campaign.stageState === 'stage_clear';
+    if (resolvedCampaign.stageState) {
+      this.stageState = resolvedCampaign.stageState as StageState;
+      this.isStageClear = resolvedCampaign.stageState === 'stage_clear';
     }
 
-    if (campaign.bannerText && campaign.bannerText !== this.lastBannerText) {
-      this.lastBannerText = campaign.bannerText;
+    if (resolvedCampaign.bannerText && resolvedCampaign.bannerText !== this.lastBannerText) {
+      this.lastBannerText = resolvedCampaign.bannerText;
       this.stageBanner = {
-        text: campaign.bannerText,
-        subtext: campaign.bannerSubtext || '',
+        text: resolvedCampaign.bannerText,
+        subtext: resolvedCampaign.bannerSubtext || '',
         timer: 4.5,
         maxTimer: 4.5,
       };
     }
 
-    if (campaign.stageState === 'boss_warning' && !this.bossWarningActive) {
+    if (resolvedCampaign.stageState === 'boss_warning' && !this.bossWarningActive) {
       this.bossWarningActive = true;
       this.playSound('/assets/sounds/gasterintro.wav', 0.7);
       setTimeout(() => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getIdToken, getStoredUserId } from '../services/api';
-import { clearLutCache } from '../game/engine/SpriteLutCache';
+import { deleteRoom, getIdToken, getStoredUserId, leaveRoom } from '../services/api';
+import { clearLutCache, decodeLutWithKey, getCachedLutProfile } from '../game/engine/SpriteLutCache';
 import {
   GameRuntimeSession,
   clampLevelPart,
@@ -53,22 +53,27 @@ export default function Game({ isDevMode = false }) {
     const storedUserId = getStoredUserId();
 
     const roomId = state.roomId || query.roomId || (isSandboxRoute ? 'local-sandbox' : persisted?.roomId) || 'local-room';
+    const hostId = state.hostId || (isSandboxRoute ? '' : persisted?.hostId) || '';
     const userId = state.userId || storedUserId || (isSandboxRoute ? 'dev-player' : persisted?.userId) || 'player-local-host';
     const playerCharacters = state.playerCharacters || persisted?.playerCharacters || {};
     const usernamesById = state.usernamesById || persisted?.usernamesById || {};
     const roleFromRoster = userId && playerCharacters[userId] ? playerCharacters[userId] : null;
     const defaultRole = isSandboxRoute ? 'Special_Attack' : 'DPS';
     const resolvedRole = normalizeRole(state.role || roleFromRoster || query.classId || (isSandboxRoute ? 'Special_Attack' : persisted?.role) || defaultRole);
-    const difficulty = toDifficulty(state.difficulty || persisted?.difficulty || query.difficulty, 'normal');
+    const calKey = isSandboxRoute ? null : (state.calKey ?? persisted?.calKey ?? null);
+    const rawDifficulty = state.difficulty || persisted?.difficulty || query.difficulty || 'normal';
+    const difficulty = calKey ? rawDifficulty : toDifficulty(rawDifficulty, 'normal');
     const world = clampLevelPart(state.world ?? persisted?.world ?? query.world, 1);
     const stage = clampLevelPart(state.stage ?? persisted?.stage ?? query.stage, 1);
     const token = isSandboxRoute ? '' : (state.token || getIdToken() || query.token || '');
 
     const payload = {
       roomId,
+      hostId,
       userId,
       role: resolvedRole,
       difficulty,
+      calKey,
       world,
       stage,
       playerCharacters,
@@ -82,9 +87,11 @@ export default function Game({ isDevMode = false }) {
         SESSION_STORAGE_KEY,
         JSON.stringify({
           roomId,
+          hostId,
           userId,
           role: resolvedRole,
           difficulty,
+          calKey,
           world,
           stage,
           playerCharacters,
@@ -102,6 +109,14 @@ export default function Game({ isDevMode = false }) {
   const selectedClassRef = useRef(launchConfig.role);
   const [workerMode, setWorkerMode] = useState('connecting');
   const [workerModeLabel, setWorkerModeLabel] = useState('Iniciando Web Workers...');
+  const [isHost, setIsHost] = useState(() =>
+    Boolean(launchConfig.hostId && launchConfig.userId && launchConfig.hostId === launchConfig.userId)
+  );
+  const isHostRef = useRef(isHost);
+  isHostRef.current = isHost;
+  const leavingRef = useRef(false);
+  const [roomClosedMessage, setRoomClosedMessage] = useState(null);
+  const roomClosedTimerRef = useRef(null);
 
   const [playerHp, setPlayerHp] = useState(100);
   const [playerMaxHp, setPlayerMaxHp] = useState(100);
@@ -126,13 +141,17 @@ export default function Game({ isDevMode = false }) {
   const [isAutoAdvancingStage, setIsAutoAdvancingStage] = useState(false);
   const [stageBlackAlpha, setStageBlackAlpha] = useState(0);
   const [stageFlashAlpha, setStageFlashAlpha] = useState(0);
-  const [currentDifficultyLabel, setCurrentDifficultyLabel] = useState(
-    launchConfig.difficulty === 'no_mercy'
+  const [currentDifficultyLabel, setCurrentDifficultyLabel] = useState(() => {
+    const activeLut = getCachedLutProfile();
+    if (activeLut?.id && launchConfig.difficulty === activeLut.id) {
+      return activeLut.level?.difficultyLabel || activeLut.ui?.label || launchConfig.difficulty;
+    }
+    return launchConfig.difficulty === 'no_mercy'
       ? 'No Mercy'
       : launchConfig.difficulty === 'difficult'
         ? 'Difficult'
-        : 'Normal'
-  );
+        : 'Normal';
+  });
   const [currentWorld, setCurrentWorld] = useState(launchConfig.world);
   const [currentStage, setCurrentStage] = useState(launchConfig.stage);
   const [currentStageTitle, setCurrentStageTitle] = useState('');
@@ -197,14 +216,32 @@ export default function Game({ isDevMode = false }) {
     const mountContainer = canvasMountRef.current;
     if (!mountContainer) return undefined;
 
+    let cancelled = false;
+    let activeSession = null;
+    leavingRef.current = false;
+    setRoomClosedMessage(null);
+    if (roomClosedTimerRef.current) {
+      clearTimeout(roomClosedTimerRef.current);
+      roomClosedTimerRef.current = null;
+    }
+
     let lastHudSync = 0;
     let lastPreviewSig = '';
     let lastPreviewActive = -1;
     setStagePreviewVariants([]);
     setActiveStagePreviewIdx(-1);
 
-    // Dirty-checked quantized cache: only notify React when visible HUD values change
-    const hudCache = {
+    const startRuntime = async () => {
+      if (launchConfig.calKey && !getCachedLutProfile()) {
+        await decodeLutWithKey(launchConfig.calKey, {
+          roomId: launchConfig.roomId,
+          hostId: launchConfig.hostId,
+        }).catch(() => null);
+      }
+      if (cancelled) return;
+
+      // Dirty-checked quantized cache: only notify React when visible HUD values change
+      const hudCache = {
       hp: -1,
       maxHp: -1,
       sp: -1,
@@ -240,7 +277,7 @@ export default function Game({ isDevMode = false }) {
       struggleTimeLeft: -1,
     };
 
-    const session = new GameRuntimeSession({
+      const session = new GameRuntimeSession({
       mountContainer,
       roomId: launchConfig.roomId,
       userId: launchConfig.userId,
@@ -266,6 +303,25 @@ export default function Game({ isDevMode = false }) {
       onWorkerModeChange: (mode, label) => {
         setWorkerMode(mode);
         setWorkerModeLabel(label);
+      },
+      onHostStatusChange: (hostFlag) => {
+        isHostRef.current = hostFlag;
+        setIsHost(hostFlag);
+      },
+      onRoomClosed: (message) => {
+        if (leavingRef.current) return;
+        clearLutCache();
+        try {
+          sessionStorage.removeItem(SESSION_STORAGE_KEY);
+          sessionStorage.removeItem('danma_current_room_id');
+        } catch {
+          // ignore storage errors
+        }
+        setRoomClosedMessage(message || 'El host abandonó la partida. La sala fue cerrada.');
+        if (roomClosedTimerRef.current) clearTimeout(roomClosedTimerRef.current);
+        roomClosedTimerRef.current = setTimeout(() => {
+          navigate('/join', { replace: true });
+        }, 2400);
       },
       onPlayersSnapshot: (players, myPlayerId) => {
         const me = players.find((p) => p.id === myPlayerId);
@@ -458,14 +514,25 @@ export default function Game({ isDevMode = false }) {
       },
     });
 
-    sessionRef.current = session;
-    session.start();
+      activeSession = session;
+      sessionRef.current = session;
+      session.start();
+    };
+
+    startRuntime();
 
     return () => {
-      session.stop();
+      cancelled = true;
+      if (roomClosedTimerRef.current) {
+        clearTimeout(roomClosedTimerRef.current);
+        roomClosedTimerRef.current = null;
+      }
+      if (activeSession) {
+        activeSession.stop();
+      }
       sessionRef.current = null;
     };
-  }, [launchConfig, toggleFullscreen, updateSelectedRole]);
+  }, [launchConfig, navigate, toggleFullscreen, updateSelectedRole]);
 
   const updateJoystickVector = useCallback((clientX, clientY, centerX, centerY, maxRadius) => {
     const rawDx = clientX - centerX;
@@ -551,14 +618,51 @@ export default function Game({ isDevMode = false }) {
     }
   }, []);
 
-  const handleExitLobby = useCallback(() => {
+  const handleLeaveMatch = useCallback(() => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+
+    if (roomClosedTimerRef.current) {
+      clearTimeout(roomClosedTimerRef.current);
+      roomClosedTimerRef.current = null;
+    }
+
     clearLutCache();
+    try {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      sessionStorage.removeItem('danma_current_room_id');
+    } catch {
+      // ignore storage errors
+    }
+
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    if (session) {
+      session.leaveMatch();
+    }
+
+    const isOnlineRoom =
+      !isSandboxRoute &&
+      Boolean(launchConfig.token) &&
+      Boolean(launchConfig.roomId) &&
+      /^[0-9a-f-]{36}$/i.test(launchConfig.roomId);
+
+    if (isOnlineRoom) {
+      if (isHostRef.current) {
+        deleteRoom(launchConfig.roomId, { keepalive: true }).catch(() => {
+          leaveRoom(launchConfig.roomId, { keepalive: true }).catch(() => {});
+        });
+      } else {
+        leaveRoom(launchConfig.roomId, { keepalive: true }).catch(() => {});
+      }
+    }
+
     if (isSandboxRoute) {
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
       return;
     }
-    navigate('/join');
-  }, [isSandboxRoute, navigate]);
+    navigate('/join', { replace: true });
+  }, [isSandboxRoute, launchConfig.roomId, launchConfig.token, navigate]);
 
   const handlePushStruggle = useCallback(() => sessionRef.current?.pushStruggle(), []);
   const handleSelectRole = useCallback((role) => sessionRef.current?.selectRole(role), []);
@@ -605,7 +709,8 @@ export default function Game({ isDevMode = false }) {
           stage={currentStage}
           stageTitle={currentStageTitle}
           bossEtaSeconds={bossEtaSeconds}
-          onExitLobby={handleExitLobby}
+          isHost={isHost}
+          onLeaveMatch={handleLeaveMatch}
         />
 
         <main className="dk-combat-arena-wrapper">
@@ -630,13 +735,14 @@ export default function Game({ isDevMode = false }) {
               stageBlackAlpha={stageBlackAlpha}
               stageFlashAlpha={stageFlashAlpha}
               isPlayerDefeated={playerHp <= 0}
+              roomClosedMessage={roomClosedMessage}
               stageClearTitle={stageClearTitle}
               stageClearSubtext={stageClearSubtext}
               stageClearMeta={stageClearMetaText}
               stageClearButtonText={stageClearButtonText}
               onPushStruggle={handlePushStruggle}
               onRestartStage={handleStageClearAction}
-              onExitLobby={handleExitLobby}
+              onLeaveMatch={handleLeaveMatch}
             />
 
             {isTouchDevice && (

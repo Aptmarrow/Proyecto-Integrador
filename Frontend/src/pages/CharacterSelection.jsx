@@ -500,6 +500,8 @@ export default function CharacterSelection() {
         };
         const selectedRole = mergedCharacters[myId] || 'Tank';
         const targetRoomId = overridePayload.roomId || latestRoom.id || activeRoomIdRef.current || 'local-room';
+        const targetHostId = overridePayload.hostId || latestRoom.hostId || (Array.isArray(latestRoom.players) ? latestRoom.players[0] : '') || '';
+        const targetCalKey = overridePayload.calKey ?? latestRoom.calKey ?? null;
         const activeLut = getCachedLutProfile();
         const targetDifficulty = normalizeDifficulty(
           overridePayload.difficulty || latestRoom.difficulty || 'normal',
@@ -518,9 +520,11 @@ export default function CharacterSelection() {
             'danma_game_session',
             JSON.stringify({
               roomId: targetRoomId,
+              hostId: targetHostId,
               userId: myId,
               role: selectedRole,
               difficulty: targetDifficulty,
+              calKey: targetCalKey,
               world: targetWorld,
               stage: targetStage,
               playerCharacters: mergedCharacters,
@@ -539,9 +543,11 @@ export default function CharacterSelection() {
         navigate('/game', {
           state: {
             roomId: targetRoomId,
+            hostId: targetHostId,
             userId: myId,
             role: selectedRole,
             difficulty: targetDifficulty,
+            calKey: targetCalKey,
             world: targetWorld,
             stage: targetStage,
             playerCharacters: mergedCharacters,
@@ -797,8 +803,10 @@ export default function CharacterSelection() {
         if (res?.allReady) {
           triggerGameLaunch({
             roomId: activeRoomId,
+            hostId: res.hostId || roomRef.current?.hostId,
             playerCharacters: res.playerCharacters || roomRef.current?.playerCharacters,
             difficulty: res.difficulty || roomRef.current?.difficulty || 'normal',
+            calKey: res.calKey ?? roomRef.current?.calKey ?? null,
             world: res.world ?? roomRef.current?.world ?? 1,
             stage: res.stage ?? roomRef.current?.stage ?? 1,
           });
@@ -1145,8 +1153,10 @@ export default function CharacterSelection() {
             if (message.type === 'game-start') {
               triggerGameLaunch({
                 roomId: message.roomId || roomData.id,
+                hostId: message.hostId || roomRef.current?.hostId || roomData.hostId,
                 playerCharacters: message.playerCharacters,
                 difficulty: message.difficulty || roomRef.current?.difficulty || roomData.difficulty || 'normal',
+                calKey: message.calKey ?? roomRef.current?.calKey ?? roomData.calKey ?? null,
                 world: message.world ?? roomRef.current?.world ?? roomData.world ?? 1,
                 stage: message.stage ?? roomRef.current?.stage ?? roomData.stage ?? 1,
               });

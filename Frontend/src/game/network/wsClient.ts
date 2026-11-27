@@ -132,10 +132,12 @@ export interface ServerCampaign {
   worldName?: string;
   stageTitle?: string;
   hasBoss?: boolean;
+  disableBoss?: boolean;
+  disableWeapons?: boolean;
   minibossName?: string | null;
   bossSpawnAt?: number;
   bossWarningAt?: number;
-  spaceTheme?: SpaceThemeSpec;
+  spaceTheme?: SpaceThemeSpec | null;
   autoAdvancing?: boolean;
   transitionBlackAlpha?: number;
 }
@@ -181,14 +183,17 @@ export type GameServerMessage =
   | { type: 'ready-status'; phase: string; players: Array<{ id: string; isReady: boolean }> }
   | { type: 'player-joined'; playerId: string }
   | { type: 'player-disconnected'; playerId: string }
-  | { type: 'player-left'; playerId: string }
+  | { type: 'player-left'; playerId: string; died?: boolean; x?: number; y?: number }
+  | { type: 'room-closed'; roomId?: string; reason?: string; message?: string }
   | { type: 'hit'; playerId: string; bulletId?: string; damage?: number }
   | { type: 'error'; message: string };
 
 export class GameWSClient {
   private socket: WebSocket | null = null;
   private onSnapshotCallback: ((snapshot: GameSnapshot) => void) | null = null;
-  private onJoinedCallback: ((playerId: string, initialState: GameSnapshot) => void) | null = null;
+  private onJoinedCallback: ((playerId: string, initialState: GameSnapshot, isHost?: boolean) => void) | null = null;
+  private onPlayerLeftCallback: ((payload: { playerId: string; died?: boolean; x?: number; y?: number }) => void) | null = null;
+  private onRoomClosedCallback: ((payload: { reason?: string; message?: string }) => void) | null = null;
   private myPlayerId: string = '';
   private inputSequence = 0;
   private connectTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -197,13 +202,21 @@ export class GameWSClient {
 
   public connect(
     roomId: string,
-    onJoined: (playerId: string, initialState: GameSnapshot) => void,
+    onJoined: (playerId: string, initialState: GameSnapshot, isHost?: boolean) => void,
     onSnapshot: (snapshot: GameSnapshot) => void,
     character?: string,
-    options?: { difficulty?: string; world?: number; stage?: number }
+    options?: {
+      difficulty?: string;
+      world?: number;
+      stage?: number;
+      onPlayerLeft?: (payload: { playerId: string; died?: boolean; x?: number; y?: number }) => void;
+      onRoomClosed?: (payload: { reason?: string; message?: string }) => void;
+    }
   ): Promise<void> {
     this.onJoinedCallback = onJoined;
     this.onSnapshotCallback = onSnapshot;
+    this.onPlayerLeftCallback = options?.onPlayerLeft ?? null;
+    this.onRoomClosedCallback = options?.onRoomClosed ?? null;
 
     return new Promise((resolve, reject) => {
       if (!roomId) {
@@ -287,13 +300,29 @@ export class GameWSClient {
             // Notify authoritative server that client assets/canvas are ready immediately
             this.send({ type: 'ready' });
             if (this.onJoinedCallback) {
-              this.onJoinedCallback(msg.playerId, msg.initialState);
+              this.onJoinedCallback(msg.playerId, msg.initialState, Boolean(msg.isHost));
             }
             finishConnect();
           } else if (msg.type === 'snapshot') {
             if (this.onSnapshotCallback) {
               this.onSnapshotCallback(msg);
             }
+          } else if (msg.type === 'player-left') {
+            this.onPlayerLeftCallback?.({
+              playerId: msg.playerId,
+              died: msg.died,
+              x: msg.x,
+              y: msg.y,
+            });
+          } else if (msg.type === 'room-closed') {
+            const reasonMsg = msg.message || 'El host abandonó la partida. La sala fue cerrada.';
+            if (!settled) {
+              const err = new Error(reasonMsg) as Error & { roomClosed?: boolean };
+              err.roomClosed = true;
+              failConnect(err);
+            }
+            this.onRoomClosedCallback?.({ reason: msg.reason, message: reasonMsg });
+            this.disconnect();
           } else if (msg.type === 'error') {
             const reason = msg.message || 'El servidor rechazo la conexion de juego';
             failConnect(new Error(reason));
@@ -337,6 +366,10 @@ export class GameWSClient {
 
   public sendStartStruggle(): void {
     this.send({ type: 'start-struggle' });
+  }
+
+  public sendLeaveGame(): void {
+    this.send({ type: 'leave-game' });
   }
 
   private send(payload: unknown): void {

@@ -3,6 +3,7 @@
 const ROOM_ID_REGEX = /^[0-9a-f-]{36}$/i;
 const ALLOWED_TYPES = new Set([
   'join-game',
+  'leave-game',
   'start-ready',
   'ready',
   'player-loaded',
