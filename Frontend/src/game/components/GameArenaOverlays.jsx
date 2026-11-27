@@ -165,11 +165,11 @@ function GameArenaOverlays({
             <button
               type="button"
               className="dk-mobile-struggle-corner-btn"
-              onTouchStart={(e) => {
+              onPointerDown={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 onPushStruggle();
               }}
-              onClick={onPushStruggle}
               aria-label="Push Struggle button"
             >
               MASH

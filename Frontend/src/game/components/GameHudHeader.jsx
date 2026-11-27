@@ -20,6 +20,9 @@ function GameHudHeader({
   stageTitle = '',
   bossEtaSeconds = 0,
   isHost = false,
+  isTouchDevice = false,
+  isFullscreen = false,
+  onToggleFullscreen,
   onLeaveMatch,
 }) {
   const formatEta = (sec) => {
@@ -40,8 +43,20 @@ function GameHudHeader({
               : 'Abandonar la partida y desconectarse de la sala'
           }
         >
-          ✕ ABANDONAR PARTIDA
+          {isTouchDevice ? '✕ SALIR' : '✕ ABANDONAR PARTIDA'}
         </button>
+
+        {isTouchDevice && onToggleFullscreen && (
+          <button
+            type="button"
+            className="dk-hud-fs-btn"
+            onClick={onToggleFullscreen}
+            title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+            aria-label="Pantalla completa"
+          >
+            {isFullscreen ? '⤡' : '⛶'}
+          </button>
+        )}
 
         <div className="dk-player-hud-card" title={`Tu Personaje: ${selectedClass}`}>
           <div className="dk-avatar-box dk-player-avatar-box">

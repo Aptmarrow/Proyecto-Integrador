@@ -102,8 +102,15 @@ export class GameRuntimeSession {
   private animFrameId = 0;
   private lastTime = performance.now();
   private stopped = false;
+  private destroyed = false;
   private numpad6Streak = 0;
   private lastNumpad6At = 0;
+
+  private readonly onWindowBlur = () => {
+    for (const k of Object.keys(this.keys)) {
+      this.keys[k] = false;
+    }
+  };
 
   private readonly onFirstTouch = () => {
     this.options.onTouchDeviceChange(true);
@@ -202,9 +209,11 @@ export class GameRuntimeSession {
 
   public start(): void {
     this.stopped = false;
-    const isCoarse = window.matchMedia('(pointer: coarse) and (hover: none)').matches;
+    this.destroyed = false;
+    const isCoarse = window.matchMedia('(pointer: coarse)').matches;
     const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    this.options.onTouchDeviceChange(isCoarse && hasTouch);
+    const isSmallTouchViewport = hasTouch && Math.min(window.innerWidth, window.innerHeight) <= 950;
+    this.options.onTouchDeviceChange(isCoarse || isSmallTouchViewport);
     this.options.onOrientationChange();
 
     window.addEventListener('touchstart', this.onFirstTouch, { once: true, passive: true });
@@ -213,6 +222,7 @@ export class GameRuntimeSession {
     document.addEventListener('fullscreenchange', this.options.onFullscreenChange);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.onWindowBlur);
 
     // 1. Connect to Authoritative Backend WS if valid room UUID + token, with automatic Local Physics Worker fallback
     const canUseBackendWs = Boolean(
@@ -323,6 +333,7 @@ export class GameRuntimeSession {
   }
 
   public leaveMatch(): void {
+    if (this.destroyed) return;
     this.stopped = true;
     this.engine.player.hp = 0;
     const client = this.gameClient;
@@ -338,6 +349,8 @@ export class GameRuntimeSession {
   }
 
   public stop(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     this.stopped = true;
     window.removeEventListener('touchstart', this.onFirstTouch);
     window.removeEventListener('resize', this.options.onOrientationChange);
@@ -345,6 +358,7 @@ export class GameRuntimeSession {
     document.removeEventListener('fullscreenchange', this.options.onFullscreenChange);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.onWindowBlur);
     cancelAnimationFrame(this.animFrameId);
     this.snapshotInterpolator.reset();
     this.workerBridge?.stop();

@@ -3,6 +3,7 @@
   inset: 0;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   background: #060608;
   color: #f4f4f5;
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -10,8 +11,14 @@
   justify-content: center;
   align-items: center;
   overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  box-sizing: border-box;
 }
 
 .dk-main-layout-container {
@@ -122,6 +129,22 @@
   border-color: #ef4444;
   color: #ffffff;
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.35);
+}
+
+.dk-hud-fs-btn {
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  border-radius: 8px;
+  width: 32px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  touch-action: manipulation;
 }
 
 .dk-squad-container {
@@ -713,15 +736,16 @@
   position: absolute;
   bottom: 20px;
   right: 20px;
-  width: 65px;
-  height: 65px;
+  width: 68px;
+  height: 68px;
   border-radius: 50%;
   background: #ffd000;
   color: #000000;
   font-weight: 900;
-  border: none;
+  border: 2px solid #ffffff;
   pointer-events: auto;
-  box-shadow: 0 4px 15px rgba(255, 208, 0, 0.6);
+  touch-action: none;
+  box-shadow: 0 4px 18px rgba(255, 208, 0, 0.7);
 }
 
 .dk-stage-transition-black {
@@ -868,35 +892,50 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  padding: 20px;
+  padding: 12px 18px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .dk-touch-joystick-zone {
-  width: 130px;
-  height: 130px;
+  width: 176px;
+  height: 156px;
   pointer-events: auto;
+  touch-action: none;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .dk-joystick-base {
-  width: 100px;
-  height: 100px;
+  width: 108px;
+  height: 108px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  border: 2px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 242, 254, 0.08);
+  border: 2px solid rgba(0, 242, 254, 0.34);
+  box-shadow: inset 0 0 14px rgba(0, 242, 254, 0.14);
   display: flex;
   align-items: center;
   justify-content: center;
+  will-change: transform;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+
+.dk-joystick-base.active {
+  background: rgba(0, 242, 254, 0.15);
+  border-color: rgba(0, 242, 254, 0.72);
 }
 
 .dk-joystick-stick {
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
-  background: #00f2fe;
-  box-shadow: 0 0 10px rgba(0, 242, 254, 0.55);
+  background: radial-gradient(circle at 35% 35%, #a5f3fc 0%, #00f2fe 55%, #0284c7 100%);
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 14px rgba(0, 242, 254, 0.65);
+  will-change: transform;
 }
 
 .dk-touch-buttons-zone {
@@ -904,22 +943,81 @@
   gap: 12px;
   align-items: flex-end;
   pointer-events: auto;
+  touch-action: none;
+}
+
+.dk-touch-secondary-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
 }
 
 .dk-touch-btn {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  border: none;
-  font-weight: 800;
-  font-size: 0.74rem;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  font-weight: 900;
+  font-size: 0.68rem;
+  letter-spacing: 0.4px;
   color: #ffffff;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
+  opacity: 0.84;
+  transition: transform 0.08s ease, opacity 0.12s ease, box-shadow 0.12s ease;
 }
 
-.dk-fire-btn { background: #ef4444; }
-.dk-focus-btn { background: #3b82f6; }
-.dk-skill-touch-btn { background: #ffd000; color: #000000; }
+.dk-touch-btn.active {
+  transform: scale(0.93);
+  opacity: 1;
+}
+
+.dk-fire-btn {
+  width: 72px;
+  height: 72px;
+  font-size: 0.76rem;
+  background: rgba(239, 68, 68, 0.78);
+  border-color: rgba(254, 202, 202, 0.75);
+}
+
+.dk-fire-btn.active {
+  background: #ef4444;
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.85);
+}
+
+.dk-focus-btn {
+  width: 52px;
+  height: 52px;
+  font-size: 0.62rem;
+  background: rgba(59, 130, 246, 0.65);
+  border-color: rgba(147, 197, 253, 0.7);
+}
+
+.dk-focus-btn.active {
+  background: #00d2ff;
+  color: #030712;
+  border-color: #ffffff;
+  box-shadow: 0 0 16px rgba(0, 210, 255, 0.85);
+}
+
+.dk-skill-touch-btn {
+  width: 56px;
+  height: 56px;
+  background: rgba(255, 208, 0, 0.48);
+  color: #111116;
+  border-color: rgba(254, 240, 138, 0.7);
+}
+
+.dk-skill-touch-btn.ready {
+  background: rgba(255, 208, 0, 0.92);
+  border-color: #ffffff;
+  opacity: 0.98;
+  box-shadow: 0 0 18px rgba(255, 208, 0, 0.8);
+}
 
 /* ── Floating Controls Bar ───────────────────────────────────────────────── */
 
@@ -1097,14 +1195,183 @@
 }
 
 @media (max-width: 768px) {
-  .dk-top-hud-bar { height: 64px; padding: 4px 8px; }
-  .dk-player-bars { width: 126px; min-width: 126px; }
+  .dk-top-hud-bar { height: 54px; min-height: 48px; padding: 4px 8px; }
+  .dk-player-bars { width: 118px; min-width: 118px; }
   .dk-mini-bars-col { width: 56px; min-width: 56px; }
-  .dk-avatar-box { width: 38px; height: 38px; }
+  .dk-avatar-box { width: 34px; height: 34px; }
   .dk-boss-hp-track { width: 140px; }
-  .dk-ad-space-footer { height: 58px; min-height: 54px; }
+  .dk-ad-space-footer { height: 52px; min-height: 48px; }
   .dk-controls-hint-group { display: none; }
-  .dk-floating-controls-bar { bottom: 64px; transform: translateX(-50%) scale(0.9); }
+  .dk-floating-controls-bar { bottom: 58px; transform: translateX(-50%) scale(0.9); }
+}
+
+/* Mobile Landscape Gameplay Optimization (gives ~88% height to the WebGL playfield) */
+@media (max-height: 560px) and (orientation: landscape), (pointer: coarse) and (max-width: 1024px) and (orientation: landscape) {
+  .dk-main-layout-container {
+    padding: 2px 6px;
+  }
+
+  .dk-top-hud-bar {
+    height: 44px;
+    min-height: 40px;
+    padding: 3px 8px;
+    gap: 6px;
+    border-radius: 6px 6px 0 0;
+  }
+
+  .dk-exit-lobby-btn {
+    padding: 4px 8px;
+    font-size: 0.58rem;
+  }
+
+  .dk-hud-fs-btn {
+    width: 28px;
+    height: 26px;
+    font-size: 0.78rem;
+  }
+
+  .dk-avatar-box {
+    width: 30px;
+    height: 30px;
+    border-width: 1.5px;
+  }
+
+  .dk-avatar-role-tag {
+    font-size: 0.44rem;
+    padding: 0 3px;
+    bottom: -4px;
+  }
+
+  .dk-player-hud-card {
+    gap: 6px;
+  }
+
+  .dk-player-bars {
+    width: 112px;
+    min-width: 104px;
+  }
+
+  .dk-resource-bars-column {
+    gap: 3px;
+    min-width: 84px;
+  }
+
+  .dk-capsule-bar-track {
+    height: 14px;
+    border-radius: 7px;
+  }
+
+  .dk-capsule-bar-content {
+    font-size: 0.52rem;
+    padding: 0 5px;
+  }
+
+  .dk-companion-full-card {
+    min-width: 110px;
+    max-width: 160px;
+    gap: 6px;
+  }
+
+  .dk-companion-mini-card {
+    padding: 2px 6px 2px 4px;
+    gap: 5px;
+  }
+
+  .dk-mini-avatar-box {
+    width: 26px;
+    height: 26px;
+  }
+
+  .dk-mini-bars-col {
+    width: 52px;
+    min-width: 52px;
+    gap: 2px;
+  }
+
+  .dk-stage-hud-pill {
+    padding: 3px 7px;
+    font-size: 0.54rem;
+    gap: 4px;
+  }
+
+  .dk-boss-hud-card {
+    gap: 6px;
+  }
+
+  .dk-boss-name {
+    font-size: 0.58rem;
+    max-width: 120px;
+  }
+
+  .dk-boss-stocks-stars {
+    font-size: 0.65rem;
+  }
+
+  .dk-boss-hp-track {
+    width: 135px;
+  }
+
+  .dk-arena-frame-rail {
+    height: 2px;
+  }
+
+  .dk-ad-space-footer {
+    display: none;
+  }
+
+  .dk-touch-controls-overlay {
+    padding: 6px 12px;
+  }
+
+  .dk-touch-joystick-zone {
+    width: 150px;
+    height: 132px;
+  }
+
+  .dk-joystick-base {
+    width: 96px;
+    height: 96px;
+  }
+
+  .dk-joystick-stick {
+    width: 40px;
+    height: 40px;
+  }
+
+  .dk-fire-btn {
+    width: 64px;
+    height: 64px;
+    font-size: 0.7rem;
+  }
+
+  .dk-skill-touch-btn {
+    width: 50px;
+    height: 50px;
+    font-size: 0.62rem;
+  }
+
+  .dk-focus-btn {
+    width: 46px;
+    height: 46px;
+    font-size: 0.56rem;
+  }
+
+  .dk-stage-banner-card {
+    padding: 10px 22px;
+  }
+
+  .dk-stage-banner-title {
+    font-size: 1.25rem;
+  }
+
+  .dk-stage-clear-card {
+    padding: 16px 22px;
+    max-width: 420px;
+  }
+
+  .dk-clear-title {
+    font-size: 1.35rem;
+  }
 }
 
 /* ── M.O (Mecanical Ophanim) Boss Intro Cinematic ─────────────────────────── */

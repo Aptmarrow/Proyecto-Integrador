@@ -58,10 +58,17 @@ export class BaseStageEngine {
 
   public isBackendConnected: boolean = false;
   public useBackendBullets: boolean = false;
+  protected isDestroyed: boolean = false;
 
   constructor(canvas: HTMLCanvasElement, width: number = 1024, height: number = 576) {
+    const isCoarseTouch =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(pointer: coarse)').matches ||
+        (('ontouchstart' in window || navigator.maxTouchPoints > 0) &&
+          Math.min(window.innerWidth, window.innerHeight) <= 950));
+    const maxDpr = isCoarseTouch ? 1 : 1.25;
     const cappedResolution =
-      typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 1.25) : 1;
+      typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, maxDpr) : 1;
     this.app = new PIXI.Application({
       view: canvas,
       width: CANVAS_WIDTH,
@@ -340,11 +347,17 @@ export class BaseStageEngine {
   }
 
   public destroy(): void {
-    this.backgroundRenderer.destroy();
-    this.bulletSystem.destroy();
-    this.laserSystem.destroy();
-    this.particleSystem.destroy();
+    if (this.isDestroyed) return;
+    this.isDestroyed = true;
+    try { this.backgroundRenderer.destroy(); } catch {}
+    try { this.bulletSystem.destroy(); } catch {}
+    try { this.laserSystem.destroy(); } catch {}
+    try { this.particleSystem.destroy(); } catch {}
     this.soundPool.clear();
-    this.app.destroy(true, { children: true, texture: false });
+    try {
+      if (this.app && (this.app as { renderer?: unknown }).renderer) {
+        this.app.destroy(true, { children: true, texture: false });
+      }
+    } catch {}
   }
 }

@@ -169,9 +169,6 @@ export default function Game({ isDevMode = false }) {
   const [stagePreviewVariants, setStagePreviewVariants] = useState([]);
   const [activeStagePreviewIdx, setActiveStagePreviewIdx] = useState(-1);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
-  const [joystickActive, setJoystickActive] = useState(false);
-  const [joystickStickPos, setJoystickStickPos] = useState({ x: 0, y: 0 });
-  const [touchFiring, setTouchFiring] = useState(false);
   const [touchFocus, setTouchFocus] = useState(false);
 
   const touchInputRef = useRef({
@@ -180,8 +177,6 @@ export default function Game({ isDevMode = false }) {
     touchFiring: false,
     touchFocus: false,
   });
-  const joystickBaseRef = useRef({ x: 0, y: 0 });
-  const joystickActiveRef = useRef(false);
   const canAdvanceStageRef = useRef(false);
   canAdvanceStageRef.current = canAdvanceStage;
 
@@ -292,11 +287,7 @@ export default function Game({ isDevMode = false }) {
       setSelectedRole: (role) => updateSelectedRole(role),
       getFrameInput: () => touchInputRef.current,
       onTouchDeviceChange: (touch) => setIsTouchDevice(touch),
-      onFirstTouch: () => {
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen?.().catch(() => {});
-        }
-      },
+      onFirstTouch: () => {},
       onOrientationChange: () => {},
       onFullscreenChange: () => setIsFullscreen(Boolean(document.fullscreenElement)),
       onToggleFullscreen: toggleFullscreen,
@@ -533,62 +524,9 @@ export default function Game({ isDevMode = false }) {
     };
   }, [launchConfig, navigate, toggleFullscreen, updateSelectedRole]);
 
-  const updateJoystickVector = useCallback((clientX, clientY, centerX, centerY, maxRadius) => {
-    const rawDx = clientX - centerX;
-    const rawDy = clientY - centerY;
-    const dist = Math.hypot(rawDx, rawDy);
-    const clampedRadius = Math.min(dist, maxRadius);
-    const angle = Math.atan2(rawDy, rawDx);
-
-    setJoystickStickPos({
-      x: Math.cos(angle) * clampedRadius,
-      y: Math.sin(angle) * clampedRadius,
-    });
-
-    const deadzone = 0.08;
-    const normalizedDist = Math.min(1, dist / maxRadius);
-    if (normalizedDist > deadzone) {
-      const factor = (normalizedDist - deadzone) / (1 - deadzone);
-      touchInputRef.current.touchDx = Math.cos(angle) * factor;
-      touchInputRef.current.touchDy = Math.sin(angle) * factor;
-    } else {
-      touchInputRef.current.touchDx = 0;
-      touchInputRef.current.touchDy = 0;
-    }
-  }, []);
-
-  const handleJoystickStart = useCallback((e) => {
-    e.preventDefault();
-    const touch = e.changedTouches[0];
-    const rect = e.currentTarget.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    joystickBaseRef.current = { x: centerX, y: centerY };
-    joystickActiveRef.current = true;
-    setJoystickActive(true);
-    updateJoystickVector(touch.clientX, touch.clientY, centerX, centerY, rect.width / 2);
-  }, [updateJoystickVector]);
-
-  const handleJoystickMove = useCallback((e) => {
-    e.preventDefault();
-    if (!joystickActiveRef.current) return;
-    const touch = e.changedTouches[0];
-    updateJoystickVector(
-      touch.clientX,
-      touch.clientY,
-      joystickBaseRef.current.x,
-      joystickBaseRef.current.y,
-      42
-    );
-  }, [updateJoystickVector]);
-
-  const handleJoystickEnd = useCallback((e) => {
-    e.preventDefault();
-    joystickActiveRef.current = false;
-    setJoystickActive(false);
-    setJoystickStickPos({ x: 0, y: 0 });
-    touchInputRef.current.touchDx = 0;
-    touchInputRef.current.touchDy = 0;
+  const handleTouchVectorChange = useCallback((dx, dy) => {
+    touchInputRef.current.touchDx = dx;
+    touchInputRef.current.touchDy = dy;
   }, []);
 
   const handleToggleTouchFocus = useCallback(() => {
@@ -599,13 +537,9 @@ export default function Game({ isDevMode = false }) {
     });
   }, []);
 
-  const handleSetTouchFiring = useCallback((firing) => {
-    setTouchFiring(firing);
+  const handleTouchFireChange = useCallback((firing) => {
     touchInputRef.current.touchFiring = firing;
   }, []);
-
-  const handleFireStart = useCallback(() => handleSetTouchFiring(true), [handleSetTouchFiring]);
-  const handleFireEnd = useCallback(() => handleSetTouchFiring(false), [handleSetTouchFiring]);
 
   const handleStageClearAction = useCallback(() => {
     const session = sessionRef.current;
@@ -708,6 +642,9 @@ export default function Game({ isDevMode = false }) {
           stageTitle={currentStageTitle}
           bossEtaSeconds={bossEtaSeconds}
           isHost={isHost}
+          isTouchDevice={isTouchDevice}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
           onLeaveMatch={handleLeaveMatch}
         />
 
@@ -745,17 +682,12 @@ export default function Game({ isDevMode = false }) {
 
             {isTouchDevice && (
               <TouchControlsOverlay
-                joystickActive={joystickActive}
-                joystickStickPos={joystickStickPos}
                 touchFocus={touchFocus}
-                touchFiring={touchFiring}
-                onJoystickStart={handleJoystickStart}
-                onJoystickMove={handleJoystickMove}
-                onJoystickEnd={handleJoystickEnd}
+                isUltiReady={isUltiReady}
+                onVectorChange={handleTouchVectorChange}
+                onFireChange={handleTouchFireChange}
                 onTriggerSkill={handleTriggerSkill}
                 onToggleFocus={handleToggleTouchFocus}
-                onFireStart={handleFireStart}
-                onFireEnd={handleFireEnd}
               />
             )}
           </div>
@@ -765,20 +697,22 @@ export default function Game({ isDevMode = false }) {
 
         <AdFooter />
 
-        <FloatingControlsBar
-          selectedClass={selectedClass}
-          isFullscreen={isFullscreen}
-          canSwitchRole={isSandboxRoute && isLocalWorkerMode}
-          showDebugActions={isSandboxRoute}
-          stagePreviewVariants={stagePreviewVariants}
-          activeStagePreviewIdx={activeStagePreviewIdx}
-          onSelectRole={handleSelectRole}
-          onTriggerSkill={handleTriggerSkill}
-          onSpawnBoss={handleSpawnBoss}
-          onStartStruggle={handleStartStruggle}
-          onSelectStagePreview={handleSelectStagePreview}
-          onToggleFullscreen={toggleFullscreen}
-        />
+        {(!isTouchDevice || isSandboxRoute) && (
+          <FloatingControlsBar
+            selectedClass={selectedClass}
+            isFullscreen={isFullscreen}
+            canSwitchRole={isSandboxRoute && isLocalWorkerMode}
+            showDebugActions={isSandboxRoute}
+            stagePreviewVariants={stagePreviewVariants}
+            activeStagePreviewIdx={activeStagePreviewIdx}
+            onSelectRole={handleSelectRole}
+            onTriggerSkill={handleTriggerSkill}
+            onSpawnBoss={handleSpawnBoss}
+            onStartStruggle={handleStartStruggle}
+            onSelectStagePreview={handleSelectStagePreview}
+            onToggleFullscreen={toggleFullscreen}
+          />
+        )}
       </div>
     </div>
   );
