@@ -100,13 +100,15 @@ async function cleanupRoom(roomId) {
   rooms.delete(roomId);
 }
 
+const { isDevBypassTokenAllowed } = require('./ws/gameSecurity');
+
 /**
  * Validate a JWT token.
  * Returns the userId string or null.
  */
 async function validateToken(token) {
   if (!token) return null;
-  if (token.startsWith('mock_token_') || token.startsWith('guest_') || token.startsWith('dev_') || token.startsWith('test-')) {
+  if (isDevBypassTokenAllowed(token)) {
     return token;
   }
   const result = await verifyToken(token);

@@ -183,6 +183,20 @@
             "example": 1
           }
         }
+      },
+      "AskAssistantRequest": {
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "example": "¿Cuáles son los controles de Danmakrew?"
+          }
+        }
       }
     }
   },
@@ -751,6 +765,29 @@
           }
         ]
       }
+    },
+    "/api/assistant/ask": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Assistant"
+        ],
+        "summary": "Consultar al asistente IA DanmaBot sobre el juego",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskAssistantRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [
@@ -787,6 +824,10 @@
     {
       "name": "Rooms",
       "description": "Lobby, salas públicas/privadas, roles y transición a partida"
+    },
+    {
+      "name": "Assistant",
+      "description": "Asistente IA DanmaBot con contexto de Danmakrew"
     }
   ]
 }

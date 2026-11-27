@@ -82,8 +82,20 @@ function validateClientMessage(msg) {
   return { ok: true };
 }
 
+function isDevBypassTokenAllowed(token, nodeEnv = process.env.NODE_ENV) {
+  if (!token || typeof token !== 'string') return false;
+  if (nodeEnv === 'production') return false;
+  return (
+    token.startsWith('mock_token_') ||
+    token.startsWith('guest_') ||
+    token.startsWith('dev_') ||
+    token.startsWith('test-')
+  );
+}
+
 module.exports = {
   parseAllowedOrigins,
   isOriginAllowed,
   validateClientMessage,
+  isDevBypassTokenAllowed,
 };

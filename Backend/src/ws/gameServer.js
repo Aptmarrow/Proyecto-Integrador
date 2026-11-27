@@ -3,7 +3,7 @@
 const GameRoom = require('../game/GameRoom');
 const { verifyToken } = require('../config/auth');
 const { RoomInputGuard } = require('./gameInputGuard');
-const { parseAllowedOrigins, isOriginAllowed, validateClientMessage } = require('./gameSecurity');
+const { parseAllowedOrigins, isOriginAllowed, validateClientMessage, isDevBypassTokenAllowed } = require('./gameSecurity');
 const { CHARACTER_ROLES, getAvailableCharacterRole, removePlayer: removeRedisPlayer } = require('../utils/roomUtils');
 const redis    = require('../config/redis');
 
@@ -31,7 +31,7 @@ const disconnectTimers = new Map();
 
 async function validateToken(token) {
   if (!token) return null;
-  if (token.startsWith('mock_token_') || token.startsWith('guest_') || token.startsWith('dev_') || token.startsWith('test-')) {
+  if (isDevBypassTokenAllowed(token)) {
     return token;
   }
   const result = await verifyToken(token);
@@ -691,4 +691,4 @@ function setupGameRoute(app) {
   console.info('[Game] /game route registered');
 }
 
-module.exports = { setupGameRoute, closeGameRoom, removePlayerFromGameRoom };
+module.exports = { setupGameRoute, closeGameRoom, removePlayerFromGameRoom, validateToken };

@@ -1,4 +1,5 @@
 const { verifyToken } = require('../config/auth');
+const { isDevBypassTokenAllowed } = require('../ws/gameSecurity');
 
 /**
  * Fastify preHandler — valida el JWT enviado como Bearer token.
@@ -12,7 +13,7 @@ async function authenticate(request, reply) {
 
   const token = authHeader.slice(7).trim();
 
-  if (token.startsWith('mock_token_') || token.startsWith('guest_') || token.startsWith('dev_')) {
+  if (isDevBypassTokenAllowed(token)) {
     request.session = { id: token, userId: token };
     request.user = { id: token, username: 'Player' };
     return;

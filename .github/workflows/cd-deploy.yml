@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-containers:
-    name: Verify Tests & Build Docker Images
+    name: Verify Tests & Build Unified Cloud Container
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -23,21 +23,21 @@ jobs:
       - name: Install Backend dependencies
         run: npm --prefix ./Backend ci
 
-      - name: Run Backend smoke tests before build
+      - name: Run Backend test suite before build
         run: npm run test:backend
 
-      - name: Prepare example .env for Docker build validation
-        run: cp Backend/.env.example Backend/.env
+      - name: Run authoritative physics test suite
+        run: npm run test:physics
 
-      - name: Build production Docker images
-        run: docker compose build
+      - name: Build unified production Docker image
+        run: docker build -t danmakrew-cloud:ci .
 
   deploy-cloud:
-    name: Deploy to Cloud Hosting
+    name: Deploy to Azure Cloud VM
     needs: build-containers
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to configured Cloud target (Railway or VPS)
+      - name: Deploy unified container to Azure VM (or Railway)
         env:
           RAILWAY_WEBHOOK_URL: ${{ secrets.RAILWAY_WEBHOOK_URL }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -45,19 +45,38 @@ jobs:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
         run: |
-          if [ -n "$RAILWAY_WEBHOOK_URL" ]; then
-            curl --fail --silent --show-error -X POST "$RAILWAY_WEBHOOK_URL"
-            echo "Railway deployment triggered successfully."
-          elif [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_SSH_KEY" ]; then
+          if [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_SSH_KEY" ]; then
             DEPLOY_DIR="${VPS_DEPLOY_PATH:-~/Proyecto-Integrador}"
             mkdir -p ~/.ssh
             printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
             chmod 600 ~/.ssh/deploy_key
             ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
-            ssh -i ~/.ssh/deploy_key "${VPS_USER}@${VPS_HOST}" \
-              "cd ${DEPLOY_DIR} && git pull --ff-only origin main && docker compose up -d --build"
-            echo "VPS deployment completed successfully."
+            ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" bash -s <<EOF
+              set -euo pipefail
+              cd ${DEPLOY_DIR}
+              git fetch origin main
+              git checkout main
+              git reset --hard origin/main
+              docker build -t danmakrew-cloud:latest .
+              docker rm -f danmakrew || true
+              docker run -d \
+                --name danmakrew \
+                --network danmakrew-net \
+                --add-host=host.docker.internal:host-gateway \
+                --restart unless-stopped \
+                --env-file ${DEPLOY_DIR}/Backend/.env \
+                -e PORT=8080 \
+                -e HOST=0.0.0.0 \
+                -e NODE_ENV=production \
+                danmakrew-cloud:latest
+              sleep 4
+              docker exec danmakrew curl -fsS http://127.0.0.1:8080/api/health
+          EOF
+            echo "Azure VM deployment completed and healthcheck passed."
+          elif [ -n "$RAILWAY_WEBHOOK_URL" ]; then
+            curl --fail --silent --show-error -X POST "$RAILWAY_WEBHOOK_URL"
+            echo "Railway deployment triggered successfully."
           else
-            echo "Docker build & tests passed."
-            echo "Configure GitHub Secrets (RAILWAY_WEBHOOK_URL, or VPS_HOST + VPS_USER + VPS_SSH_KEY) to enable automatic remote rollout."
+            echo "Unified Docker image & tests passed."
+            echo "Configure GitHub Secrets (VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_DEPLOY_PATH) to enable automatic Azure rollout on merge to main."
           fi
