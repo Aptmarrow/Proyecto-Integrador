@@ -22,6 +22,7 @@ function getSignalHelpers() {
 const ROOM_TTL = 7200; // seconds
 const PUBLIC_ROOMS_KEY = 'rooms:public';
 const MAX_PUBLIC_LIST = 50;
+const STANDARD_DIFFICULTIES = new Set(['normal', 'difficult', 'no_mercy']);
 
 // ── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ const updateRoomSchema = z
     difficulty: z.string().min(3).max(20).trim().optional(),
     world: z.number().int().min(1).max(3).optional(),
     stage: z.number().int().min(1).max(3).optional(),
+    calKey: z.string().max(128).nullable().optional(),
   })
   .refine((payload) => Object.keys(payload).length > 0, {
     message: 'No settings provided',
@@ -79,6 +81,13 @@ function sanitiseRoom(data) {
     playerReady[playerId] = Boolean(rawReady[playerId]);
   }
 
+  const difficulty = data.difficulty || 'normal';
+  const isStandardDifficulty = STANDARD_DIFFICULTIES.has(difficulty);
+  const calKey =
+    !isStandardDifficulty && typeof data.calKey === 'string' && data.calKey.trim().length > 0
+      ? data.calKey.trim()
+      : null;
+
   return {
     id: data.id,
     name: data.name,
@@ -90,10 +99,11 @@ function sanitiseRoom(data) {
     hasPassword: data.hasPassword,
     isPublic: data.isPublic,
     createdAt: data.createdAt,
-    difficulty: data.difficulty || 'normal',
+    difficulty,
     world: Number.isInteger(data.world) && data.world >= 1 && data.world <= 3 ? data.world : 1,
     stage: Number.isInteger(data.stage) && data.stage >= 1 && data.stage <= 3 ? data.stage : 1,
     status: data.status || 'lobby',
+    calKey,
     playerCharacters,
     playerReady,
   };
@@ -172,7 +182,7 @@ async function roomRoutes(fastify) {
       pipeline.set(`room:${id}:pwd`, password, 'EX', ROOM_TTL);
     }
 
-    if (isPublic && !hasPassword) {
+    if (isPublic && !hasPassword && STANDARD_DIFFICULTIES.has(room.difficulty)) {
       pipeline.zadd(PUBLIC_ROOMS_KEY, Date.now(), id);
     }
 
@@ -212,7 +222,7 @@ async function roomRoutes(fastify) {
         const room = JSON.parse(raw);
         if (!room || !room.id) {
           staleIds.push(ids[i]);
-        } else if (room.status !== 'in_game') {
+        } else if (room.status !== 'in_game' && STANDARD_DIFFICULTIES.has(room.difficulty || 'normal')) {
           rooms.push(room);
         }
       } catch {
@@ -308,7 +318,7 @@ async function roomRoutes(fastify) {
       pipeline.set(roomKey(roomId), JSON.stringify(nextRoom), 'EX', ROOM_TTL);
     }
 
-    if (nextRoom.isPublic && !nextRoom.hasPassword) {
+    if (nextRoom.isPublic && !nextRoom.hasPassword && STANDARD_DIFFICULTIES.has(nextRoom.difficulty)) {
       pipeline.zadd(PUBLIC_ROOMS_KEY, Date.now(), roomId);
     } else {
       pipeline.zrem(PUBLIC_ROOMS_KEY, roomId);
@@ -323,6 +333,7 @@ async function roomRoutes(fastify) {
       world: nextRoom.world,
       stage: nextRoom.stage,
       isPublic: nextRoom.isPublic,
+      calKey: nextRoom.calKey,
     });
 
     return reply.send(nextRoom);
@@ -423,6 +434,14 @@ async function roomRoutes(fastify) {
 
     if (room.hostId === request.user.id) {
       return reply.status(400).send({ message: 'You are the host — use the host-room WebSocket message instead' });
+    }
+
+    if (room.status === 'in_game') {
+      return reply.status(409).send({ message: 'La partida ya comenzó' });
+    }
+
+    if (!STANDARD_DIFFICULTIES.has(room.difficulty || 'normal')) {
+      return reply.status(403).send({ message: 'La sala está cerrada para nuevos ingresos' });
     }
 
     if (room.hasPassword) {

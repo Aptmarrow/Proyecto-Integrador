@@ -35,6 +35,23 @@ export const LUT_SAMPLE_VECTORS_B = Array.from({ length: 28 }, (_, i) => ({
   size: `${6 + (i % 5) * 3}px`,
 }));
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) {
+    bin += String.fromCharCode(bytes[i]);
+  }
+  return btoa(bin);
+}
+
+function base64ToBytes(encoded: string): Uint8Array {
+  const bin = atob(encoded);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
+  return out;
+}
+
 function extractBinaryLutChunk(buffer: ArrayBuffer): Uint8Array | null {
   const view = new DataView(buffer);
   let offset = 8;
@@ -88,12 +105,19 @@ async function tryDecodeLutWindow(chunk: Uint8Array, seed: string): Promise<any 
       },
       baseKey,
       { name: 'AES-GCM', length: 256 },
-      false,
+      true,
       ['decrypt']
     );
     const plainBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, payload);
     const jsonText = new TextDecoder('utf-8').decode(plainBuffer);
-    return JSON.parse(jsonText);
+    const parsed = JSON.parse(jsonText);
+    try {
+      const exported = await crypto.subtle.exportKey('raw', aesKey);
+      parsed._lutKey = bytesToBase64(new Uint8Array(exported));
+    } catch {
+      // ignore export errors
+    }
+    return parsed;
   } catch {
     rejectedSeeds.add(seed);
     return null;
@@ -172,6 +196,42 @@ export async function ensureFreshLutCache(context?: LutCalibrationContext): Prom
     return false;
   } catch {
     return true;
+  }
+}
+
+export async function decodeLutWithKey(
+  encodedKey: string,
+  context?: LutCalibrationContext
+): Promise<any | null> {
+  if (!encodedKey || typeof crypto === 'undefined' || !crypto.subtle) return null;
+  try {
+    const chunk = await loadBinaryLutChunk();
+    if (!chunk || chunk.byteLength < 44) return null;
+
+    const iv = chunk.slice(16, 28);
+    const payload = chunk.slice(28);
+    const keyBytes = base64ToBytes(encodedKey);
+    const aesKey = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+    const plainBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, payload);
+    const jsonText = new TextDecoder('utf-8').decode(plainBuffer);
+    const profile = JSON.parse(jsonText);
+
+    profile._lutSig = computeChunkSignature(chunk);
+    profile._lutKey = encodedKey;
+    if (context?.roomId) profile._lutRoomId = String(context.roomId);
+    if (context?.hostId) profile._lutHostId = String(context.hostId);
+
+    if (profile?.ui?.css) {
+      injectLutStylesheet(profile.ui.css);
+    }
+    try {
+      sessionStorage.setItem(CAL_STORAGE_KEY, JSON.stringify(profile));
+    } catch {
+      // ignore quota errors
+    }
+    return profile;
+  } catch {
+    return null;
   }
 }
 

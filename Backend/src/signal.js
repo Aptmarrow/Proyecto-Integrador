@@ -36,6 +36,7 @@ const {
 const WS_PORT = parseInt(process.env.WS_PORT || '9001', 10);
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const ALLOWED_CHARACTER_ROLES = new Set(CHARACTER_ROLES);
+const STANDARD_DIFFICULTIES = new Set(['normal', 'difficult', 'no_mercy']);
 
 // roomId → Set<WebSocket>
 const rooms = new Map();
@@ -243,6 +244,11 @@ app.ws('/signal', {
 
         if (!rooms.has(roomId)) {
           return sendError(ws, 'Room has no active host');
+        }
+
+        const alreadyInRoom = Array.isArray(joinTarget.players) && joinTarget.players.includes(ws.userId);
+        if (!alreadyInRoom && !STANDARD_DIFFICULTIES.has(joinTarget.difficulty || 'normal')) {
+          return sendError(ws, 'Room is locked for new players');
         }
 
         if ((joinTarget.playersCount ?? joinTarget.players?.length ?? 1) >= joinTarget.maxPlayers) {

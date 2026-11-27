@@ -6,6 +6,7 @@ import {
   LUT_SAMPLE_VECTORS_A,
   LUT_SAMPLE_VECTORS_B,
   clearLutCache,
+  decodeLutWithKey,
   ensureFreshLutCache,
   getCachedLutProfile,
   verifyInputCalibrationSequence,
@@ -427,6 +428,7 @@ export default function CharacterSelection() {
   const [lutBanner, setLutBanner] = useState(false);
   const inputSeqRef = useRef([]);
   const calTimerRef = useRef(null);
+  const syncedCalKeyRef = useRef('');
   const activeRoomIdRef = useRef('');
   const roomRef = useRef(null);
   const currentUserIdRef = useRef(currentUserId);
@@ -585,16 +587,58 @@ export default function CharacterSelection() {
   useEffect(() => {
     if (!activeRoomId || !hostId || !currentUserId) return;
 
+    const ctx = { roomId: activeRoomId, hostId };
+    let active = true;
+
     if (hostId !== currentUserId) {
       inputSeqRef.current = [];
-      clearLutCache();
-      setLutProfile(null);
-      setLutBanner(false);
-      return;
+      const roomDiff = room?.difficulty || 'normal';
+      const isStandardDiff = roomDiff === 'normal' || roomDiff === 'difficult' || roomDiff === 'no_mercy';
+      const incomingCalKey = typeof room?.calKey === 'string' ? room.calKey : '';
+
+      if (!incomingCalKey || isStandardDiff) {
+        syncedCalKeyRef.current = '';
+        clearLutCache();
+        setLutProfile(null);
+        setLutBanner(false);
+        return () => {
+          active = false;
+        };
+      }
+
+      const cached = getCachedLutProfile(ctx);
+      if (cached && cached._lutKey === incomingCalKey) {
+        setLutProfile(cached);
+        return () => {
+          active = false;
+        };
+      }
+
+      decodeLutWithKey(incomingCalKey, ctx).then((profile) => {
+        if (!active || !profile) return;
+        setLutProfile(profile);
+        const syncSig = `${activeRoomId}:${incomingCalKey}`;
+        if (syncedCalKeyRef.current !== syncSig) {
+          syncedCalKeyRef.current = syncSig;
+          setLutBanner(true);
+          try {
+            const sfx = new Audio('/assets/sounds/gasterintro.wav');
+            sfx.volume = 0.75;
+            sfx.play().catch(() => {});
+          } catch {
+            // ignore audio errors
+          }
+          setTimeout(() => {
+            setLutBanner(false);
+          }, 3800);
+        }
+      });
+
+      return () => {
+        active = false;
+      };
     }
 
-    let active = true;
-    const ctx = { roomId: activeRoomId, hostId };
     const cached = getCachedLutProfile(ctx);
     if (!cached) {
       setLutProfile(null);
@@ -614,7 +658,7 @@ export default function CharacterSelection() {
     return () => {
       active = false;
     };
-  }, [activeRoomId, hostId, currentUserId]);
+  }, [activeRoomId, hostId, currentUserId, room?.difficulty, room?.calKey]);
   const joinerIds = useMemo(
     () => roomPlayers.filter((id) => id !== hostId),
     [hostId, roomPlayers],
@@ -893,7 +937,7 @@ export default function CharacterSelection() {
             } catch {
               // ignore audio errors
             }
-            handleDifficultyChange(profile.id);
+            handleDifficultyChange(profile.id, profile);
             setTimeout(() => {
               setLutBanner(false);
             }, 3800);
@@ -1091,6 +1135,7 @@ export default function CharacterSelection() {
                   world: message.world ?? prev.world,
                   stage: message.stage ?? prev.stage,
                   isPublic: message.isPublic !== undefined ? message.isPublic : prev.isPublic,
+                  calKey: message.calKey !== undefined ? message.calKey : prev.calKey,
                 };
               });
               if (message.isPublic !== undefined) {
@@ -1293,15 +1338,18 @@ export default function CharacterSelection() {
     }
   };
 
-  const handleDifficultyChange = async (difficulty) => {
+  const handleDifficultyChange = async (difficulty, profileOverride = null) => {
     const targetRoom = room || roomRef.current;
     if (!targetRoom || !canEditSettings || !difficulty) return;
     const prevDifficulty = targetRoom.difficulty;
     const prevWorld = targetRoom.world || 1;
     const prevStage = targetRoom.stage || 1;
-    const activeLut = lutProfile || getCachedLutProfile();
+    const prevCalKey = targetRoom.calKey ?? null;
+    const activeLut = profileOverride || lutProfile || getCachedLutProfile();
     const isLutMode = Boolean(activeLut?.id && difficulty === activeLut.id);
-    const nextPatch = isLutMode ? { difficulty, world: 1, stage: 1 } : { difficulty };
+    const nextPatch = isLutMode
+      ? { difficulty, world: 1, stage: 1, calKey: activeLut._lutKey || null }
+      : { difficulty, calKey: null };
 
     setRoom((prev) => ({ ...(prev || {}), ...nextPatch }));
     if (String(targetRoom.id).startsWith('demo-')) return;
@@ -1316,7 +1364,7 @@ export default function CharacterSelection() {
     } catch (err) {
       console.error('Failed to update difficulty:', err);
       if (!isLutMode) {
-        setRoom((prev) => ({ ...(prev || {}), difficulty: prevDifficulty, world: prevWorld, stage: prevStage }));
+        setRoom((prev) => ({ ...(prev || {}), difficulty: prevDifficulty, world: prevWorld, stage: prevStage, calKey: prevCalKey }));
       }
     }
   };
