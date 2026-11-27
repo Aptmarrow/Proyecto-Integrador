@@ -103,7 +103,7 @@ class RoomInputGuard {
 
     return {
       accepted: true,
-      input: { dx, dy, action, focus },
+      input: { dx, dy, action, focus, seq },
       meta: {
         suspicious: state.violations > 0,
         violations: state.violations,

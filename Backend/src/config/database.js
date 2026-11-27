@@ -84,8 +84,12 @@ async function initDatabase() {
         name         TEXT    NOT NULL,
         rarity       INTEGER NOT NULL DEFAULT 1,
         level        INTEGER NOT NULL DEFAULT 1,
-        image        TEXT
+        image        TEXT,
+        is_equipped  BOOLEAN NOT NULL DEFAULT FALSE
       );
+
+      ALTER TABLE chip
+        ADD COLUMN IF NOT EXISTS is_equipped BOOLEAN NOT NULL DEFAULT FALSE;
 
       CREATE TABLE IF NOT EXISTS chip_stats (
         id                SERIAL  PRIMARY KEY,

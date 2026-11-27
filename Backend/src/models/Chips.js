@@ -1,5 +1,7 @@
 const db = require('../config/database');
 
+const MAX_EQUIPPED_CHIPS = 3;
+
 const STAT_KEYS = [
   'HP',
   'Bullet_Damage',
@@ -35,12 +37,14 @@ function rowToChip(row) {
     }
   }
 
+  chip.is_equipped = Boolean(chip.is_equipped);
   chip.stats = hasStats ? stats : null;
   return chip;
 }
 
 const Chip = {
   STAT_KEYS,
+  MAX_EQUIPPED_CHIPS,
 
   async findById(id) {
     const { rows } = await db.query(
@@ -59,10 +63,48 @@ const Chip = {
        FROM chip c
        LEFT JOIN chip_stats s ON s.chip_id = c.id
        WHERE c.inventory_id = $1
+       ORDER BY c.is_equipped DESC, c.rarity DESC, c.id ASC`,
+      [inventoryId]
+    );
+    return rows.map(rowToChip);
+  },
+
+  async findEquippedByInventory(inventoryId) {
+    const { rows } = await db.query(
+      `SELECT c.*, ${SELECT_STATS_COLS}
+       FROM chip c
+       LEFT JOIN chip_stats s ON s.chip_id = c.id
+       WHERE c.inventory_id = $1 AND c.is_equipped = TRUE
        ORDER BY c.id ASC`,
       [inventoryId]
     );
     return rows.map(rowToChip);
+  },
+
+  async setEquipped(chipId, inventoryId, isEquipped) {
+    const chip = await this.findById(chipId);
+    if (!chip || Number(chip.inventory_id) !== Number(inventoryId)) {
+      const err = new Error('La chip no existe o no pertenece a tu inventario.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const wantEquipped = Boolean(isEquipped);
+    if (wantEquipped && !chip.is_equipped) {
+      const equipped = await this.findEquippedByInventory(inventoryId);
+      if (equipped.length >= MAX_EQUIPPED_CHIPS) {
+        const err = new Error(`Solo podés equiparte un máximo de ${MAX_EQUIPPED_CHIPS} chips a la vez.`);
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    await db.query(
+      'UPDATE chip SET is_equipped = $1 WHERE id = $2 AND inventory_id = $3',
+      [wantEquipped, chipId, inventoryId]
+    );
+
+    return this.findById(chipId);
   },
 
   async create({ inventoryId, name, rarity = 1, level = 1, image = null, stats = null }) {

@@ -33,7 +33,6 @@ class EnemySystem {
       maxHp: hpVal,
       radius: config.radius || 16,
       scoreValue: config.scoreValue || 220,
-      itemDrop: config.itemDrop || 'point',
       isDead: false,
       isMiniboss: Boolean(config.isMiniboss),
       minibossName: config.minibossName || null,
@@ -74,13 +73,11 @@ class EnemySystem {
       this.spawn({
         type: 'green_fairy', trajectory: 'double_helix', attackPattern: 'aimed_single',
         startX: WORLD_WIDTH + 50 + i * 60, startY: 170, speed: 130, hp: 14,
-        itemDrop: i % 2 === 0 ? 'power' : 'point',
         customParams: { freq: 3.2, amp: 70, phase: i * 0.4 },
       });
       this.spawn({
         type: 'yellow_fairy', trajectory: 'double_helix', attackPattern: 'helix_stream',
         startX: WORLD_WIDTH + 50 + i * 60, startY: 430, speed: 130, hp: 16,
-        itemDrop: 'power',
         customParams: { freq: 3.2, amp: 70, phase: i * 0.4 + Math.PI },
       });
     }
@@ -91,13 +88,13 @@ class EnemySystem {
       this.spawn({
         type: 'red_fairy', trajectory: 'hover_retreat', attackPattern: 'flower_burst',
         startX: WORLD_WIDTH + 50 + i * 70, startY: 100 + i * 20, speed: 150, hp: 28,
-        itemDrop: 'power', shootInterval: 1.1,
+        shootInterval: 1.1,
         customParams: { hoverX: 580 - i * 30, hoverTime: 3.8 },
       });
       this.spawn({
         type: 'red_fairy', trajectory: 'hover_retreat', attackPattern: 'flower_burst',
         startX: WORLD_WIDTH + 50 + i * 70, startY: 500 - i * 20, speed: 150, hp: 28,
-        itemDrop: 'point', shootInterval: 1.1,
+        shootInterval: 1.1,
         customParams: { hoverX: 580 - i * 30, hoverTime: 3.8 },
       });
     }
@@ -109,7 +106,7 @@ class EnemySystem {
     this.spawn({
       type: 'big_fairy', trajectory: 'hover_retreat', attackPattern: 'star_rings',
       startX, startY, speed: 60, hp: 130, radius: 30, scoreValue: 1200,
-      itemDrop: 'life_frag', shootInterval: 0.85,
+      shootInterval: 0.85,
       customParams: { hoverX: 530, hoverTime: 7.5 },
     });
   }
@@ -119,7 +116,6 @@ class EnemySystem {
       this.spawn({
         type: 'purple_fairy', trajectory: 'hover_retreat', attackPattern: 'ring_burst',
         startX: WORLD_WIDTH + 50 + i * 40, startY: sy, speed: 120, hp: 38,
-        itemDrop: i % 2 === 0 ? 'power' : 'point',
         shootInterval: 1.0,
         customParams: { hoverX: 560 - (i % 2) * 40, hoverTime: 4.2 },
       });
@@ -134,7 +130,6 @@ class EnemySystem {
         attackPattern: 'needle_stream',
         startX: WORLD_WIDTH + 40 + i * 50, startY: isTop ? 36 : WORLD_HEIGHT - 36,
         speed: 170, hp: 18,
-        itemDrop: i % 3 === 0 ? 'power' : 'point',
         shootInterval: 0.9, shootDelay: 0.15 + i * 0.1,
       });
     }
@@ -239,7 +234,6 @@ class EnemySystem {
               x: e.x,
               y: e.y,
               score: e.scoreValue,
-              itemDrop: e.itemDrop,
               isMiniboss: Boolean(e.isMiniboss),
               minibossName: e.minibossName || null,
             });

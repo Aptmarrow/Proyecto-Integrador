@@ -12,6 +12,7 @@ export interface ServerPlayer {
   maxSp?: number;
   defensePercent?: number;
   focus?: boolean;
+  lastProcessedSeq?: number;
 }
 
 export interface ServerBullet {
@@ -109,13 +110,6 @@ export interface ServerEnemy {
   fuseProgress?: number;
 }
 
-export interface ServerItem {
-  id: string;
-  x: number;
-  y: number;
-  type: 'power' | 'point' | 'bomb_frag' | 'life_frag' | string;
-}
-
 import type { SpaceThemeSpec } from '../campaign/spaceCampaignCatalog';
 
 export interface ServerCampaign {
@@ -132,10 +126,12 @@ export interface ServerCampaign {
   worldName?: string;
   stageTitle?: string;
   hasBoss?: boolean;
+  disableBoss?: boolean;
+  disableWeapons?: boolean;
   minibossName?: string | null;
   bossSpawnAt?: number;
   bossWarningAt?: number;
-  spaceTheme?: SpaceThemeSpec;
+  spaceTheme?: SpaceThemeSpec | null;
   autoAdvancing?: boolean;
   transitionBlackAlpha?: number;
 }
@@ -156,6 +152,14 @@ export interface ServerBeamStruggle {
   vortexY?: number;
 }
 
+export interface ServerChipDrop {
+  dropId: string;
+  userId: string;
+  name: string;
+  rarity: number;
+  rarityLabel: string;
+}
+
 export interface GameSnapshot {
   type: 'snapshot';
   tick: number;
@@ -168,10 +172,10 @@ export interface GameSnapshot {
   lasers?: ServerLaser[];
   walls?: ServerWall[];
   enemies?: ServerEnemy[];
-  items?: ServerItem[];
   boss?: ServerBoss;
   campaign?: ServerCampaign;
   struggle?: ServerBeamStruggle;
+  chipDrops?: ServerChipDrop[];
 }
 
 export type GameServerMessage =
@@ -181,14 +185,17 @@ export type GameServerMessage =
   | { type: 'ready-status'; phase: string; players: Array<{ id: string; isReady: boolean }> }
   | { type: 'player-joined'; playerId: string }
   | { type: 'player-disconnected'; playerId: string }
-  | { type: 'player-left'; playerId: string }
+  | { type: 'player-left'; playerId: string; died?: boolean; x?: number; y?: number }
+  | { type: 'room-closed'; roomId?: string; reason?: string; message?: string }
   | { type: 'hit'; playerId: string; bulletId?: string; damage?: number }
   | { type: 'error'; message: string };
 
 export class GameWSClient {
   private socket: WebSocket | null = null;
   private onSnapshotCallback: ((snapshot: GameSnapshot) => void) | null = null;
-  private onJoinedCallback: ((playerId: string, initialState: GameSnapshot) => void) | null = null;
+  private onJoinedCallback: ((playerId: string, initialState: GameSnapshot, isHost?: boolean) => void) | null = null;
+  private onPlayerLeftCallback: ((payload: { playerId: string; died?: boolean; x?: number; y?: number }) => void) | null = null;
+  private onRoomClosedCallback: ((payload: { reason?: string; message?: string }) => void) | null = null;
   private myPlayerId: string = '';
   private inputSequence = 0;
   private connectTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -197,13 +204,21 @@ export class GameWSClient {
 
   public connect(
     roomId: string,
-    onJoined: (playerId: string, initialState: GameSnapshot) => void,
+    onJoined: (playerId: string, initialState: GameSnapshot, isHost?: boolean) => void,
     onSnapshot: (snapshot: GameSnapshot) => void,
     character?: string,
-    options?: { difficulty?: string; world?: number; stage?: number }
+    options?: {
+      difficulty?: string;
+      world?: number;
+      stage?: number;
+      onPlayerLeft?: (payload: { playerId: string; died?: boolean; x?: number; y?: number }) => void;
+      onRoomClosed?: (payload: { reason?: string; message?: string }) => void;
+    }
   ): Promise<void> {
     this.onJoinedCallback = onJoined;
     this.onSnapshotCallback = onSnapshot;
+    this.onPlayerLeftCallback = options?.onPlayerLeft ?? null;
+    this.onRoomClosedCallback = options?.onRoomClosed ?? null;
 
     return new Promise((resolve, reject) => {
       if (!roomId) {
@@ -287,13 +302,29 @@ export class GameWSClient {
             // Notify authoritative server that client assets/canvas are ready immediately
             this.send({ type: 'ready' });
             if (this.onJoinedCallback) {
-              this.onJoinedCallback(msg.playerId, msg.initialState);
+              this.onJoinedCallback(msg.playerId, msg.initialState, Boolean(msg.isHost));
             }
             finishConnect();
           } else if (msg.type === 'snapshot') {
             if (this.onSnapshotCallback) {
               this.onSnapshotCallback(msg);
             }
+          } else if (msg.type === 'player-left') {
+            this.onPlayerLeftCallback?.({
+              playerId: msg.playerId,
+              died: msg.died,
+              x: msg.x,
+              y: msg.y,
+            });
+          } else if (msg.type === 'room-closed') {
+            const reasonMsg = msg.message || 'El host abandonó la partida. La sala fue cerrada.';
+            if (!settled) {
+              const err = new Error(reasonMsg) as Error & { roomClosed?: boolean };
+              err.roomClosed = true;
+              failConnect(err);
+            }
+            this.onRoomClosedCallback?.({ reason: msg.reason, message: reasonMsg });
+            this.disconnect();
           } else if (msg.type === 'error') {
             const reason = msg.message || 'El servidor rechazo la conexion de juego';
             failConnect(new Error(reason));
@@ -305,10 +336,11 @@ export class GameWSClient {
     });
   }
 
-  public sendInput(dx: number, dy: number, action: string | null = null, focus: boolean = false): void {
+  public sendInput(dx: number, dy: number, action: string | null = null, focus: boolean = false): number {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       const clampedDx = Math.max(-1, Math.min(1, dx));
       const clampedDy = Math.max(-1, Math.min(1, dy));
+      const seq = this.inputSequence++;
       this.socket.send(
         JSON.stringify({
           type: 'input',
@@ -316,11 +348,13 @@ export class GameWSClient {
           dy: clampedDy,
           action: action ?? null,
           focus: Boolean(focus),
-          seq: this.inputSequence++,
+          seq,
           clientTs: Date.now(),
         })
       );
+      return seq;
     }
+    return -1;
   }
 
   public sendAdvanceStage(): void {
@@ -337,6 +371,10 @@ export class GameWSClient {
 
   public sendStartStruggle(): void {
     this.send({ type: 'start-struggle' });
+  }
+
+  public sendLeaveGame(): void {
+    this.send({ type: 'leave-game' });
   }
 
   private send(payload: unknown): void {

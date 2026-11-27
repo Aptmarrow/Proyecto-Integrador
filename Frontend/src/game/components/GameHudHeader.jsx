@@ -14,13 +14,16 @@ function GameHudHeader({
   isMiniboss = false,
   isBossRefilling,
   bossDisplayHpPercent,
-  workerModeLabel,
   difficultyLabel = 'Normal',
   world = 1,
   stage = 1,
   stageTitle = '',
   bossEtaSeconds = 0,
-  onExitLobby,
+  isHost = false,
+  isTouchDevice = false,
+  isFullscreen = false,
+  onToggleFullscreen,
+  onLeaveMatch,
 }) {
   const formatEta = (sec) => {
     const m = Math.floor(sec / 60);
@@ -33,11 +36,27 @@ function GameHudHeader({
         <button
           type="button"
           className="dk-exit-lobby-btn"
-          onClick={onExitLobby}
-          title="Salir al Lobby"
+          onClick={onLeaveMatch}
+          title={
+            isHost
+              ? 'Abandonar y cerrar la partida para todos los jugadores'
+              : 'Abandonar la partida y desconectarse de la sala'
+          }
         >
-          ← LOBBY
+          {isTouchDevice ? '✕ SALIR' : '✕ ABANDONAR PARTIDA'}
         </button>
+
+        {isTouchDevice && onToggleFullscreen && (
+          <button
+            type="button"
+            className="dk-hud-fs-btn"
+            onClick={onToggleFullscreen}
+            title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+            aria-label="Pantalla completa"
+          >
+            {isFullscreen ? '⤡' : '⛶'}
+          </button>
+        )}
 
         <div className="dk-player-hud-card" title={`Tu Personaje: ${selectedClass}`}>
           <div className="dk-avatar-box dk-player-avatar-box">
@@ -164,11 +183,11 @@ function GameHudHeader({
         <div className="dk-hud-status-cluster">
           <div
             className="dk-stage-hud-pill"
-            title={`Dificultad ${difficultyLabel} — Mundo ${world}-${stage}${stageTitle ? `: ${stageTitle}` : ''}`}
+            title={`${difficultyLabel} · ${world}-${stage}${stageTitle ? ` · ${stageTitle}` : ''}`}
           >
             <span>{String(difficultyLabel).toUpperCase()}</span>
             <span className="dk-stage-hud-sep">·</span>
-            <span>NIVEL {world}-{stage}</span>
+            <span>{world}-{stage}</span>
             {stageTitle && (
               <>
                 <span className="dk-stage-hud-sep">·</span>
@@ -178,16 +197,10 @@ function GameHudHeader({
             {bossEtaSeconds > 0 && (
               <>
                 <span className="dk-stage-hud-sep">·</span>
-                <span>JEFE EN {formatEta(bossEtaSeconds)}</span>
+                <span>JEFE {formatEta(bossEtaSeconds)}</span>
               </>
             )}
           </div>
-          {workerModeLabel && (
-            <div className="dk-worker-status-pill" title={workerModeLabel}>
-              <span className="dk-worker-dot" />
-              <span>{workerModeLabel}</span>
-            </div>
-          )}
         </div>
       )}
 

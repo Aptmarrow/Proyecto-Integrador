@@ -136,6 +136,18 @@
           }
         }
       },
+      "EquipChipRequest": {
+        "type": "object",
+        "required": [
+          "equipped"
+        ],
+        "properties": {
+          "equipped": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
       "CreateRoomRequest": {
         "type": "object",
         "required": [
@@ -181,6 +193,20 @@
             "minimum": 1,
             "maximum": 3,
             "example": 1
+          }
+        }
+      },
+      "AskAssistantRequest": {
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "example": "¿Cuáles son los controles de Danmakrew?"
           }
         }
       }
@@ -505,6 +531,62 @@
         }
       }
     },
+    "/api/auth/user/inventory/chips/{chipId}/equip": {
+      "patch": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chipId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Equipar o desequipar un chip del inventario (máximo 3 equipados)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EquipChipRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/user/inventory/stats": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Calcular estadísticas totales del rol combinando stats base y chips equipados",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/rooms": {
       "post": {
         "responses": {
@@ -751,6 +833,29 @@
           }
         ]
       }
+    },
+    "/api/assistant/ask": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Assistant"
+        ],
+        "summary": "Consultar al asistente IA DanmaBot sobre el juego",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskAssistantRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [
@@ -787,6 +892,10 @@
     {
       "name": "Rooms",
       "description": "Lobby, salas públicas/privadas, roles y transición a partida"
+    },
+    {
+      "name": "Assistant",
+      "description": "Asistente IA DanmaBot con contexto de Danmakrew"
     }
   ]
 }

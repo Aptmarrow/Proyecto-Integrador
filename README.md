@@ -1,62 +1,65 @@
-# Proyecto Integrador — Danmakrew
+# Proyecto Integrador — Danmakrew (NoMercyGames)
 
-Repositorio unificado de **NoMercyGames** para **Danmakrew**: *Bullet Hell* cooperativo multijugador 100% web, diseñado para ofrecer alta dificultad, progresión por farmeo y juego social en tiempo real con un consumo mínimo de recursos.
-
----
-
-## H1 · Kickoff — Mercado, Problema y Alcance
-
-### A1 · Problema Real del Mercado Identificado
-
-#### Sector de mercado objetivo
-Entusiastas de PC gaming de nicho *hardcore* y fanáticos del género **Bullet Hell / Danmaku** que buscan experiencias de alta exigencia mecánica, cooperación táctica y sistemas profundos de progresión y farmeo, pero que suelen jugar en solitario por la falta de espacios sociales accesibles dentro del género.
-
-#### Problemática detectada
-1. **Aislamiento en un género históricamente individual**: La mayoría de los títulos *bullet hell* están enfocados en el modo *single-player* o cooperativo local, dificultando que jugadores afines se encuentren, formen escuadrones y compartan la experiencia en línea.
-2. **Barrera de hardware y fricción de entrada**: Muchos juegos cooperativos actuales requieren descargas pesadas y equipos de gama media/alta, dejando fuera a usuarios con computadoras modestas o hardware limitado.
-3. **Escasez de progresión cooperativa con roles definidos**: Faltan propuestas web ligeras que combinen patrones *danmaku* de alta dificultad con roles tácticos complementarios y un bucle de farmeo/mejora persistente.
-
-#### Propuesta de valor de Danmakrew
-- **Multijugador social en navegador**: Creación de salas públicas o privadas por código, lista de amigos y emparejamiento rápido en lobby en tiempo real.
-- **Arquitectura ultraligera (apta para hardware modesto)**: Ejecución directa en navegador (y compilable como PWA) con renderizado 2D optimizado en **PixiJS v7** y descarga de cálculo a **Web Workers** para sostener 60 FPS estables sin requerir GPU dedicada ni instalaciones pesadas.
-- **Alta dificultad cooperativa**: Simulación autoritativa a 60 Hz, jefes multifase, mecánicas de *Beam Struggle* y roles únicos por escuadrón (`Tank`, `Support`, `DPS`, `Special_Attack`).
-- **Potencial de farmeo y progresión**: Sistema persistente de inventario y *chips* con estadísticas para personalizar y potenciar el rendimiento en partida.
+Repositorio unificado de **NoMercyGames** para **Danmakrew**: *Bullet Hell* cooperativo multijugador 100% web desplegado en producción en **[https://nomercygames.me](https://nomercygames.me)**, diseñado para ofrecer alta dificultad, cooperación en tiempo real y progresión por *chips* con consumo mínimo de recursos.
 
 ---
 
-### A2 · Actores y Diagrama de Casos de Uso
+## 1. Fundamentación, Mercado y Propuesta de Valor
+
+### Sector de mercado objetivo
+Entusiastas del género **Bullet Hell / Danmaku** y jugadores cooperativos que buscan experiencias de alta exigencia mecánica, roles tácticos y juego social accesible sin descargas pesadas ni requisitos elevados de hardware.
+
+### Problemática detectada
+1. **Aislamiento en un género históricamente individual**: La mayoría de los títulos *bullet hell* son *single-player* o cooperativo local, dificultando jugar en escuadrón en línea.
+2. **Barrera de hardware y fricción de entrada**: Muchos juegos cooperativos exigen descargas grandes y PCs de gama media/alta.
+3. **Escasez de progresión cooperativa con roles definidos**: Faltan propuestas web ligeras que combinen patrones *danmaku* autoritativos a 60 Hz, roles tácticos y soporte asistido en línea.
+
+### Propuesta de valor de Danmakrew
+- **Multijugador social en navegador (PC y móvil)**: Salas públicas o privadas por código, lista de amigos, selección de roles únicos en tiempo real y soporte táctil multi-touch.
+- **Arquitectura ultraligera**: Renderizado 2D acelerado por WebGL (**PixiJS v7**), simulación física autoritativa a **60 Hz** (**Planck.js**) y reconciliación por secuencia (`seq`) en cliente.
+- **Alta dificultad cooperativa**: Campaña de 3 mundos × 3 sectores en 3 dificultades (`Normal`, `Difficult`, `No Mercy`), jefes multifase, *Beam Struggle* y roles únicos (`Tank`, `Support`, `DPS`, `Special_Attack`).
+- **Asistente IA integrado (`DanmaBot`)**: Chatbot conectado a `/api/assistant/ask` con base de conocimiento contextual del juego (`Backend/contextbook.md`).
+
+---
+
+## 2. Análisis Funcional — Actores, Casos de Uso y User Stories
+
+### Actores
 
 | Actor | Descripción |
 |-------|-------------|
-| **Jugador Invitado** | Usuario no autenticado que puede registrarse, verificar su correo electrónico, iniciar sesión o probar la arena en modo Demo / Offline (`demo-room-01`). |
+| **Jugador Invitado** | Usuario no autenticado que puede consultar a `DanmaBot`, registrarse, verificar su correo electrónico e iniciar sesión con JWT. |
 | **Jugador Autenticado** | Usuario con sesión JWT activa. Gestiona amigos, inventario de *chips*, se une a salas públicas o por código, selecciona rol único y participa en partidas cooperativas. |
-| **Anfitrión (Host)** | Jugador autenticado que crea una sala, define su visibilidad (pública/privada) y coordina el inicio o cierre de la sesión de lobby. |
-| **Sistema Autoritativo (Backend)** | Orquesta autenticación/persistencia (SQLite), salas efímeras (Redis), señalización WS (`/signal`) y físicas autoritativas a 60 Hz (`/game`). |
+| **Anfitrión (Host)** | Jugador autenticado que crea una sala, configura visibilidad, dificultad y nivel, y controla el inicio o cierre de la partida. |
+| **Sistema Autoritativo (Backend Cloud)** | Orquesta autenticación JWT y persistencia en **Neon PostgreSQL**, salas efímeras, señalización WS (`/signal`), motor autoritativo a 60 Hz (`/game`), asistente IA (`/api/assistant/ask`) y correos transaccionales vía **Postfix + OpenDKIM**. |
+
+### Diagrama de Casos de Uso
 
 ```mermaid
 flowchart LR
     Invitado["Jugador Invitado"]
     Jugador["Jugador Autenticado"]
     Host["Anfitrión (Host)"]
-    Sistema["Sistema Autoritativo (Backend)"]
+    Sistema["Backend Autoritativo (Cloud)"]
 
-    subgraph Danmakrew["Sistema Danmakrew"]
-        UC1(["Registrarse y verificar email"])
+    subgraph Danmakrew["Sistema Danmakrew — nomercygames.me"]
+        UC1(["Registrarse y verificar email vía Postfix"])
         UC2(["Iniciar sesión (JWT)"])
-        UC3(["Jugar modo Demo / Offline"])
+        UC3(["Consultar al asistente IA DanmaBot"])
         UC4(["Gestionar amigos y solicitudes"])
         UC5(["Gestionar inventario y chips"])
         UC6(["Buscar y unirse a sala (pública / código)"])
-        UC7(["Crear y administrar sala"])
+        UC7(["Crear y administrar sala (dificultad / cierre)"])
         UC8(["Seleccionar rol único y marcar LISTO"])
-        UC9(["Jugar partida cooperativa 60 Hz"])
-        UC10(["Validar físicas, colisiones y snapshots"])
+        UC9(["Jugar partida cooperativa 60 Hz (PC / Móvil)"])
+        UC10(["Validar físicas, colisiones y snapshots 60 Hz"])
     end
 
     Invitado --> UC1
     Invitado --> UC2
     Invitado --> UC3
 
+    Jugador --> UC3
     Jugador --> UC4
     Jugador --> UC5
     Jugador --> UC6
@@ -66,158 +69,130 @@ flowchart LR
     Host -.->|extiende| Jugador
     Host --> UC7
 
+    UC1 --- Sistema
+    UC2 --- Sistema
+    UC3 --- Sistema
+    UC7 --- Sistema
     UC9 --> UC10
     UC10 --- Sistema
-    UC7 --- Sistema
-    UC2 --- Sistema
 ```
 
----
-
-### A3 · Backlog de User Stories
+### Backlog de User Stories
 
 | ID | Historia de Usuario | Criterios de Aceptación |
 |----|---------------------|-------------------------|
-| **US-01** | **Como** jugador invitado, **quiero** registrarme con verificación por correo e iniciar sesión con credenciales seguras, **para** guardar mi progreso, amigos e inventario. | • El registro valida formato de datos con Zod y almacena la contraseña hasheada con `bcryptjs` en SQLite.<br>• Se envía un correo de verificación mediante `nodemailer` antes de habilitar el acceso completo.<br>• El login emite un token JWT válido y bloquea credenciales incorrectas. |
-| **US-02** | **Como** jugador solitario de *bullet hell*, **quiero** enviar y aceptar solicitudes de amistad, **para** construir una lista de compañeros con los que jugar frecuentemente. | • Un jugador autenticado puede enviar una solicitud de amistad a otro usuario.<br>• El destinatario puede listar solicitudes pendientes y aceptarlas.<br>• Al aceptarse, ambos usuarios quedan vinculados en la tabla `friend`. |
-| **US-03** | **Como** anfitrión, **quiero** crear una sala pública o privada con código de acceso, **para** reunir a mis amigos o abrir partida a la comunidad. | • El endpoint `POST /api/rooms` crea la sala en Redis con TTL de 2 horas y asigna al creador como `hostId`.<br>• Las salas públicas aparecen en el navegador de salas (`GET /api/rooms`).<br>• Las salas privadas permiten el ingreso mediante código único (`GET /api/rooms/by-code/:code`). |
-| **US-04** | **Como** jugador en lobby, **quiero** elegir un rol único (`Tank`, `Support`, `DPS` o `Special_Attack`) y marcar **LISTO**, **para** coordinar la estrategia del escuadrón antes de entrar a la arena. | • No se permiten roles duplicados dentro de la misma sala.<br>• Los cambios de rol y estado de preparación se sincronizan en tiempo real vía `/signal`.<br>• Cuando todos los jugadores están listos, la sala pasa a estado `in_game` y emite `game-start`. |
-| **US-05** | **Como** jugador en partida, **quiero** combatir contra oleadas y jefes con físicas precisas y baja latencia desde el navegador, **para** disfrutar una experiencia *danmaku* fluida incluso en una PC modesta. | • El servidor simula físicas Planck.js a 60 Hz de forma autoritativa (`/game`).<br>• El cliente interpola snapshots en `snapshot.worker.ts` y renderiza en PixiJS v7 a 60 FPS fuera del hilo principal.<br>• Si no hay conexión al servidor WS, `GameWorkerBridge` activa el modo demo local con `gameSimulation.worker.ts`. |
-| **US-06** | **Como** jugador enfocado en el farmeo, **quiero** obtener y gestionar *chips* con estadísticas en mi inventario, **para** mejorar y personalizar mis capacidades en futuras partidas. | • El usuario cuenta con inventario persistente en SQLite (`inventory`, `chip`, `chip_stats`).<br>• Los *chips* pueden consultarse y añadirse al inventario mediante la API autenticada (`POST /api/auth/user/inventory/chips`). |
+| **US-01** | **Como** jugador invitado, **quiero** registrarme con verificación por correo e iniciar sesión con credenciales seguras, **para** guardar mi progreso, amigos e inventario. | • El registro valida esquemas con **Zod** y almacena la contraseña hasheada con `bcryptjs` en **Neon PostgreSQL**.<br>• Se envía un correo transaccional de verificación vía **Postfix + OpenDKIM** (SPF/DKIM).<br>• El login emite un token **JWT** firmado y bloquea cuentas no verificadas. |
+| **US-02** | **Como** jugador cooperativo, **quiero** enviar y aceptar solicitudes de amistad, **para** armar escuadrón con mis compañeros. | • Un jugador autenticado puede enviar, listar y aceptar solicitudes de amistad.<br>• Al aceptarse, la relación se persiste en la tabla `friends` en PostgreSQL. |
+| **US-03** | **Como** anfitrión, **quiero** crear y configurar una sala pública o privada con código, **para** reunir a mi equipo o abrir partida a la comunidad. | • `POST /api/rooms` crea la sala con TTL de 2 h y asigna `hostId`.<br>• Las salas públicas aparecen en `GET /api/rooms`; las privadas se acceden por código de 6 caracteres (`GET /api/rooms/by-code/:code`).<br>• Si el host abandona una partida activa, la sala se cierra y se notifica a todos los jugadores. |
+| **US-04** | **Como** jugador en lobby, **quiero** elegir un rol único (`Tank`, `Support`, `DPS` o `Special_Attack`) y marcar **LISTO**, **para** coordinar la estrategia del escuadrón. | • No se permiten roles duplicados dentro de la misma sala (`409 Conflict`).<br>• Los cambios de rol, dificultad y estado **LISTO** se sincronizan en tiempo real vía `/signal`. |
+| **US-05** | **Como** jugador en partida (PC o móvil), **quiero** combatir contra oleadas y jefes a 60 Hz con controles responsivos, **para** disfrutar un *danmaku* fluido sin lag. | • El backend simula físicas **Planck.js** a 60.00 Hz exactos en `/game` con confirmación `lastProcessedSeq`.<br>• El cliente aplica predicción 0 ms + reconciliación por secuencia + interpolación síncrona y controles táctiles multi-touch con Pointer Events. |
+| **US-06** | **Como** jugador enfocado en progresión, **quiero** obtener *chips* al derrotar jefes, gestionarlos en mi inventario y equipar hasta 3 para ver mis estadísticas totales por rol, **para** potenciar mi perfil de juego. | • Inventario, *chips* y columna `is_equipped` persistidos en **Neon PostgreSQL** (`inventory`, `chip`, `chip_stats`).<br>• Interfaz `/inventory` con filtros por rareza (`Scrapy`, `Reliable`, `Premiumish`), equipamiento hasta 3 slots (`PATCH /api/auth/user/inventory/chips/:chipId/equip`) y cálculo de stats totales (`GET /api/auth/user/inventory/stats`).<br>• Drops automáticos al derrotar jefes con notificación animada en partida. |
+| **US-07** | **Como** jugador nuevo o recurrente, **quiero** consultar al asistente IA **DanmaBot** desde cualquier menú, **para** resolver dudas sobre controles, roles, jefes y salas al instante. | • Widget flotante `DanmaBot` visible en menús (oculto durante la partida).<br>• Consulta `POST /api/assistant/ask` alimentado por `Backend/contextbook.md` y un proveedor LLM OpenAI-compatible (Groq). |
+| **US-08** | **Como** administrador de la plataforma, **quiero** entregar los correos transaccionales a través de un servidor **Postfix** propio con **SPF y DKIM**, **para** cumplir estándares de entregabilidad y seguridad. | • Postfix + OpenDKIM corriendo en la VM de Azure con firma RSA-2048 (`danmakrew._domainkey.nomercygames.me`).<br>• Relay TLS autenticado por puerto 587 y registros DNS SPF + DKIM en Cloudflare. |
 
 ---
 
-## Arquitectura y Stack Tecnológico (Actualizado)
+## 3. Arquitectura Cloud y Stack Tecnológico
 
-Tras la evolución del proyecto hacia una arquitectura unificada **Backend autoritativo + Thin Client React/PixiJS**, este es el stack **realmente activo** en el código:
-
-| Capa | Tecnología en Uso | Propósito |
-|------|-------------------|-----------|
-| **API HTTP** | Fastify v4 + Zod (`8080`) | Endpoints REST, validación de esquemas, CORS (`@fastify/cors`) y rate limiting (`@fastify/rate-limit`) |
-| **Autenticación y Persistencia** | SQLite (`better-sqlite3`) + **JWT (`jsonwebtoken`)** + `bcryptjs` + `nodemailer` | Registro, hash de contraseñas, verificación por email y sesiones stateless |
-| **Salas efímeras** | Redis Stack (`ioredis`, TTL 2h) | Almacenamiento temporal de salas, jugadores, roles y estado `in_game` |
-| **Señalización & Servidor de Juego WS** | `µWebSockets.js` con fallback automático a `ws` (`uwsCompat.js`, puerto `9001`) | Lobby en tiempo real (`/signal`) y streaming autoritativo de partida (`/game`) |
-| **Físicas autoritativas** | Planck.js (`60 Hz`) | Simulación rígida de jugadores, proyectiles, muros, enemigos y *Beam Struggle* en servidor y worker de respaldo |
-| **Frontend Web + Juego Unificado** | React 19 + React Router v7 + TypeScript + PixiJS v7 + Vite 6 + PWA (`vite-plugin-pwa`) | SPA unificada, renderizado 2D acelerado por WebGL y soporte instalable |
-| **Web Workers (Frontend)** | `snapshot.worker.ts` + `gameSimulation.worker.ts` | Interpolación a 60 FPS fuera del hilo principal y simulación local Planck.js para modo offline/demo |
-
----
-
-## G2 · Estrategia de Branching (Análisis y Estándar)
-
-### Análisis de la estrategia utilizada hasta ahora
-Al inspeccionar el historial de commits y ramas remotas del repositorio se observa lo siguiente:
-- **Integración por Pull Requests sobre `main`**: La mayoría de los cambios llegaron a `main` mediante Pull Requests (`#20` hasta `#67`), evitando el trabajo directo masivo sobre la rama principal.
-- **Trazabilidad por número de Issue**: La convención predominante ha sido `<numero-issue>-<slug>` (por ejemplo, `58-making-of-the-inventory-something-functional-and-predictable`, `66-oauth2`, `68-modify-readmemd`).
-- **Desviaciones detectadas**:
-  - Ramas ad-hoc fuera de convención (`fix-lobbys`, `fix/sas`) y merges puntuales directos sin PR (`Merge branch '38-sas'`).
-  - Nombres de rama poco descriptivos en etapas intermedias (`38-sas`, `41-cooc-reeer-tiooot`, `44-reverse-lego`).
-  - Falta de una regla documentada de protección de `main` y de prefijos semánticos uniformes.
-
-### Estándar de Branching adoptado (`main` protegida + `feature/*`)
-Para consolidar el flujo de trabajo en equipo se establece la siguiente política:
-1. **Rama `main` protegida**: Prohibido hacer `push` directo; toda integración requiere **Pull Request** aprobado y checks en verde (`typecheck:frontend`, `build:frontend`, `test:physics`).
-2. **Convención de ramas**:
-   - `feature/<issue>-<descripcion-corta>` — Nuevas funcionalidades (ej. `feature/66-oauth2`).
-   - `fix/<issue>-<descripcion-corta>` — Corrección de errores (ej. `fix/34-lobby-sync`).
-   - `docs/<issue>-<descripcion-corta>` — Cambios de documentación (ej. `docs/68-update-readme`).
-3. **Flujo de trabajo**: Crear rama desde `main` actualizada → commits atómicos → abrir PR enlazado al Issue → revisión → *squash/merge* a `main` y eliminación de la rama temporal.
+| Capa | Tecnología en Producción | Propósito |
+|------|--------------------------|-----------|
+| **Dominio, DNS y SSL** | **Cloudflare DNS + HTTPS** (`nomercygames.me`) + Nginx Edge TLS (`danmakrew-edge`) | Enrutamiento HTTPS obligatorio y terminación TLS |
+| **Cloud Hosting y Contenedores** | **Microsoft Azure VM** (Ubuntu 24.04) + **Docker** (`Dockerfile` unificado) | Contenedor único Nginx + Node.js 20 (`danmakrew-cloud:latest`) |
+| **API HTTP & Documentación** | **Fastify v4** + **Zod** + **Swagger / OpenAPI 3.0** (`/docs` y `/docs/json`) | Endpoints REST, validación de esquemas, CORS y rate limiting |
+| **Base de Datos Cloud** | **PostgreSQL en Neon Cloud** (`pg` con TLS) | Usuarios, amigos, solicitudes, inventarios y *chips* |
+| **Correo Transaccional** | **Postfix + OpenDKIM** (VM Azure) + `nodemailer` | Envío de verificación de cuentas con firma DKIM y políticas SPF |
+| **Chatbot IA** | **DanmaBot** (`POST /api/assistant/ask` + Groq LLM + `contextbook.md`) | Asistente interactivo contextual con respuestas rápidas y FAQs |
+| **Tiempo Real (WS 60 Hz)** | **µWebSockets.js** (fallback `ws`, puerto `9001`) + **Planck.js** | Lobby (`/signal`) y simulación física autoritativa (`/game`) |
+| **Frontend Web Responsivo** | **React 19** + **React Router v7** + **TypeScript** + **PixiJS v7** + **Vite 6** | SPA responsiva, render WebGL en lockstep VSync y controles táctiles |
 
 ---
 
-## Estructura del Proyecto
+## 4. Seguridad
+
+- **Autenticación JWT**: Tokens firmados con `jsonwebtoken` (`JWT_SECRET`, `JWT_AUDIENCE`, expiración configurable). En producción (`NODE_ENV=production`), `/game` y `/signal` rechazan tokens de prueba y exigen JWT válido.
+- **Hashing de contraseñas**: `bcryptjs` con salt por usuario; nunca se almacenan contraseñas en texto plano.
+- **Validación y protección**: Esquemas estrictos con **Zod**, `@fastify/rate-limit`, validación de orígenes CORS/WS (`gameSecurity.js`) y anti-replay/rate-limit de inputs (`RoomInputGuard`).
+- **Manejo de secretos**: Todas las credenciales (`DB_*`, `JWT_SECRET`, `LLM_API_KEY`, `EMAIL_*`) residen exclusivamente en variables de entorno (`.env` ignorado por Git) y GitHub Secrets para CI/CD.
+
+---
+
+## 5. Flujo de Trabajo Profesional (SDLC & CI/CD)
+
+### Estrategia de Branching
+1. **Rama `main` protegida**: Prohibido el push directo; toda integración se realiza mediante **Pull Request** con revisión de pares (**Reviewer**) y checks en verde.
+2. **Convención de ramas**: `<issue>-<descripcion>`, `feat/<descripcion>`, `fix/<descripcion>` o `docs/<descripcion>`.
+
+### Pipelines de GitHub Actions (`.github/workflows/`)
+- **`ci-tests.yml` (Testing & Verification)**: En cada PR y push a `main`, ejecuta la suite de tests unitarios e integración con cobertura (`npm run test:coverage`, **> 70% de cobertura**), tests de físicas Planck.js (`npm run test:physics`), `tsc --noEmit`, build de producción de Vite y validación de Docker.
+- **`ci-docs.yml` (Documentación OpenAPI)**: Genera y valida automáticamente `Backend/docs/openapi.json` (OpenAPI 3.0.3) y sube el artefacto en cada PR/push.
+- **`cd-deploy.yml` (Continuous Deployment a Azure)**: Tras validar tests y construir la imagen Docker unificada en `main`, despliega automáticamente por SSH a la VM de Azure (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_DEPLOY_PATH`), reconstruye `danmakrew-cloud:latest`, reinicia el contenedor en `danmakrew-net` con acceso a Postfix (`--add-host=host.docker.internal:host-gateway`) y verifica `/api/health`.
+
+---
+
+## 6. Estructura del Proyecto
 
 ```text
 Proyecto-Integrador/
+├── .github/workflows/
+│   ├── ci-tests.yml               # Pipeline de testing, cobertura, typecheck y build
+│   ├── ci-docs.yml                # Pipeline de generación y validación OpenAPI 3.0
+│   └── cd-deploy.yml              # Pipeline de despliegue continuo a Azure VM
 ├── Backend/
+│   ├── contextbook.md             # Base de conocimiento del asistente IA DanmaBot
+│   ├── docs/openapi.json          # Especificación OpenAPI 3.0.3 autogenerada
 │   ├── scripts/
-│   │   └── testPhysics.js          # Suite automatizada de físicas Danmakrew
-│   └── src/
-│       ├── config/                 # SQLite, JWT Auth, Redis
-│       ├── game/                   # Motor autoritativo 60Hz (GameRoom, Planck.js, Boss, Bullets, Walls)
-│       ├── middleware/             # Autenticación JWT de sesiones
-│       ├── routes/                 # Auth, amigos, inventario, salas (userRoutes.js, roomRoutes.js)
-│       ├── utils/                  # Mailer, compatibilidad uWS/ws, utilidades de salas (roomUtils.js)
-│       ├── ws/                     # Servidor WS de partida (/game), seguridad y guardas de input
-│       ├── signal.js               # Señalización WS de lobby (/signal) y transición a partida
-│       └── index.js                # Punto de entrada unificado (Fastify + WS)
+│   │   ├── generateOpenApi.js     # Generador de especificación Swagger/OpenAPI
+│   │   └── testPhysics.js         # Suite de físicas autoritativas Planck.js
+│   ├── src/
+│   │   ├── app.js                 # Factoría Fastify + Swagger + CORS + rate-limit
+│   │   ├── config/                # Neon PostgreSQL (database.js), JWT (auth.js), Redis
+│   │   ├── game/                  # Motor autoritativo 60 Hz (GameRoom, Planck.js, Boss, Bullets, Walls)
+│   │   ├── middleware/            # Autenticación JWT (authenticate)
+│   │   ├── models/                # User, Friend, FriendRequest, Inventory, Chips
+│   │   ├── routes/                # userRoutes.js, roomRoutes.js, assistantRoutes.js
+│   │   ├── utils/                 # mailer.js (Postfix/SMTP), roomUtils.js, uwsCompat.js
+│   │   ├── ws/                    # /game WS, gameSecurity.js, gameInputGuard.js
+│   │   ├── signal.js              # Señalización WS de lobby (/signal)
+│   │   └── index.js               # Arranque unificado (Neon init + WS + Fastify)
+│   └── test/                      # Suite unitaria e integración (>70% cobertura)
 ├── Frontend/
-│   ├── public/assets/              # Sprites, escenarios y efectos de sonido del juego
+│   ├── public/assets/             # Sprites, escenarios y efectos de sonido
 │   └── src/
-│       ├── components/             # Componentes globales de la web (Header, Modals, ProtectedRoute)
-│       ├── game/                   # Motor y sesión del juego Danmakrew integrados en la SPA
-│       │   ├── components/         # HUD táctico, overlays de arena, controles táctiles y flotantes
-│       │   ├── engine/             # Renderizador PixiJS v7, etapas 1-3, balas, jefes y efectos
-│       │   ├── network/            # Cliente WebSocket tipado (/game)
-│       │   ├── session/            # Orquestación de partida, puente de workers y estado del escuadrón
-│       │   └── workers/            # snapshot.worker.ts (interpolación) y gameSimulation.worker.ts (Planck.js)
-│       ├── pages/                  # Home, LobbyBrowser, JoinSelection, CharacterSelection, Game (/game), Auth
-│       ├── services/               # Clientes REST y WebSocket de lobby (api.js, wsClient.js)
-│       └── styles/                 # Hojas de estilo modulares (incluye game.css con prefijo dk-*)
-├── postman/                        # Colección de pruebas de API
-├── docker-compose.yml              # Orquestación completa (Redis + Backend + Frontend)
-└── package.json                    # Scripts raíz del workspace
+│       ├── components/            # DanmaBot, BulletBackground, OrientationGuard, ProtectedRoute
+│       ├── game/                  # Motor PixiJS v7, predicción seq, interpolador síncrono y controles táctiles
+│       ├── pages/                 # Home, Login, Register, Dashboard, JoinSelection, LobbyBrowser, CharacterSelection, Game
+│       ├── services/              # Cliente REST (api.js) y WS de lobby (wsClient.js)
+│       └── styles/                # Hojas de estilo modulares responsivas + chatbot.css + game.css
+├── deploy/
+│   ├── nginx.cloud.conf.template  # Proxy reverso Nginx (SPA + /api + /docs + /signal + /game + no-cache)
+│   ├── start-cloud.sh             # Entrypoint unificado del contenedor
+│   └── CLOUD_DEPLOY.md            # Guía de despliegue Cloud
+├── Dockerfile                     # Build multi-stage unificado para producción
+├── docker-compose.yml             # Orquestación local (Redis + Backend + Frontend)
+└── package.json                   # Scripts raíz del workspace
 ```
 
 ---
 
-## Flujo Lobby → Selección de Personaje → Partida (`/game`)
+## 7. Desarrollo Local y Comandos de Verificación
 
-1. **Salas (`/rooms` / `/create-room`)**: Creación y unión a salas almacenadas en Redis y sincronizadas por `/signal`.
-2. **Selección de Personaje (`/character-selection`)**:
-   - Cada jugador elige un rol único entre `Tank`, `Support`, `DPS` y `Special_Attack` (sin duplicados en el escuadrón).
-   - Cuando todos los jugadores marcan **LISTO**, el servidor marca la sala como `in_game` (preservando la sala en Redis durante el cambio de vista) y emite `game-start`.
-3. **Partida (`/game`)**:
-   - **Modo Online**: `GameWSClient` recibe snapshots del backend autoritativo (`GameRoom` + Planck.js) y los envía a `snapshot.worker.ts`, que interpola posiciones, proyectiles, muros, enemigos, ítems, jefe y *Beam Struggle* a 60 FPS fuera del hilo principal.
-   - **Modo Offline / Demo (`demo-room-01`)**: Si el servidor WS no está disponible o se entra en sala de prueba, `GameWorkerBridge` levanta automáticamente `gameSimulation.worker.ts` con las **mismas físicas Planck.js** (muros de Tank de 25 HP / 1.0s TTL, auto-aim + curación de Support, ráfaga de DPS, Master Spark de 50 DPS de SP.ATK, choque de rayos *Beam Struggle* y jefe de 5 fases) conectado a `snapshot.worker.ts`.
-
----
-
-## Ejecución con Docker Compose
-
-### 1. Configurar variables de entorno
-
+### Configuración rápida
 ```bash
 cp Backend/.env.example Backend/.env
-```
-
-### 2. Levantar todos los servicios
-
-```bash
-docker compose up --build
-```
-
-| Servicio | Puerto local | Descripción |
-|----------|-------------|-------------|
-| **redis** | `6379` | Redis Stack (salas efímeras) |
-| **api** | `8080` | Backend HTTP REST (Fastify) |
-| **api** | `9001` | Señalización `/signal` y servidor de juego `/game` (`µWebSockets.js` / `ws`) |
-| **frontend** | `3000` | Aplicación unificada React + PixiJS + Web Workers |
-
----
-
-## Desarrollo Local (sin Docker)
-
-Requisitos: Node.js 20+ y Redis corriendo en `127.0.0.1:6379` (para salas online; el modo demo funciona incluso sin backend).
-
-```bash
-# Instalar dependencias
 npm --prefix ./Backend install
-npm --prefix ./Frontend install
-
-# Levantar Backend (:8080 / :9001) + Frontend (:3000) juntos en una sola terminal
+npm --prefix ./Frontend install --legacy-peer-deps
 npm run dev
 ```
 
-Luego abrí **http://localhost:3000** en el navegador (el puerto `8080` es únicamente la API REST).
-
-### Comandos de verificación desde la raíz
+### Comandos principales desde la raíz
 
 | Comando | Descripción |
 |---------|-------------|
-| `npm run dev` | Inicia Backend + Frontend en simultáneo desde una sola terminal |
-| `npm run dev:backend` | Inicia solo el backend en modo watch (`:8080` + `:9001`) |
-| `npm run dev:frontend` | Inicia solo Vite en desarrollo (`http://localhost:3000`) |
-| `npm run typecheck:frontend` | Verifica tipos TypeScript (`tsc --noEmit`) del motor, sesión y Web Workers |
-| `npm run build:frontend` | Compila el bundle de producción de `Frontend/` (React + PixiJS + Workers + PWA) |
-| `npm run test:physics` | Ejecuta la batería de pruebas de físicas Planck.js del backend |
+| `npm run dev` | Inicia Backend (`:8080` / `:9001`) + Frontend (`:3000`) en simultáneo |
+| `npm run test:backend` | Ejecuta la suite unitaria e integración del Backend |
+| `npm run test:coverage` | Ejecuta tests con reporte de cobertura |
+| `npm run test:physics` | Ejecuta pruebas de físicas autoritativas Planck.js |
+| `npm run docs:openapi` | Regenera `Backend/docs/openapi.json` desde los esquemas de Fastify |
+| `npm run typecheck:frontend` | Verifica tipos TypeScript (`tsc --noEmit`) |
+| `npm run build:frontend` | Compila el bundle de producción de `Frontend/` |
+| `docker build -t danmakrew-cloud:latest .` | Construye el contenedor unificado de producción |

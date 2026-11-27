@@ -66,6 +66,21 @@ server {
         proxy_buffering off;
     }
 
+    # Never cache SPA HTML entrypoint, service worker scripts, or web manifest
+    location ~* ^/(index\.html|sw\.js|registerSW\.js|workbox-.*\.js|manifest\.webmanifest)$ {
+        expires -1;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0" always;
+        add_header Pragma "no-cache" always;
+        try_files $uri =404;
+    }
+
+    # Unhashed render calibration texture must revalidate on each fetch
+    location = /assets/sprites/FirstBoss.png {
+        expires -1;
+        add_header Cache-Control "no-cache, must-revalidate" always;
+        try_files $uri =404;
+    }
+
     # Static game assets (sprites, audio, hashed JS/CSS chunks)
     location /assets/ {
         expires 7d;
@@ -75,6 +90,9 @@ server {
 
     # SPA React Router fallback
     location / {
+        expires -1;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0" always;
+        add_header Pragma "no-cache" always;
         try_files $uri $uri/ /index.html;
     }
 }

@@ -23,36 +23,36 @@ function FloatingControlsBar({
             className={`dk-quick-role-btn ${selectedClass === 'DPS' ? 'active' : ''}`}
             onClick={() => onSelectRole('DPS')}
           >
-            ⚔️ DPS [1]
+            DPS [1]
           </button>
           <button
             type="button"
             className={`dk-quick-role-btn ${selectedClass === 'Tank' ? 'active' : ''}`}
             onClick={() => onSelectRole('Tank')}
           >
-            🛡️ TANK [2]
+            TANK [2]
           </button>
           <button
             type="button"
             className={`dk-quick-role-btn ${selectedClass === 'Support' ? 'active' : ''}`}
             onClick={() => onSelectRole('Support')}
           >
-            💖 SUPPORT [3]
+            SUPPORT [3]
           </button>
           <button
             type="button"
             className={`dk-quick-role-btn ${selectedClass === 'Special_Attack' ? 'active' : ''}`}
             onClick={() => onSelectRole('Special_Attack')}
           >
-            ⚡ SP.ATK [4]
+            SP.ATK [4]
           </button>
         </div>
       )}
 
       <div className="dk-controls-hint-group">
-        <span className="dk-hint-chip">WASD / FLECHAS: MOVER</span>
-        <span className="dk-hint-chip">[Z]: DISPARAR</span>
-        <span className="dk-hint-chip">[SHIFT]: FOCUS</span>
+        <span className="dk-hint-chip">WASD / FLECHAS · MOVER</span>
+        <span className="dk-hint-chip">[Z] · DISPARAR</span>
+        <span className="dk-hint-chip">[SHIFT] · FOCUS</span>
       </div>
 
       <div className="dk-actions-quick-group">
@@ -60,9 +60,9 @@ function FloatingControlsBar({
           type="button"
           className="dk-action-btn dk-skill-act-btn"
           onClick={onTriggerSkill}
-          title="Activar Habilidad Especial de Clase [X]"
+          title="Habilidad especial [X]"
         >
-          ⭐ SKILL [X]
+          SKILL [X]
         </button>
         {showDebugActions && (
           <>
@@ -70,17 +70,17 @@ function FloatingControlsBar({
               type="button"
               className="dk-action-btn dk-boss-act-btn"
               onClick={onSpawnBoss}
-              title="Invocar Jefe Ahora [B]"
+              title="Invocar jefe [B]"
             >
-              👹 BOSS [B]
+              BOSS [B]
             </button>
             <button
               type="button"
               className="dk-action-btn dk-struggle-act-btn"
               onClick={onStartStruggle}
-              title="Probar Choque de Rayos [T]"
+              title="Probar choque de rayos [T]"
             >
-              ⚡ CLASH [T]
+              CLASH [T]
             </button>
             {stagePreviewVariants.length > 0 && (
               <>
@@ -90,9 +90,9 @@ function FloatingControlsBar({
                     type="button"
                     className={`dk-action-btn dk-preview-act-btn ${activeStagePreviewIdx === idx ? 'active' : ''}`}
                     onClick={() => onSelectStagePreview?.(idx)}
-                    title={`Probar ${variant.label} [${variant.key || idx + 5}]`}
+                    title={`${variant.label} [${variant.key || idx + 5}]`}
                   >
-                    ✨ {variant.label} [{variant.key || idx + 5}]
+                    {variant.label} [{variant.key || idx + 5}]
                   </button>
                 ))}
                 <button
@@ -101,7 +101,7 @@ function FloatingControlsBar({
                   onClick={() => onSelectStagePreview?.(-1)}
                   title="Restaurar línea temporal [0]"
                 >
-                  ↺ RESET [0]
+                  RESET [0]
                 </button>
               </>
             )}
@@ -111,9 +111,9 @@ function FloatingControlsBar({
           type="button"
           className="dk-action-btn dk-fullscreen-toggle-btn"
           onClick={onToggleFullscreen}
-          title="Pantalla Completa [F]"
+          title="Pantalla completa [F]"
         >
-          {isFullscreen ? '🗗 SALIR FULL' : '⛶ FULLSCREEN [F]'}
+          {isFullscreen ? 'VENTANA [F]' : 'PANTALLA COMPLETA [F]'}
         </button>
       </div>
     </div>
@@ -121,4 +121,3 @@ function FloatingControlsBar({
 }
 
 export default memo(FloatingControlsBar);
-

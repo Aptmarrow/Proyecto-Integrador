@@ -1,5 +1,5 @@
 import * as PIXI from 'pixi.js';
-import type { EnemyType, TrajectoryType, AttackPatternType, ItemType } from '../types';
+import type { EnemyType, TrajectoryType, AttackPatternType } from '../types';
 import type { BulletSystem } from '../systems/BulletSystem';
 
 export interface EnemyConfig {
@@ -13,7 +13,6 @@ export interface EnemyConfig {
   speed?: number;
   radius?: number;
   scoreValue?: number;
-  itemDrop?: ItemType;
   shootInterval?: number;
   shootDelay?: number;
   texture?: PIXI.Texture;
@@ -35,7 +34,6 @@ export class Enemy {
   public speed: number;
   public radius: number;
   public scoreValue: number;
-  public itemDrop: ItemType;
   public shootInterval: number;
   public shootTimer: number;
   public lifetime: number = 0;
@@ -67,7 +65,6 @@ export class Enemy {
     this.maxHp = this.hp;
     this.radius = config.radius ?? (this.type === 'big_fairy' ? 28 : 16);
     this.scoreValue = config.scoreValue ?? (this.type === 'big_fairy' ? 500 : (this.type === 'red_fairy' ? 150 : 80));
-    this.itemDrop = config.itemDrop ?? (this.type === 'big_fairy' ? 'bomb_frag' : (this.type === 'red_fairy' ? 'power' : 'point'));
     this.shootInterval = config.shootInterval ?? (this.type === 'big_fairy' ? 0.35 : 1.2);
     this.shootTimer = -(config.shootDelay ?? 0.4);
     this.difficultyTint = config.difficultyTint ?? 0xffffff;

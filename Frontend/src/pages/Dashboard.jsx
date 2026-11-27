@@ -34,7 +34,7 @@ export default function Dashboard() {
             SHOP
           </button>
 
-          <button className="menu-btn" onClick={() => console.log('Ir a Inventory')}>
+          <button className="menu-btn" onClick={() => navigate('/inventory')}>
             {/* Ícono de caja/inventario */}
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M21 8L12 13L3 8M21 8L12 3L3 8M21 8V16L12 21M3 8V16L12 21M12 13V21M7.5 5.5L16.5 10.5M7.5 18.5L16.5 13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>

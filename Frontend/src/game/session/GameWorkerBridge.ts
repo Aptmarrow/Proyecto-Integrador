@@ -7,6 +7,7 @@ export class GameWorkerBridge {
   private myPlayerId: string = '';
   private onSnapshotCallback: ((snapshot: GameSnapshot) => void) | null = null;
   private isInitialized = false;
+  private inputSequence = 0;
 
   public start(
     roomId: string,
@@ -59,8 +60,9 @@ export class GameWorkerBridge {
     });
   }
 
-  public sendInput(dx: number, dy: number, action: string | null = null, isFocus: boolean = false): void {
+  public sendInput(dx: number, dy: number, action: string | null = null, isFocus: boolean = false): number {
     if (this.worker && this.isInitialized) {
+      const seq = this.inputSequence++;
       this.worker.postMessage({
         type: 'PLAYER_INPUT',
         payload: {
@@ -69,18 +71,12 @@ export class GameWorkerBridge {
           dy,
           action,
           isFocus,
+          seq,
         },
       });
+      return seq;
     }
-  }
-
-  public addTeammate(playerId: string, character: string, isBot: boolean = true): void {
-    if (this.worker && this.isInitialized) {
-      this.worker.postMessage({
-        type: 'ADD_PLAYER',
-        payload: { playerId, character, isBot },
-      });
-    }
+    return -1;
   }
 
   public setRole(role: string): void {

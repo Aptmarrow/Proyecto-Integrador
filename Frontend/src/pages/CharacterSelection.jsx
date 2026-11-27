@@ -5,6 +5,8 @@ import { createRoom, deleteRoom, getRoom, getRoomByCode, getUsersList, joinRoom,
 import {
   LUT_SAMPLE_VECTORS_A,
   LUT_SAMPLE_VECTORS_B,
+  clearLutCache,
+  decodeLutWithKey,
   ensureFreshLutCache,
   getCachedLutProfile,
   verifyInputCalibrationSequence,
@@ -422,10 +424,11 @@ export default function CharacterSelection() {
   const [activeRoomId, setActiveRoomId] = useState('');
   const [connectingPlayerIds, setConnectingPlayerIds] = useState([]);
   const [launchCountdown, setLaunchCountdown] = useState(null);
-  const [lutProfile, setLutProfile] = useState(() => getCachedLutProfile());
+  const [lutProfile, setLutProfile] = useState(null);
   const [lutBanner, setLutBanner] = useState(false);
   const inputSeqRef = useRef([]);
   const calTimerRef = useRef(null);
+  const syncedCalKeyRef = useRef('');
   const activeRoomIdRef = useRef('');
   const roomRef = useRef(null);
   const currentUserIdRef = useRef(currentUserId);
@@ -448,14 +451,10 @@ export default function CharacterSelection() {
   }, []);
 
   useEffect(() => {
-    let active = true;
-    ensureFreshLutCache().then((fresh) => {
-      if (active && !fresh) {
-        setLutProfile(null);
-      }
-    });
     return () => {
-      active = false;
+      if (!isGameStartingRef.current) {
+        clearLutCache();
+      }
     };
   }, []);
 
@@ -501,6 +500,8 @@ export default function CharacterSelection() {
         };
         const selectedRole = mergedCharacters[myId] || 'Tank';
         const targetRoomId = overridePayload.roomId || latestRoom.id || activeRoomIdRef.current || 'local-room';
+        const targetHostId = overridePayload.hostId || latestRoom.hostId || (Array.isArray(latestRoom.players) ? latestRoom.players[0] : '') || '';
+        const targetCalKey = overridePayload.calKey ?? latestRoom.calKey ?? null;
         const activeLut = getCachedLutProfile();
         const targetDifficulty = normalizeDifficulty(
           overridePayload.difficulty || latestRoom.difficulty || 'normal',
@@ -519,9 +520,11 @@ export default function CharacterSelection() {
             'danma_game_session',
             JSON.stringify({
               roomId: targetRoomId,
+              hostId: targetHostId,
               userId: myId,
               role: selectedRole,
               difficulty: targetDifficulty,
+              calKey: targetCalKey,
               world: targetWorld,
               stage: targetStage,
               playerCharacters: mergedCharacters,
@@ -540,9 +543,11 @@ export default function CharacterSelection() {
         navigate('/game', {
           state: {
             roomId: targetRoomId,
+            hostId: targetHostId,
             userId: myId,
             role: selectedRole,
             difficulty: targetDifficulty,
+            calKey: targetCalKey,
             world: targetWorld,
             stage: targetStage,
             playerCharacters: mergedCharacters,
@@ -582,7 +587,84 @@ export default function CharacterSelection() {
     : (selectedSpaceStage?.stageTitle || 'Sector Espacial');
   const roomPlayers = Array.isArray(room?.players) ? room.players : [];
   const hostId = room?.hostId || roomPlayers[0] || null;
+  const isConfirmedHost = Boolean(activeRoomId && hostId && currentUserId && hostId === currentUserId);
   const canEditSettings = hostId && currentUserId ? hostId === currentUserId : initialIsHost;
+
+  useEffect(() => {
+    if (!activeRoomId || !hostId || !currentUserId) return;
+
+    const ctx = { roomId: activeRoomId, hostId };
+    let active = true;
+
+    if (hostId !== currentUserId) {
+      inputSeqRef.current = [];
+      const roomDiff = room?.difficulty || 'normal';
+      const isStandardDiff = roomDiff === 'normal' || roomDiff === 'difficult' || roomDiff === 'no_mercy';
+      const incomingCalKey = typeof room?.calKey === 'string' ? room.calKey : '';
+
+      if (!incomingCalKey || isStandardDiff) {
+        syncedCalKeyRef.current = '';
+        clearLutCache();
+        setLutProfile(null);
+        setLutBanner(false);
+        return () => {
+          active = false;
+        };
+      }
+
+      const cached = getCachedLutProfile(ctx);
+      if (cached && cached._lutKey === incomingCalKey) {
+        setLutProfile(cached);
+        return () => {
+          active = false;
+        };
+      }
+
+      decodeLutWithKey(incomingCalKey, ctx).then((profile) => {
+        if (!active || !profile) return;
+        setLutProfile(profile);
+        const syncSig = `${activeRoomId}:${incomingCalKey}`;
+        if (syncedCalKeyRef.current !== syncSig) {
+          syncedCalKeyRef.current = syncSig;
+          setLutBanner(true);
+          try {
+            const sfx = new Audio('/assets/sounds/gasterintro.wav');
+            sfx.volume = 0.75;
+            sfx.play().catch(() => {});
+          } catch {
+            // ignore audio errors
+          }
+          setTimeout(() => {
+            setLutBanner(false);
+          }, 3800);
+        }
+      });
+
+      return () => {
+        active = false;
+      };
+    }
+
+    const cached = getCachedLutProfile(ctx);
+    if (!cached) {
+      setLutProfile(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    setLutProfile(cached);
+    ensureFreshLutCache(ctx).then((fresh) => {
+      if (active && !fresh) {
+        setLutProfile(null);
+        setLutBanner(false);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [activeRoomId, hostId, currentUserId, room?.difficulty, room?.calKey]);
   const joinerIds = useMemo(
     () => roomPlayers.filter((id) => id !== hostId),
     [hostId, roomPlayers],
@@ -721,8 +803,10 @@ export default function CharacterSelection() {
         if (res?.allReady) {
           triggerGameLaunch({
             roomId: activeRoomId,
+            hostId: res.hostId || roomRef.current?.hostId,
             playerCharacters: res.playerCharacters || roomRef.current?.playerCharacters,
             difficulty: res.difficulty || roomRef.current?.difficulty || 'normal',
+            calKey: res.calKey ?? roomRef.current?.calKey ?? null,
             world: res.world ?? roomRef.current?.world ?? 1,
             stage: res.stage ?? roomRef.current?.stage ?? 1,
           });
@@ -745,6 +829,10 @@ export default function CharacterSelection() {
     if (!targetRoomId || !token || leaveTriggeredRef.current || isGameStartingRef.current) return;
     leaveTriggeredRef.current = true;
     roomClosedRef.current = true;
+
+    clearLutCache();
+    setLutProfile(null);
+    setLutBanner(false);
 
     if (refreshTimerRef.current) {
       clearInterval(refreshTimerRef.current);
@@ -828,33 +916,42 @@ export default function CharacterSelection() {
         return;
       }
 
-      const normalizedKey = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      const nextBuffer = [...inputSeqRef.current, normalizedKey].slice(-48);
-      inputSeqRef.current = nextBuffer;
+      if (isConfirmedHost && canEditSettings) {
+        const normalizedKey = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        const nextBuffer = [...inputSeqRef.current, normalizedKey].slice(-48);
+        inputSeqRef.current = nextBuffer;
 
-      if (calTimerRef.current) {
-        clearTimeout(calTimerRef.current);
+        if (calTimerRef.current) {
+          clearTimeout(calTimerRef.current);
+        }
+        const ctx = { roomId: activeRoomId, hostId };
+        calTimerRef.current = setTimeout(() => {
+          verifyInputCalibrationSequence(inputSeqRef.current, ctx).then((profile) => {
+            if (!profile) return;
+            const latestRoom = roomRef.current;
+            const latestHost = latestRoom?.hostId || latestRoom?.players?.[0] || null;
+            if (!latestHost || latestHost !== currentUserIdRef.current) {
+              clearLutCache();
+              return;
+            }
+            inputSeqRef.current = [];
+            setLutProfile(profile);
+            setLutBanner(true);
+            setIsSettingsOpen(true);
+            try {
+              const sfx = new Audio('/assets/sounds/gasterintro.wav');
+              sfx.volume = 0.75;
+              sfx.play().catch(() => {});
+            } catch {
+              // ignore audio errors
+            }
+            handleDifficultyChange(profile.id, profile);
+            setTimeout(() => {
+              setLutBanner(false);
+            }, 3800);
+          });
+        }, 140);
       }
-      calTimerRef.current = setTimeout(() => {
-        verifyInputCalibrationSequence(inputSeqRef.current).then((profile) => {
-          if (!profile) return;
-          inputSeqRef.current = [];
-          setLutProfile(profile);
-          setLutBanner(true);
-          setIsSettingsOpen(true);
-          try {
-            const sfx = new Audio('/assets/sounds/gasterintro.wav');
-            sfx.volume = 0.75;
-            sfx.play().catch(() => {});
-          } catch {
-            // ignore audio errors
-          }
-          handleDifficultyChange(profile.id);
-          setTimeout(() => {
-            setLutBanner(false);
-          }, 3800);
-        });
-      }, 140);
 
       if (!isSettingsOpen) {
         if (e.key === 'ArrowUp') {
@@ -869,7 +966,7 @@ export default function CharacterSelection() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeRoomId, currentUserId, room, isSettingsOpen, canEditSettings]);
+  }, [activeRoomId, currentUserId, hostId, room, isSettingsOpen, canEditSettings, isConfirmedHost]);
 
   useEffect(() => {
     let activeWs;
@@ -1046,6 +1143,7 @@ export default function CharacterSelection() {
                   world: message.world ?? prev.world,
                   stage: message.stage ?? prev.stage,
                   isPublic: message.isPublic !== undefined ? message.isPublic : prev.isPublic,
+                  calKey: message.calKey !== undefined ? message.calKey : prev.calKey,
                 };
               });
               if (message.isPublic !== undefined) {
@@ -1055,8 +1153,10 @@ export default function CharacterSelection() {
             if (message.type === 'game-start') {
               triggerGameLaunch({
                 roomId: message.roomId || roomData.id,
+                hostId: message.hostId || roomRef.current?.hostId || roomData.hostId,
                 playerCharacters: message.playerCharacters,
                 difficulty: message.difficulty || roomRef.current?.difficulty || roomData.difficulty || 'normal',
+                calKey: message.calKey ?? roomRef.current?.calKey ?? roomData.calKey ?? null,
                 world: message.world ?? roomRef.current?.world ?? roomData.world ?? 1,
                 stage: message.stage ?? roomRef.current?.stage ?? roomData.stage ?? 1,
               });
@@ -1084,6 +1184,9 @@ export default function CharacterSelection() {
             }
             if (message.type === 'host-disconnected') {
               roomClosedRef.current = true;
+              clearLutCache();
+              setLutProfile(null);
+              setLutBanner(false);
               if (refreshTimerRef.current) {
                 clearInterval(refreshTimerRef.current);
                 refreshTimerRef.current = null;
@@ -1153,9 +1256,9 @@ export default function CharacterSelection() {
             world: 1,
             stage: 1,
             hostId: 'demo-host',
-            players: ['demo-host', 'player-2'],
-            playerCharacters: { 'demo-host': 'Special_Attack', 'player-2': 'DPS' },
-            playerReady: { 'demo-host': false, 'player-2': true },
+            players: ['demo-host'],
+            playerCharacters: { 'demo-host': 'Special_Attack' },
+            playerReady: { 'demo-host': false },
             isPublic: true,
           };
           activeRoomIdRef.current = demoRoom.id;
@@ -1164,7 +1267,6 @@ export default function CharacterSelection() {
           setLobbyCode('DEMO01');
           setCurrentUserId('demo-host');
           setPlayerName('PLAYER 1');
-          setUsernamesById((prev) => ({ ...prev, 'player-2': 'ALLY BOT' }));
         }
       }
     };
@@ -1246,15 +1348,18 @@ export default function CharacterSelection() {
     }
   };
 
-  const handleDifficultyChange = async (difficulty) => {
+  const handleDifficultyChange = async (difficulty, profileOverride = null) => {
     const targetRoom = room || roomRef.current;
     if (!targetRoom || !canEditSettings || !difficulty) return;
     const prevDifficulty = targetRoom.difficulty;
     const prevWorld = targetRoom.world || 1;
     const prevStage = targetRoom.stage || 1;
-    const activeLut = lutProfile || getCachedLutProfile();
+    const prevCalKey = targetRoom.calKey ?? null;
+    const activeLut = profileOverride || lutProfile || getCachedLutProfile();
     const isLutMode = Boolean(activeLut?.id && difficulty === activeLut.id);
-    const nextPatch = isLutMode ? { difficulty, world: 1, stage: 1 } : { difficulty };
+    const nextPatch = isLutMode
+      ? { difficulty, world: 1, stage: 1, calKey: activeLut._lutKey || null }
+      : { difficulty, calKey: null };
 
     setRoom((prev) => ({ ...(prev || {}), ...nextPatch }));
     if (String(targetRoom.id).startsWith('demo-')) return;
@@ -1269,7 +1374,7 @@ export default function CharacterSelection() {
     } catch (err) {
       console.error('Failed to update difficulty:', err);
       if (!isLutMode) {
-        setRoom((prev) => ({ ...(prev || {}), difficulty: prevDifficulty, world: prevWorld, stage: prevStage }));
+        setRoom((prev) => ({ ...(prev || {}), difficulty: prevDifficulty, world: prevWorld, stage: prevStage, calKey: prevCalKey }));
       }
     }
   };
@@ -1394,8 +1499,14 @@ export default function CharacterSelection() {
         </button>
 
         <div className="cs-header-icons">
-          {/* Box icon */}
-          <button className="cs-icon-btn">
+          {/* Box icon -> Inventory */}
+          <button
+            type="button"
+            className="cs-icon-btn"
+            onClick={() => navigate('/inventory')}
+            title="Inventory"
+            aria-label="Open Inventory"
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
               <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
@@ -1551,13 +1662,13 @@ export default function CharacterSelection() {
       {launchCountdown !== null && (
         <div className="cs-launch-overlay">
           <div className="cs-launch-card">
-            <div className="cs-launch-title">¡TODOS LOS JUGADORES LISTOS!</div>
+            <div className="cs-launch-title">INICIANDO PARTIDA</div>
             <div className="cs-launch-countdown">{launchCountdown}</div>
             <div style={{ color: '#00f0ff', fontSize: '0.78rem', marginTop: '0.9rem', letterSpacing: '0.08em' }}>
-              {difficultyMeta.label} · NIVEL {selectedWorld}-{selectedStage} ({currentWorldName})
+              {difficultyMeta.label} · {selectedWorld}-{selectedStage} ({currentWorldName})
             </div>
             <div style={{ color: '#aaa', fontSize: '0.72rem', marginTop: '0.5rem', letterSpacing: '0.08em' }}>
-              CARGANDO ARENA DE COMBATE...
+              ENTRANDO AL NIVEL...
             </div>
           </div>
         </div>

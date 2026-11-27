@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getIdToken, getStoredUserId } from '../services/api';
+import { deleteRoom, getIdToken, getStoredUserId, leaveRoom } from '../services/api';
+import { clearLutCache, decodeLutWithKey, getCachedLutProfile } from '../game/engine/SpriteLutCache';
 import {
   GameRuntimeSession,
   clampLevelPart,
@@ -52,22 +53,27 @@ export default function Game({ isDevMode = false }) {
     const storedUserId = getStoredUserId();
 
     const roomId = state.roomId || query.roomId || (isSandboxRoute ? 'local-sandbox' : persisted?.roomId) || 'local-room';
+    const hostId = state.hostId || (isSandboxRoute ? '' : persisted?.hostId) || '';
     const userId = state.userId || storedUserId || (isSandboxRoute ? 'dev-player' : persisted?.userId) || 'player-local-host';
     const playerCharacters = state.playerCharacters || persisted?.playerCharacters || {};
     const usernamesById = state.usernamesById || persisted?.usernamesById || {};
     const roleFromRoster = userId && playerCharacters[userId] ? playerCharacters[userId] : null;
     const defaultRole = isSandboxRoute ? 'Special_Attack' : 'DPS';
     const resolvedRole = normalizeRole(state.role || roleFromRoster || query.classId || (isSandboxRoute ? 'Special_Attack' : persisted?.role) || defaultRole);
-    const difficulty = toDifficulty(state.difficulty || persisted?.difficulty || query.difficulty, 'normal');
+    const calKey = isSandboxRoute ? null : (state.calKey ?? persisted?.calKey ?? null);
+    const rawDifficulty = state.difficulty || persisted?.difficulty || query.difficulty || 'normal';
+    const difficulty = calKey ? rawDifficulty : toDifficulty(rawDifficulty, 'normal');
     const world = clampLevelPart(state.world ?? persisted?.world ?? query.world, 1);
     const stage = clampLevelPart(state.stage ?? persisted?.stage ?? query.stage, 1);
     const token = isSandboxRoute ? '' : (state.token || getIdToken() || query.token || '');
 
     const payload = {
       roomId,
+      hostId,
       userId,
       role: resolvedRole,
       difficulty,
+      calKey,
       world,
       stage,
       playerCharacters,
@@ -81,9 +87,11 @@ export default function Game({ isDevMode = false }) {
         SESSION_STORAGE_KEY,
         JSON.stringify({
           roomId,
+          hostId,
           userId,
           role: resolvedRole,
           difficulty,
+          calKey,
           world,
           stage,
           playerCharacters,
@@ -100,7 +108,14 @@ export default function Game({ isDevMode = false }) {
   const [selectedClass, setSelectedClass] = useState(launchConfig.role);
   const selectedClassRef = useRef(launchConfig.role);
   const [workerMode, setWorkerMode] = useState('connecting');
-  const [workerModeLabel, setWorkerModeLabel] = useState('Iniciando Web Workers...');
+  const [isHost, setIsHost] = useState(() =>
+    Boolean(launchConfig.hostId && launchConfig.userId && launchConfig.hostId === launchConfig.userId)
+  );
+  const isHostRef = useRef(isHost);
+  isHostRef.current = isHost;
+  const leavingRef = useRef(false);
+  const [roomClosedMessage, setRoomClosedMessage] = useState(null);
+  const roomClosedTimerRef = useRef(null);
 
   const [playerHp, setPlayerHp] = useState(100);
   const [playerMaxHp, setPlayerMaxHp] = useState(100);
@@ -121,17 +136,22 @@ export default function Game({ isDevMode = false }) {
   const [stageBanner, setStageBanner] = useState(null);
   const [bossWarningActive, setBossWarningActive] = useState(false);
   const [spellcardBanner, setSpellcardBanner] = useState(null);
+  const [chipDropNotice, setChipDropNotice] = useState(null);
   const [isStageClear, setIsStageClear] = useState(false);
   const [isAutoAdvancingStage, setIsAutoAdvancingStage] = useState(false);
   const [stageBlackAlpha, setStageBlackAlpha] = useState(0);
   const [stageFlashAlpha, setStageFlashAlpha] = useState(0);
-  const [currentDifficultyLabel, setCurrentDifficultyLabel] = useState(
-    launchConfig.difficulty === 'no_mercy'
+  const [currentDifficultyLabel, setCurrentDifficultyLabel] = useState(() => {
+    const activeLut = getCachedLutProfile();
+    if (activeLut?.id && launchConfig.difficulty === activeLut.id) {
+      return activeLut.level?.difficultyLabel || activeLut.ui?.label || launchConfig.difficulty;
+    }
+    return launchConfig.difficulty === 'no_mercy'
       ? 'No Mercy'
       : launchConfig.difficulty === 'difficult'
         ? 'Difficult'
-        : 'Normal'
-  );
+        : 'Normal';
+  });
   const [currentWorld, setCurrentWorld] = useState(launchConfig.world);
   const [currentStage, setCurrentStage] = useState(launchConfig.stage);
   const [currentStageTitle, setCurrentStageTitle] = useState('');
@@ -150,9 +170,6 @@ export default function Game({ isDevMode = false }) {
   const [stagePreviewVariants, setStagePreviewVariants] = useState([]);
   const [activeStagePreviewIdx, setActiveStagePreviewIdx] = useState(-1);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
-  const [joystickActive, setJoystickActive] = useState(false);
-  const [joystickStickPos, setJoystickStickPos] = useState({ x: 0, y: 0 });
-  const [touchFiring, setTouchFiring] = useState(false);
   const [touchFocus, setTouchFocus] = useState(false);
 
   const touchInputRef = useRef({
@@ -161,8 +178,6 @@ export default function Game({ isDevMode = false }) {
     touchFiring: false,
     touchFocus: false,
   });
-  const joystickBaseRef = useRef({ x: 0, y: 0 });
-  const joystickActiveRef = useRef(false);
   const canAdvanceStageRef = useRef(false);
   canAdvanceStageRef.current = canAdvanceStage;
 
@@ -196,14 +211,32 @@ export default function Game({ isDevMode = false }) {
     const mountContainer = canvasMountRef.current;
     if (!mountContainer) return undefined;
 
+    let cancelled = false;
+    let activeSession = null;
+    leavingRef.current = false;
+    setRoomClosedMessage(null);
+    if (roomClosedTimerRef.current) {
+      clearTimeout(roomClosedTimerRef.current);
+      roomClosedTimerRef.current = null;
+    }
+
     let lastHudSync = 0;
     let lastPreviewSig = '';
     let lastPreviewActive = -1;
     setStagePreviewVariants([]);
     setActiveStagePreviewIdx(-1);
 
-    // Dirty-checked quantized cache: only notify React when visible HUD values change
-    const hudCache = {
+    const startRuntime = async () => {
+      if (launchConfig.calKey && !getCachedLutProfile()) {
+        await decodeLutWithKey(launchConfig.calKey, {
+          roomId: launchConfig.roomId,
+          hostId: launchConfig.hostId,
+        }).catch(() => null);
+      }
+      if (cancelled) return;
+
+      // Dirty-checked quantized cache: only notify React when visible HUD values change
+      const hudCache = {
       hp: -1,
       maxHp: -1,
       sp: -1,
@@ -220,6 +253,7 @@ export default function Game({ isDevMode = false }) {
       stageBannerKey: null,
       bossWarning: null,
       spellBannerKey: null,
+      chipDropKey: '',
       isStageClear: null,
       isAutoAdvancing: null,
       blackAlpha: -1,
@@ -239,7 +273,7 @@ export default function Game({ isDevMode = false }) {
       struggleTimeLeft: -1,
     };
 
-    const session = new GameRuntimeSession({
+      const session = new GameRuntimeSession({
       mountContainer,
       roomId: launchConfig.roomId,
       userId: launchConfig.userId,
@@ -249,22 +283,37 @@ export default function Game({ isDevMode = false }) {
       world: launchConfig.world,
       stage: launchConfig.stage,
       testMode: launchConfig.testMode,
+      allowDebugHotkeys: isSandboxRoute,
       initialRoster: launchConfig.playerCharacters,
       getSelectedRole: () => selectedClassRef.current,
       setSelectedRole: (role) => updateSelectedRole(role),
       getFrameInput: () => touchInputRef.current,
       onTouchDeviceChange: (touch) => setIsTouchDevice(touch),
-      onFirstTouch: () => {
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen?.().catch(() => {});
-        }
-      },
+      onFirstTouch: () => {},
       onOrientationChange: () => {},
       onFullscreenChange: () => setIsFullscreen(Boolean(document.fullscreenElement)),
       onToggleFullscreen: toggleFullscreen,
-      onWorkerModeChange: (mode, label) => {
+      onWorkerModeChange: (mode) => {
         setWorkerMode(mode);
-        setWorkerModeLabel(label);
+      },
+      onHostStatusChange: (hostFlag) => {
+        isHostRef.current = hostFlag;
+        setIsHost(hostFlag);
+      },
+      onRoomClosed: (message) => {
+        if (leavingRef.current) return;
+        clearLutCache();
+        try {
+          sessionStorage.removeItem(SESSION_STORAGE_KEY);
+          sessionStorage.removeItem('danma_current_room_id');
+        } catch {
+          // ignore storage errors
+        }
+        setRoomClosedMessage(message || 'El host abandonó la partida. La sala fue cerrada.');
+        if (roomClosedTimerRef.current) clearTimeout(roomClosedTimerRef.current);
+        roomClosedTimerRef.current = setTimeout(() => {
+          navigate('/join', { replace: true });
+        }, 2400);
       },
       onPlayersSnapshot: (players, myPlayerId) => {
         const me = players.find((p) => p.id === myPlayerId);
@@ -358,6 +407,21 @@ export default function Game({ isDevMode = false }) {
           hudCache.spellBannerKey = nextSpellBannerKey;
           setSpellcardBanner(
             engine.spellcardBanner.active ? { active: true, name: engine.spellcardBanner.name } : null
+          );
+        }
+
+        const nextChipDropKey = engine.chipDropNotice ? engine.chipDropNotice.id : '';
+        if (nextChipDropKey !== hudCache.chipDropKey) {
+          hudCache.chipDropKey = nextChipDropKey;
+          setChipDropNotice(
+            engine.chipDropNotice
+              ? {
+                  id: engine.chipDropNotice.id,
+                  name: engine.chipDropNotice.name,
+                  rarity: engine.chipDropNotice.rarity,
+                  rarityLabel: engine.chipDropNotice.rarityLabel,
+                }
+              : null
           );
         }
 
@@ -457,71 +521,29 @@ export default function Game({ isDevMode = false }) {
       },
     });
 
-    sessionRef.current = session;
-    session.start();
+      activeSession = session;
+      sessionRef.current = session;
+      session.start();
+    };
+
+    startRuntime();
 
     return () => {
-      session.stop();
+      cancelled = true;
+      if (roomClosedTimerRef.current) {
+        clearTimeout(roomClosedTimerRef.current);
+        roomClosedTimerRef.current = null;
+      }
+      if (activeSession) {
+        activeSession.stop();
+      }
       sessionRef.current = null;
     };
-  }, [launchConfig, toggleFullscreen, updateSelectedRole]);
+  }, [launchConfig, navigate, toggleFullscreen, updateSelectedRole]);
 
-  const updateJoystickVector = useCallback((clientX, clientY, centerX, centerY, maxRadius) => {
-    const rawDx = clientX - centerX;
-    const rawDy = clientY - centerY;
-    const dist = Math.hypot(rawDx, rawDy);
-    const clampedRadius = Math.min(dist, maxRadius);
-    const angle = Math.atan2(rawDy, rawDx);
-
-    setJoystickStickPos({
-      x: Math.cos(angle) * clampedRadius,
-      y: Math.sin(angle) * clampedRadius,
-    });
-
-    const deadzone = 0.08;
-    const normalizedDist = Math.min(1, dist / maxRadius);
-    if (normalizedDist > deadzone) {
-      const factor = (normalizedDist - deadzone) / (1 - deadzone);
-      touchInputRef.current.touchDx = Math.cos(angle) * factor;
-      touchInputRef.current.touchDy = Math.sin(angle) * factor;
-    } else {
-      touchInputRef.current.touchDx = 0;
-      touchInputRef.current.touchDy = 0;
-    }
-  }, []);
-
-  const handleJoystickStart = useCallback((e) => {
-    e.preventDefault();
-    const touch = e.changedTouches[0];
-    const rect = e.currentTarget.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    joystickBaseRef.current = { x: centerX, y: centerY };
-    joystickActiveRef.current = true;
-    setJoystickActive(true);
-    updateJoystickVector(touch.clientX, touch.clientY, centerX, centerY, rect.width / 2);
-  }, [updateJoystickVector]);
-
-  const handleJoystickMove = useCallback((e) => {
-    e.preventDefault();
-    if (!joystickActiveRef.current) return;
-    const touch = e.changedTouches[0];
-    updateJoystickVector(
-      touch.clientX,
-      touch.clientY,
-      joystickBaseRef.current.x,
-      joystickBaseRef.current.y,
-      42
-    );
-  }, [updateJoystickVector]);
-
-  const handleJoystickEnd = useCallback((e) => {
-    e.preventDefault();
-    joystickActiveRef.current = false;
-    setJoystickActive(false);
-    setJoystickStickPos({ x: 0, y: 0 });
-    touchInputRef.current.touchDx = 0;
-    touchInputRef.current.touchDy = 0;
+  const handleTouchVectorChange = useCallback((dx, dy) => {
+    touchInputRef.current.touchDx = dx;
+    touchInputRef.current.touchDy = dy;
   }, []);
 
   const handleToggleTouchFocus = useCallback(() => {
@@ -532,13 +554,9 @@ export default function Game({ isDevMode = false }) {
     });
   }, []);
 
-  const handleSetTouchFiring = useCallback((firing) => {
-    setTouchFiring(firing);
+  const handleTouchFireChange = useCallback((firing) => {
     touchInputRef.current.touchFiring = firing;
   }, []);
-
-  const handleFireStart = useCallback(() => handleSetTouchFiring(true), [handleSetTouchFiring]);
-  const handleFireEnd = useCallback(() => handleSetTouchFiring(false), [handleSetTouchFiring]);
 
   const handleStageClearAction = useCallback(() => {
     const session = sessionRef.current;
@@ -550,13 +568,51 @@ export default function Game({ isDevMode = false }) {
     }
   }, []);
 
-  const handleExitLobby = useCallback(() => {
+  const handleLeaveMatch = useCallback(() => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+
+    if (roomClosedTimerRef.current) {
+      clearTimeout(roomClosedTimerRef.current);
+      roomClosedTimerRef.current = null;
+    }
+
+    clearLutCache();
+    try {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      sessionStorage.removeItem('danma_current_room_id');
+    } catch {
+      // ignore storage errors
+    }
+
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    if (session) {
+      session.leaveMatch();
+    }
+
+    const isOnlineRoom =
+      !isSandboxRoute &&
+      Boolean(launchConfig.token) &&
+      Boolean(launchConfig.roomId) &&
+      /^[0-9a-f-]{36}$/i.test(launchConfig.roomId);
+
+    if (isOnlineRoom) {
+      if (isHostRef.current) {
+        deleteRoom(launchConfig.roomId, { keepalive: true }).catch(() => {
+          leaveRoom(launchConfig.roomId, { keepalive: true }).catch(() => {});
+        });
+      } else {
+        leaveRoom(launchConfig.roomId, { keepalive: true }).catch(() => {});
+      }
+    }
+
     if (isSandboxRoute) {
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
       return;
     }
-    navigate('/join');
-  }, [isSandboxRoute, navigate]);
+    navigate('/join', { replace: true });
+  }, [isSandboxRoute, launchConfig.roomId, launchConfig.token, navigate]);
 
   const handlePushStruggle = useCallback(() => sessionRef.current?.pushStruggle(), []);
   const handleSelectRole = useCallback((role) => sessionRef.current?.selectRole(role), []);
@@ -573,12 +629,12 @@ export default function Game({ isDevMode = false }) {
   const playerAvatarSrc = roleIcon(selectedClass);
   const isLocalWorkerMode = workerMode === 'local-worker';
 
-  const stageClearMetaText = `Dificultad: ${currentDifficultyLabel} | Mundo ${currentWorld} | Stage ${currentStage}`;
+  const stageClearMetaText = `${currentDifficultyLabel} · Mundo ${currentWorld}-${currentStage}`;
   const stageClearButtonText = canAdvanceStage
-    ? '▶ SIGUIENTE STAGE'
+    ? 'SIGUIENTE NIVEL'
     : isCampaignComplete
-      ? '🏆 REINICIAR CAMPAÑA'
-      : '🔄 JUGAR OTRA VEZ (REPLAY)';
+      ? 'REINICIAR CAMPAÑA'
+      : 'JUGAR DE NUEVO';
 
   return (
     <div className="dk-game-viewport" role="application" aria-label="Danmakrew Arena de Combate">
@@ -597,13 +653,16 @@ export default function Game({ isDevMode = false }) {
           isMiniboss={isMinibossEncounter}
           isBossRefilling={isBossRefilling}
           bossDisplayHpPercent={bossDisplayHpPercent}
-          workerModeLabel={workerModeLabel}
           difficultyLabel={currentDifficultyLabel}
           world={currentWorld}
           stage={currentStage}
           stageTitle={currentStageTitle}
           bossEtaSeconds={bossEtaSeconds}
-          onExitLobby={handleExitLobby}
+          isHost={isHost}
+          isTouchDevice={isTouchDevice}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          onLeaveMatch={handleLeaveMatch}
         />
 
         <main className="dk-combat-arena-wrapper">
@@ -616,6 +675,7 @@ export default function Game({ isDevMode = false }) {
               stageBanner={stageBanner}
               bossWarningActive={bossWarningActive}
               spellcardBanner={spellcardBanner}
+              chipDropNotice={chipDropNotice}
               moIntroActive={moIntroActive}
               moIntroProgress={moIntroProgress}
               isStruggleAligning={isStruggleAligning}
@@ -628,28 +688,24 @@ export default function Game({ isDevMode = false }) {
               stageBlackAlpha={stageBlackAlpha}
               stageFlashAlpha={stageFlashAlpha}
               isPlayerDefeated={playerHp <= 0}
+              roomClosedMessage={roomClosedMessage}
               stageClearTitle={stageClearTitle}
               stageClearSubtext={stageClearSubtext}
               stageClearMeta={stageClearMetaText}
               stageClearButtonText={stageClearButtonText}
               onPushStruggle={handlePushStruggle}
               onRestartStage={handleStageClearAction}
-              onExitLobby={handleExitLobby}
+              onLeaveMatch={handleLeaveMatch}
             />
 
             {isTouchDevice && (
               <TouchControlsOverlay
-                joystickActive={joystickActive}
-                joystickStickPos={joystickStickPos}
                 touchFocus={touchFocus}
-                touchFiring={touchFiring}
-                onJoystickStart={handleJoystickStart}
-                onJoystickMove={handleJoystickMove}
-                onJoystickEnd={handleJoystickEnd}
+                isUltiReady={isUltiReady}
+                onVectorChange={handleTouchVectorChange}
+                onFireChange={handleTouchFireChange}
                 onTriggerSkill={handleTriggerSkill}
                 onToggleFocus={handleToggleTouchFocus}
-                onFireStart={handleFireStart}
-                onFireEnd={handleFireEnd}
               />
             )}
           </div>
@@ -659,20 +715,22 @@ export default function Game({ isDevMode = false }) {
 
         <AdFooter />
 
-        <FloatingControlsBar
-          selectedClass={selectedClass}
-          isFullscreen={isFullscreen}
-          canSwitchRole={isLocalWorkerMode}
-          showDebugActions={true}
-          stagePreviewVariants={stagePreviewVariants}
-          activeStagePreviewIdx={activeStagePreviewIdx}
-          onSelectRole={handleSelectRole}
-          onTriggerSkill={handleTriggerSkill}
-          onSpawnBoss={handleSpawnBoss}
-          onStartStruggle={handleStartStruggle}
-          onSelectStagePreview={handleSelectStagePreview}
-          onToggleFullscreen={toggleFullscreen}
-        />
+        {(!isTouchDevice || isSandboxRoute) && (
+          <FloatingControlsBar
+            selectedClass={selectedClass}
+            isFullscreen={isFullscreen}
+            canSwitchRole={isSandboxRoute && isLocalWorkerMode}
+            showDebugActions={isSandboxRoute}
+            stagePreviewVariants={stagePreviewVariants}
+            activeStagePreviewIdx={activeStagePreviewIdx}
+            onSelectRole={handleSelectRole}
+            onTriggerSkill={handleTriggerSkill}
+            onSpawnBoss={handleSpawnBoss}
+            onStartStruggle={handleStartStruggle}
+            onSelectStagePreview={handleSelectStagePreview}
+            onToggleFullscreen={toggleFullscreen}
+          />
+        )}
       </div>
     </div>
   );

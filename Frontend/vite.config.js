@@ -7,18 +7,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      selfDestroying: true,
+      injectRegister: null,
       includeAssets: ['vite.svg'],
-      workbox: {
-        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        globIgnores: ['**/assets/sprites/FirstBoss.png'],
-        runtimeCaching: [
-          {
-            urlPattern: /\/assets\/sprites\/FirstBoss\.png/,
-            handler: 'NetworkOnly',
-          },
-        ],
-      },
       manifest: {
         name: 'Danmakrew',
         short_name: 'Danma',

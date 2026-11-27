@@ -113,10 +113,31 @@ describe('Fastify REST API & OpenAPI integration tests', () => {
     };
 
     Chip.create = async ({ inventoryId, name, rarity = 1, level = 1, image = null, stats = null }) => {
-      const chip = { id: store.nextChipId++, inventory_id: inventoryId, name, rarity, level, image, stats };
+      const chip = { id: store.nextChipId++, inventory_id: inventoryId, name, rarity, level, image, is_equipped: false, stats };
       store.chips.set(chip.id, chip);
       const inv = [...store.inventories.values()].find((i) => i.id === inventoryId);
       if (inv) inv.chips.push(chip);
+      return chip;
+    };
+    Chip.findEquippedByInventory = async (inventoryId) =>
+      [...store.chips.values()].filter((c) => c.inventory_id === inventoryId && c.is_equipped);
+    Chip.setEquipped = async (chipId, inventoryId, isEquipped) => {
+      const chip = store.chips.get(chipId);
+      if (!chip || Number(chip.inventory_id) !== Number(inventoryId)) {
+        const err = new Error('La chip no existe o no pertenece a tu inventario.');
+        err.statusCode = 404;
+        throw err;
+      }
+      const want = Boolean(isEquipped);
+      if (want && !chip.is_equipped) {
+        const equipped = await Chip.findEquippedByInventory(inventoryId);
+        if (equipped.length >= Chip.MAX_EQUIPPED_CHIPS) {
+          const err = new Error(`Solo podés equiparte un máximo de ${Chip.MAX_EQUIPPED_CHIPS} chips a la vez.`);
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+      chip.is_equipped = want;
       return chip;
     };
 
@@ -254,6 +275,51 @@ describe('Fastify REST API & OpenAPI integration tests', () => {
     });
     assert.equal(invRes.statusCode, 200);
     assert.equal(invRes.json().chips.length, 1);
+    const createdChipId = chipRes.json().id;
+
+    // Equip / unequip chip & stats calculation
+    const badChipIdRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/auth/user/inventory/chips/abc/equip',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { equipped: true },
+    });
+    assert.equal(badChipIdRes.statusCode, 400);
+
+    const badBodyRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/auth/user/inventory/chips/${createdChipId}/equip`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { equipped: 'yes' },
+    });
+    assert.equal(badBodyRes.statusCode, 400);
+
+    const equipRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/auth/user/inventory/chips/${createdChipId}/equip`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { equipped: true },
+    });
+    assert.equal(equipRes.statusCode, 200);
+    assert.equal(equipRes.json().chip.is_equipped, true);
+    assert.equal(equipRes.json().equippedCount, 1);
+
+    const statsRes = await app.inject({
+      method: 'GET',
+      url: '/api/auth/user/inventory/stats?class=DPS',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    assert.equal(statsRes.statusCode, 200);
+    assert.equal(statsRes.json().equippedCount, 1);
+    assert.equal(statsRes.json().bonuses.Ultimate_Damage, 20);
+
+    const missingChipRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/auth/user/inventory/chips/999999/equip',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { equipped: true },
+    });
+    assert.equal(missingChipRes.statusCode, 404);
   });
 
   it('handles friend requests and full multiplayer room lifecycle', async () => {

@@ -36,6 +36,7 @@ const {
 const WS_PORT = parseInt(process.env.WS_PORT || '9001', 10);
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const ALLOWED_CHARACTER_ROLES = new Set(CHARACTER_ROLES);
+const STANDARD_DIFFICULTIES = new Set(['normal', 'difficult', 'no_mercy']);
 
 // roomId → Set<WebSocket>
 const rooms = new Map();
@@ -99,13 +100,15 @@ async function cleanupRoom(roomId) {
   rooms.delete(roomId);
 }
 
+const { isDevBypassTokenAllowed } = require('./ws/gameSecurity');
+
 /**
  * Validate a JWT token.
  * Returns the userId string or null.
  */
 async function validateToken(token) {
   if (!token) return null;
-  if (token.startsWith('mock_token_') || token.startsWith('guest_') || token.startsWith('dev_') || token.startsWith('test-')) {
+  if (isDevBypassTokenAllowed(token)) {
     return token;
   }
   const result = await verifyToken(token);
@@ -243,6 +246,11 @@ app.ws('/signal', {
 
         if (!rooms.has(roomId)) {
           return sendError(ws, 'Room has no active host');
+        }
+
+        const alreadyInRoom = Array.isArray(joinTarget.players) && joinTarget.players.includes(ws.userId);
+        if (!alreadyInRoom && !STANDARD_DIFFICULTIES.has(joinTarget.difficulty || 'normal')) {
+          return sendError(ws, 'Room is locked for new players');
         }
 
         if ((joinTarget.playersCount ?? joinTarget.players?.length ?? 1) >= joinTarget.maxPlayers) {
@@ -387,6 +395,7 @@ app.ws('/signal', {
         if (allReady) {
           room.status = 'in_game';
           markRoomTransitioningToGame(roomId);
+          await redis.zrem('rooms:public', roomId).catch(() => {});
         }
 
         await redis.set(`room:${roomId}`, JSON.stringify(room), 'KEEPTTL');
@@ -404,9 +413,11 @@ app.ws('/signal', {
           broadcast(roomId, {
             type: 'game-start',
             roomId,
+            hostId: room.hostId,
             players: room.players,
             playerCharacters: room.playerCharacters || {},
             difficulty: room.difficulty || 'normal',
+            calKey: room.calKey || null,
             world: room.world || 1,
             stage: room.stage || 1,
           });

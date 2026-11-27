@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { loginUser, resendVerificationEmail, setIdToken, setStoredUserId } from '../services/api'
 import BulletBackground from '../components/BulletBackground'
@@ -11,30 +11,6 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [resending, setResending] = useState(false)
   const [isTyping, setIsTyping] = useState(false)
-
-  useEffect(() => {
-    const handleViewportChange = () => {
-      if (!window.visualViewport) return
-      // Si el viewport vuelve a tener >= 80% de la altura de la ventana, el teclado se cerró
-      const isKeyboardClosed = window.visualViewport.height >= window.innerHeight * 0.8
-      if (isKeyboardClosed) {
-        setIsTyping(false)
-        if (document.activeElement && document.activeElement.tagName === 'INPUT') {
-          document.activeElement.blur()
-        }
-      }
-    }
-
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', handleViewportChange)
-    }
-
-    return () => {
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', handleViewportChange)
-      }
-    }
-  }, [])
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value })
@@ -87,16 +63,18 @@ export default function Login() {
     setIsTyping(true)
     const target = e.target
     setTimeout(() => {
-      target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
-    }, 350)
+      if (document.activeElement === target) {
+        target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+      }
+    }, 220)
   }
 
   const handleInputBlur = () => {
     setTimeout(() => {
-      if (!document.activeElement || (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'BUTTON')) {
+      if (!document.activeElement || document.activeElement.tagName !== 'INPUT') {
         setIsTyping(false)
       }
-    }, 150)
+    }, 180)
   }
 
   return (
@@ -123,6 +101,11 @@ export default function Login() {
                 id="email"
                 name="email"
                 type="email"
+                inputMode="email"
+                autoComplete="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="player@danma.gg"
                 value={form.email}
                 onChange={handleChange}
@@ -138,6 +121,7 @@ export default function Login() {
                 id="password"
                 name="password"
                 type="password"
+                autoComplete="current-password"
                 placeholder="Your password"
                 value={form.password}
                 onChange={handleChange}
@@ -162,20 +146,6 @@ export default function Login() {
             style={{ marginTop: '0.75rem', opacity: resending ? 0.7 : 1 }}
           >
             {resending ? 'Reenviando...' : 'Reenviar correo de verificación'}
-          </button>
-
-          <button
-            type="button"
-            className="btn-login-submit"
-            onClick={() => navigate('/character-selection', { state: { roomId: 'demo-room-01', isHost: true, alreadyJoined: true } })}
-            style={{
-              marginTop: '1.2rem',
-              borderColor: '#00f0ff',
-              color: '#00f0ff',
-              background: 'rgba(0, 240, 255, 0.12)',
-            }}
-          >
-            ⚡ JUGAR OFFLINE (SELECCIÓN DE PERSONAJES)
           </button>
         </form>
 

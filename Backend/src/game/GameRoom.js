@@ -6,7 +6,6 @@ const { LaserSystem } = require('./systems/LaserSystem');
 const { WallSystem } = require('./systems/WallSystem');
 const { BeamStruggleAuthority } = require('./systems/BeamStruggleAuthority');
 const { EnemySystem } = require('./systems/EnemySystem');
-const { ItemSystem } = require('./systems/ItemSystem');
 const { TimelineManager } = require('./systems/TimelineManager');
 const { RoomPhaseController } = require('./RoomPhaseController');
 const { CampaignManager } = require('./campaign/CampaignManager');
@@ -15,16 +14,17 @@ const { spawnAutoAimBullet } = require('./autoAim');
 const { releaseBullet } = require('./entities/Bullet');
 const { DEFAULT_PLAYER_STATS, normalizeClassId, getCharacterStats } = require('./config/characterStats');
 const { buildRoomSnapshot } = require('./serializers/roomSnapshot');
+const { awardBossChipDrops } = require('./rewards/bossChipDrops');
 
 const SKILL_COOLDOWN    = 1.5;   // 1.5s skill cooldown
 const STRUGGLE_BOSS_WIN_PLAYER_DAMAGE = 35;
 const AUTO_ADVANCE_DURATION = 2.0; // 0.7s victory beat -> 0.9s fade-to-black -> 0.4s hold -> auto next level
 
 const SPAWN_POSITIONS = [
-  { x: 100, y: 100 },
-  { x: 700, y: 100 },
-  { x: 100, y: 500 },
-  { x: 700, y: 500 },
+  { x: 110, y: 240 },
+  { x: 110, y: 360 },
+  { x: 165, y: 180 },
+  { x: 165, y: 420 },
 ];
 
 class GameRoom {
@@ -37,7 +37,6 @@ class GameRoom {
     this.laserSystem   = new LaserSystem();
     this.wallSystem    = new WallSystem();
     this.enemySystem   = new EnemySystem();
-    this.itemSystem    = new ItemSystem();
     this.timeline      = new TimelineManager();
     this.campaign      = new CampaignManager(options.difficulty, options.world, options.stage);
     this.boss          = new BossController();
@@ -46,6 +45,7 @@ class GameRoom {
     this.stageTime     = 0;
     this._countdownMs  = 0;
     this._autoAdvanceTimer = 0;
+    this._recentChipDrops = [];
     this._phaseController = new RoomPhaseController({
       initialPhase: options.initialPhase || 'loading',
       expectedPlayerCount: options.expectedPlayerCount || 1,
@@ -56,7 +56,6 @@ class GameRoom {
     // Setup boss callbacks
     this.boss.onPhaseChange = (_phase, _spellName, _isSpellCard) => {
       this.bulletSystem.clearByOwner('boss');
-      this.itemSystem.spawnItemFountain(this.boss.x, this.boss.y, 8);
     };
 
     this.boss.onDefeated = () => {
@@ -64,7 +63,33 @@ class GameRoom {
       this.bulletSystem.clearByOwner('boss');
       this.laserSystem.lasers = [];
       this.enemySystem.clear();
-      this.itemSystem.spawnItemFountain(this.boss.x, this.boss.y, 20);
+
+      // Roll & persist boss chip drops directly into each player's inventory (async, non-blocking)
+      const participantIds = Array.from(this.players.keys());
+      const diff = this.campaign.difficulty;
+      const worldNum = this.campaign.worldIndex + 1;
+      awardBossChipDrops(participantIds, diff, worldNum)
+        .then((awarded) => {
+          if (!Array.isArray(awarded) || awarded.length === 0) return;
+          const now = Date.now();
+          this._recentChipDrops = (this._recentChipDrops || []).filter((d) => d.expiresAt > now);
+          for (const entry of awarded) {
+            if (!entry?.chip) continue;
+            const r = Number(entry.chip.rarity) || 1;
+            this._recentChipDrops.push({
+              dropId: `${entry.userId}_${entry.chip.id}_${now}`,
+              userId: entry.userId,
+              name: entry.chip.name,
+              rarity: r,
+              rarityLabel: r >= 3 ? 'Premiumish' : r === 2 ? 'Reliable' : 'Scrapy',
+              expiresAt: now + 7500,
+            });
+          }
+        })
+        .catch((err) => {
+          console.error('[GameRoom] Boss chip drop error:', err.message);
+        });
+
       if (this.campaign.hasNextStage()) {
         this._autoAdvanceTimer = AUTO_ADVANCE_DURATION;
       }
@@ -92,12 +117,11 @@ class GameRoom {
     });
   }
 
-  _handleMinibossDefeated(x, y) {
+  _handleMinibossDefeated() {
     if (this.campaign.stageState === 'stage_clear') return;
     this.campaign.markStageCleared();
     this.bulletSystem.clearByOwner('boss');
     this.laserSystem.lasers = [];
-    this.itemSystem.spawnItemFountain(x, y, 16);
     if (this.campaign.hasNextStage()) {
       this._autoAdvanceTimer = AUTO_ADVANCE_DURATION;
     }
@@ -105,6 +129,7 @@ class GameRoom {
 
   spawnBossNow() {
     const config = this.campaign.getStageConfig();
+    if (config.disableBoss) return;
     this.enemySystem.clear();
     this.bulletSystem.clearByOwner('boss');
     this.campaign.stageState = 'boss_battle';
@@ -129,6 +154,7 @@ class GameRoom {
   }
 
   startBeamStruggleTest(playerId) {
+    if (this.campaign.getStageConfig().disableBoss) return;
     if (!this.boss.isActive || this.boss.isDefeated) {
       this.spawnBossNow();
     }
@@ -172,7 +198,10 @@ class GameRoom {
 
   _setupTimeline() {
     const config = this.campaign.getStageConfig();
-    this.boss.configure(config.bossProfile, this._getSquadHpScale());
+    this._weaponsDisabled = Boolean(config.disableWeapons);
+    if (!config.disableBoss && config.bossProfile) {
+      this.boss.configure(config.bossProfile, this._getSquadHpScale());
+    }
     this.timeline.loadFromStageConfig(config, this.campaign.bannerText, this.campaign.bannerSubtext);
 
     this.timeline
@@ -187,13 +216,16 @@ class GameRoom {
         }
       })
       .on('boss_warning', () => {
+        if (config.disableBoss) return;
         this.campaign.stageState = 'boss_warning';
       })
       .on('spawn_miniboss', (payload) => {
+        if (config.disableBoss) return;
         this.campaign.stageState = 'boss_battle';
         this._spawnEndMiniboss(payload?.miniboss || config.miniboss);
       })
       .on('spawn_boss', () => {
+        if (config.disableBoss) return;
         this.campaign.stageState = 'boss_battle';
         this.boss.configure(config.bossProfile, this._getSquadHpScale());
         this.boss.spawn(685, 300);
@@ -224,6 +256,8 @@ class GameRoom {
       stats,
       hp:            stats.hpMax,
       sp:            stats.spMax,
+      pendingSeq:    -1,
+      lastProcessedSeq: -1,
     });
   }
 
@@ -261,6 +295,9 @@ class GameRoom {
     const player = this.players.get(playerId);
     if (player && player.active && this.phase === 'playing') {
       player.input = input;
+      if (Number.isInteger(input?.seq) && input.seq > player.pendingSeq) {
+        player.pendingSeq = input.seq;
+      }
     }
   }
 
@@ -386,11 +423,10 @@ class GameRoom {
       },
     });
 
-    // 6. Spawn items from defeated enemies and grant squad SP
+    // 6. Grant squad SP from defeated enemies and check miniboss clear
     for (const defeat of enemyDefeats) {
-      this.itemSystem.spawnItem(defeat.x, defeat.y, defeat.itemDrop);
       if (defeat.isMiniboss) {
-        this._handleMinibossDefeated(defeat.x, defeat.y);
+        this._handleMinibossDefeated();
       }
       for (const [, p] of this.players) {
         if (p.active && p.hp > 0) {
@@ -400,18 +436,27 @@ class GameRoom {
       }
     }
 
-    // 7. Update items
-    const itemPickups = this.itemSystem.update(deltaTime, this.players);
-    this._applyItemPickups(itemPickups);
-
-    // 8. Physics step
+    // 7. Physics step
     this.world.step(deltaTime);
 
     // 9. Bullet collision
     const bulletHits = this.bulletSystem.update(deltaTime, this.players);
     this._applyBulletHits(bulletHits);
 
-    // 10. Laser updates
+    // 10. Laser updates (anchor player beams to their caster when not in beam struggle)
+    if (!this._beamStruggleController.isSuppressingLaserDamage()) {
+      for (const laser of this.laserSystem.lasers) {
+        if (laser.ownerId && laser.ownerId !== 'boss') {
+          const owner = this.players.get(laser.ownerId);
+          if (owner && owner.active && owner.hp > 0) {
+            const pPos = owner.body.getPosition();
+            laser.sourceX = pPos.x + 18;
+            laser.sourceY = pPos.y;
+            laser.targetY = pPos.y;
+          }
+        }
+      }
+    }
     this.laserSystem.update(deltaTime);
     this.laserSystem.clearBulletsInPath(this.bulletSystem);
 
@@ -459,10 +504,15 @@ class GameRoom {
             e.hp -= deltaTime * 95;
             if (e.hp <= 0) {
               e.isDead = true;
-              this.itemSystem.spawnItem(e.x, e.y, e.itemDrop);
               this.enemySystem.active.splice(i, 1);
+              for (const [, p] of this.players) {
+                if (p.active && p.hp > 0) {
+                  const stats = p.stats || DEFAULT_PLAYER_STATS;
+                  p.sp = Math.min(stats.spMax, p.sp + 65);
+                }
+              }
               if (e.isMiniboss) {
-                this._handleMinibossDefeated(e.x, e.y);
+                this._handleMinibossDefeated();
               }
             }
           }
@@ -538,15 +588,23 @@ class GameRoom {
     // Passive SP regeneration so tactical 4-player skills stay responsive across waves & boss phases
     player.sp = Math.min(stats.spMax, player.sp + deltaTime * 50);
 
+    if (this._weaponsDisabled) {
+      applyInput(player.body, player.input);
+      if (player.pendingSeq > player.lastProcessedSeq) {
+        player.lastProcessedSeq = player.pendingSeq;
+      }
+      return;
+    }
+
     if (action === 'shoot' && player.shootCooldown <= 0) {
       if (normClass === 'support' || normClass === 'healer') {
         const targets = this._getAutoAimTargets();
-        spawnAutoAimBullet(this.bulletSystem, id, pos.x + 16, pos.y, targets, 660, 4, 2.6, stats.bulletDamage, 'autoaim');
+        spawnAutoAimBullet(this.bulletSystem, id, pos.x + 16, pos.y, targets, 780, 4, 2.6, stats.bulletDamage, 'autoaim');
       } else if (normClass === 'tank' || normClass === 'defense') {
-        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y, 620, 0, 5, 2.5, 'normal', stats.bulletDamage, 0x00ff88);
+        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y, 760, 0, 5, 2.5, 'normal', stats.bulletDamage, 0x00ff88);
       } else {
-        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y - 6, 760, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
-        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y + 6, 760, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
+        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y - 6, 960, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
+        this.bulletSystem.spawnBullet(id, pos.x + 16, pos.y + 6, 960, 0, 4, 2.5, 'normal', stats.bulletDamage, 0x00f2fe);
       }
       player.shootCooldown = shootCooldown;
     }
@@ -565,14 +623,15 @@ class GameRoom {
 
     // Special_Attack: Piercing Master Spark laser (clears enemy bullets + triggers Beam Struggle vs Boss Mega-Beams)
     if ((action === 'laser' || ((normClass === 'special_attack' || normClass === 'attack') && action === 'special')) && player.skillCooldown <= 0 && player.sp >= laserCost) {
-      this.laserSystem.spawnLaser(pos.x + 16, pos.y, pos.y, {
+      this.laserSystem.spawnLaser(pos.x + 18, pos.y, pos.y, {
         ownerId: id,
         direction: 'right',
-        chargeDuration: 0.28,
-        fireDuration: 1.15,
-        fadeDuration: 0.22,
-        maxWidth: 34,
-        color: 0x00f0ff,
+        chargeDuration: 0.42,
+        fireDuration: 1.35,
+        fadeDuration: 0.30,
+        maxWidth: 72,
+        color: 0x00f2fe,
+        dps: 85,
       });
       player.skillCooldown = SKILL_COOLDOWN * 2;
       player.sp = Math.max(0, player.sp - laserCost);
@@ -606,6 +665,9 @@ class GameRoom {
     }
 
     applyInput(player.body, player.input);
+    if (player.pendingSeq > player.lastProcessedSeq) {
+      player.lastProcessedSeq = player.pendingSeq;
+    }
   }
 
   _applyBulletHits(bulletHits) {
@@ -613,29 +675,6 @@ class GameRoom {
       const player = this.players.get(hit.playerId);
       if (!player || player.hp <= 0) continue;
       this.applyDamageToPlayer(player, hit.damage || 5);
-    }
-  }
-
-  _applyItemPickups(pickups) {
-    for (const pickup of pickups) {
-      const player = this.players.get(pickup.playerId);
-      if (!player || player.hp <= 0) continue;
-
-      const stats = player.stats || DEFAULT_PLAYER_STATS;
-      switch (pickup.type) {
-        case 'power':
-          player.sp = Math.min(stats.spMax, player.sp + 50);
-          break;
-        case 'point':
-          player.sp = Math.min(stats.spMax, player.sp + 30);
-          break;
-        case 'bomb_frag':
-          player.sp = Math.min(stats.spMax, player.sp + 165);
-          break;
-        case 'life_frag':
-          player.hp = Math.min(stats.hpMax, player.hp + 28);
-          break;
-      }
     }
   }
 
@@ -711,7 +750,6 @@ class GameRoom {
     this.laserSystem = new LaserSystem();
     this.wallSystem = new WallSystem();
     this.enemySystem.clear();
-    this.itemSystem.clear();
     this.boss.reset();
     this.timeline.reset();
     this.stageTime = 0;

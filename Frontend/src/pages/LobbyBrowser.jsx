@@ -227,9 +227,9 @@ export default function LobbyBrowser() {
         {/* RIGHT PANEL */}
         <div className="lb-right-panel">
           <div className="lb-info-box">
-            <h3>REQUIREMENTS</h3>
+            <h3>PLAYERS</h3>
             <div className="lb-info-content">
-              {selectedLobbyId ? (
+              {selectedLobbyId && selectedLobby ? (
                 <p>{resolvePlayerNames(selectedLobby)}</p>
               ) : (
                 <p>SELECT A LOBBY</p>
@@ -238,10 +238,14 @@ export default function LobbyBrowser() {
           </div>
           
           <div className="lb-info-box">
-            <h3>REWARDS</h3>
+            <h3>MATCH INFO</h3>
             <div className="lb-info-content">
-              {selectedLobbyId ? (
-                <p>- +500 EXP<br/>- NEON CRYSTALS<br/>- RARE SKINS</p>
+              {selectedLobbyId && selectedLobby ? (
+                <p>
+                  {DIFFICULTY_META[normalizeDifficulty(selectedLobby.difficulty)].label}<br />
+                  STAGE {selectedLobby.world || 1}-{selectedLobby.stage || 1}<br />
+                  SLOTS {resolvePlayersCount(selectedLobby)}/{selectedLobby.maxPlayers || 4}
+                </p>
               ) : (
                 <p>SELECT A LOBBY</p>
               )}

@@ -1,10 +1,9 @@
-import type { CharacterClass, RemotePlayer, Bullet, LaserBeam, WallBarrier, SparkParticle, StageState, BossPhase, ItemType, GameDifficulty } from './types';
-import type { ServerBullet, ServerLaser, ServerBoss, ServerBeamStruggle, ServerEnemy, ServerItem, ServerCampaign } from '../network/wsClient';
+import type { CharacterClass, RemotePlayer, Bullet, LaserBeam, WallBarrier, SparkParticle, StageState, BossPhase, GameDifficulty } from './types';
+import type { ServerBullet, ServerLaser, ServerBoss, ServerBeamStruggle, ServerEnemy, ServerCampaign, ServerChipDrop } from '../network/wsClient';
 import { BaseStageEngine } from './BaseStageEngine';
 import { Player } from './entities/Player';
 import { Boss } from './entities/Boss';
 import { EnemySystem } from './systems/EnemySystem';
-import { ItemSystem } from './systems/ItemSystem';
 import { BeamStruggleSystem } from './systems/BeamStruggleSystem';
 import { getCachedLutProfile } from './SpriteLutCache';
 import { getSpaceStageConfig } from '../campaign/spaceCampaignCatalog';
@@ -16,7 +15,6 @@ export class GameEngine extends BaseStageEngine {
   public player: Player;
   public boss: Boss;
   public enemySystem: EnemySystem;
-  public itemSystem: ItemSystem;
   private networkSync = new NetworkSyncController();
 
   // Estado del Nivel y HUD
@@ -25,11 +23,14 @@ export class GameEngine extends BaseStageEngine {
   public stageBanner: { text: string; subtext: string; timer: number; maxTimer: number } | null = null;
   public bossWarningActive: boolean = false;
   public spellcardBanner: { active: boolean; name: string; timer: number } = { active: false, name: '', timer: 0 };
+  public chipDropNotice: { id: string; name: string; rarity: number; rarityLabel: string; timer: number; maxTimer: number } | null = null;
+  private seenChipDropIds = new Set<string>();
   private _showBossHpBar: boolean = false;
   private lastBannerText: string = '';
   private lastSyncedSpellcard: string = '';
   private lastStageKey: string = '';
   private hasSyncedStageTime: boolean = false;
+  private hasReceivedInitialPos: boolean = false;
   public stageTransitionBlackAlpha: number = 0;
   public stageRevealFlashAlpha: number = 0;
   private revealCurtainTimer: number = 0;
@@ -54,10 +55,20 @@ export class GameEngine extends BaseStageEngine {
     onPlayerHit: () => {},
     onBossHit: () => {},
     onShake: (mag: number) => {
-      this.shakeTimer = mag;
+      this.shakeTimer = Math.max(this.shakeTimer, mag);
     },
     onSound: (path: string, vol: number) => {
       this.playSound(path, vol);
+    },
+    resolveOwnerPos: (ownerId: string) => {
+      if (!ownerId || ownerId === 'player' || ownerId === this.localPlayerId) {
+        return this.player.pos;
+      }
+      const remote = this.remotePlayerSprites.get(ownerId);
+      if (remote) {
+        return { x: remote.position.x, y: remote.position.y };
+      }
+      return null;
     },
   };
 
@@ -90,7 +101,6 @@ export class GameEngine extends BaseStageEngine {
       );
       this.shakeTimer = Math.max(this.shakeTimer, armed ? 0.3 : 0.14);
     };
-    this.itemSystem = new ItemSystem(this.playfieldContainer);
     this.applyDifficultyVisuals(options?.difficulty);
 
     const activeLut = getCachedLutProfile();
@@ -154,8 +164,10 @@ export class GameEngine extends BaseStageEngine {
 
   public get bossEtaSeconds(): number {
     if (this.showBossHpBar || this.isStageClear) return 0;
-    const spawnAt = this.networkSync.campaignState?.bossSpawnAt;
-    if (typeof spawnAt !== 'number' || spawnAt <= 0) return 0;
+    const campaign = this.networkSync.campaignState;
+    if (campaign?.disableBoss) return 0;
+    const spawnAt = campaign?.bossSpawnAt;
+    if (typeof spawnAt !== 'number' || spawnAt <= 0 || spawnAt >= 90000) return 0;
     return Math.max(0, spawnAt - this.stageTime);
   }
 
@@ -458,10 +470,10 @@ export class GameEngine extends BaseStageEngine {
     this.hasSyncedStageTime = false;
     this.boss.reset();
     this.enemySystem.clear();
-    this.itemSystem.clear();
     this.bulletSystem.clear();
     this.laserSystem.clear();
     this.wallSystem.clear();
+    this.player.clearPendingInputs();
   }
 
   public goToNextStage(): boolean {
@@ -479,15 +491,47 @@ export class GameEngine extends BaseStageEngine {
 
   // ── Sincronización de Red ───────────────────────────────────────────────────
 
-  public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string): void {
+  public reconcileLocalPlayer(players: RemotePlayer[], myPlayerId: string): void {
+    if (!myPlayerId || !Array.isArray(players)) return;
+    const me = players.find((p) => p.id === myPlayerId);
+    if (!me) return;
+
+    const scaledX = me.x * this.SCALE_X;
+    const scaledY = me.y * this.SCALE_Y;
+    if (!this.hasReceivedInitialPos) {
+      this.hasReceivedInitialPos = true;
+      this.player.setPosition(scaledX, scaledY);
+    } else {
+      this.player.reconcileAuthoritative(scaledX, scaledY, me.lastProcessedSeq);
+    }
+    this.networkSync.applySnapshot(players, myPlayerId, this.player);
+  }
+
+  public applyBackendSnapshot(
+    players: RemotePlayer[],
+    myPlayerId: string,
+    skipLocalPosOrCb?: boolean | ((x: number, y: number, characterRole?: string) => void)
+  ): void {
+    const skipLocalPos = skipLocalPosOrCb === true;
+    const extraCb = typeof skipLocalPosOrCb === 'function' ? skipLocalPosOrCb : undefined;
     super.applyBackendSnapshot(players, myPlayerId, (x, y, characterRole) => {
-      this.player.targetPos.x = x;
-      this.player.targetPos.y = y;
+      if (!skipLocalPos) {
+        if (!this.hasReceivedInitialPos) {
+          this.hasReceivedInitialPos = true;
+          this.player.setPosition(x, y);
+        } else {
+          const me = players.find((p) => p.id === myPlayerId);
+          this.player.reconcileAuthoritative(x, y, me?.lastProcessedSeq);
+        }
+      }
       if (characterRole && this.player.characterClassId !== characterRole) {
         this.player.setCharacterClass(characterRole as CharacterClass);
       }
+      extraCb?.(x, y, characterRole);
     });
-    this.networkSync.applySnapshot(players, myPlayerId, this.player);
+    if (!skipLocalPos) {
+      this.networkSync.applySnapshot(players, myPlayerId, this.player);
+    }
   }
 
   public applyBackendBoss(boss: ServerBoss): void {
@@ -526,11 +570,27 @@ export class GameEngine extends BaseStageEngine {
     this.enemySystem.applyBackendEnemies(enemies, this.SCALE_X, this.SCALE_Y);
   }
 
-  public applyBackendItems(items?: ServerItem[]): void {
-    if (!items) return;
-    this.itemSystem.applyBackendItems(items, this.SCALE_X, this.SCALE_Y);
+  public applyBackendChipDrops(drops: ServerChipDrop[] | undefined, myPlayerId: string): void {
+    if (!drops || !drops.length || !myPlayerId) return;
+    for (const d of drops) {
+      if (d.userId !== myPlayerId || this.seenChipDropIds.has(d.dropId)) continue;
+      this.seenChipDropIds.add(d.dropId);
+      const isPremium = Number(d.rarity) >= 3;
+      const duration = isPremium ? 6.5 : 4.5;
+      this.chipDropNotice = {
+        id: d.dropId,
+        name: d.name,
+        rarity: Number(d.rarity) || 1,
+        rarityLabel: d.rarityLabel || (isPremium ? 'Premiumish' : Number(d.rarity) === 2 ? 'Reliable' : 'Scrapy'),
+        timer: duration,
+        maxTimer: duration,
+      };
+      this.playSound('/assets/sounds/powerup.wav', isPremium ? 0.85 : 0.65);
+      if (isPremium) {
+        this.playSound('/assets/sounds/gasterintro.wav', 0.65);
+      }
+    }
   }
-
   private applyDifficultyVisuals(difficulty?: string): void {
     const norm = difficulty === 'no_mercy' ? 'no_mercy' : difficulty === 'difficult' ? 'difficult' : 'normal';
     const bulletTint = norm === 'difficult' ? 0xffb4b4 : norm === 'no_mercy' ? 0xddbfff : 0xffffff;
@@ -557,9 +617,28 @@ export class GameEngine extends BaseStageEngine {
 
   public applyBackendCampaign(campaign?: ServerCampaign): void {
     if (!campaign) return;
-    this.networkSync.applyCampaignSnapshot(campaign);
+    const activeLut = getCachedLutProfile();
+    const resolvedCampaign: ServerCampaign =
+      activeLut?.id && campaign.difficulty === activeLut.id && activeLut.level
+        ? {
+            ...campaign,
+            difficultyLabel: activeLut.level.difficultyLabel || campaign.difficultyLabel,
+            worldName: activeLut.level.worldName || campaign.worldName,
+            stageTitle: activeLut.level.stageTitle || campaign.stageTitle,
+            bannerText: activeLut.level.bannerText || campaign.bannerText,
+            bannerSubtext: activeLut.level.bannerSubtext || campaign.bannerSubtext,
+            clearTitle: activeLut.level.clearTitle || campaign.clearTitle,
+            clearSubtext: activeLut.level.clearSubtext || campaign.clearSubtext,
+            bossSpawnAt: activeLut.level.bossSpawnAt ?? campaign.bossSpawnAt,
+            bossWarningAt: activeLut.level.bossWarningAt ?? campaign.bossWarningAt,
+            disableBoss: activeLut.level.disableBoss ?? campaign.disableBoss,
+            disableWeapons: activeLut.level.disableWeapons ?? campaign.disableWeapons,
+          }
+        : campaign;
 
-    const nextStageKey = `${campaign.difficulty}:${campaign.world}-${campaign.stage}`;
+    this.networkSync.applyCampaignSnapshot(resolvedCampaign);
+
+    const nextStageKey = `${resolvedCampaign.difficulty}:${resolvedCampaign.world}-${resolvedCampaign.stage}`;
     if (this.lastStageKey && this.lastStageKey !== nextStageKey) {
       // Seamless arrival in new level: brief black lift + crisp luminous reveal flash!
       this.revealCurtainTimer = 0.36;
@@ -574,32 +653,32 @@ export class GameEngine extends BaseStageEngine {
     }
     this.lastStageKey = nextStageKey;
 
-    if (campaign.autoAdvancing && typeof campaign.transitionBlackAlpha === 'number') {
-      this.stageTransitionBlackAlpha = Math.max(this.stageTransitionBlackAlpha, campaign.transitionBlackAlpha);
+    if (resolvedCampaign.autoAdvancing && typeof resolvedCampaign.transitionBlackAlpha === 'number') {
+      this.stageTransitionBlackAlpha = Math.max(this.stageTransitionBlackAlpha, resolvedCampaign.transitionBlackAlpha);
     }
 
     const theme =
-      campaign.spaceTheme ||
-      getSpaceStageConfig(campaign.difficulty, campaign.world, campaign.stage).spaceTheme;
+      resolvedCampaign.spaceTheme ||
+      getSpaceStageConfig(resolvedCampaign.difficulty, resolvedCampaign.world, resolvedCampaign.stage).spaceTheme;
     this.backgroundRenderer.setSpaceTheme(theme);
-    this.applyDifficultyVisuals(campaign.difficulty);
+    this.applyDifficultyVisuals(resolvedCampaign.difficulty);
 
-    if (campaign.stageState) {
-      this.stageState = campaign.stageState as StageState;
-      this.isStageClear = campaign.stageState === 'stage_clear';
+    if (resolvedCampaign.stageState) {
+      this.stageState = resolvedCampaign.stageState as StageState;
+      this.isStageClear = resolvedCampaign.stageState === 'stage_clear';
     }
 
-    if (campaign.bannerText && campaign.bannerText !== this.lastBannerText) {
-      this.lastBannerText = campaign.bannerText;
+    if (resolvedCampaign.bannerText && resolvedCampaign.bannerText !== this.lastBannerText) {
+      this.lastBannerText = resolvedCampaign.bannerText;
       this.stageBanner = {
-        text: campaign.bannerText,
-        subtext: campaign.bannerSubtext || '',
+        text: resolvedCampaign.bannerText,
+        subtext: resolvedCampaign.bannerSubtext || '',
         timer: 4.5,
         maxTimer: 4.5,
       };
     }
 
-    if (campaign.stageState === 'boss_warning' && !this.bossWarningActive) {
+    if (resolvedCampaign.stageState === 'boss_warning' && !this.bossWarningActive) {
       this.bossWarningActive = true;
       this.playSound('/assets/sounds/gasterintro.wav', 0.7);
       setTimeout(() => {
@@ -613,11 +692,20 @@ export class GameEngine extends BaseStageEngine {
   public update(dt: number, keys: Record<string, boolean>, moveVec?: { dx: number; dy: number }): void {
     this.animTimer += dt;
     this.difficultyGlintFilter?.advance(dt);
+    if (this.chipDropNotice) {
+      this.chipDropNotice.timer -= dt;
+      if (this.chipDropNotice.timer <= 0) {
+        this.chipDropNotice = null;
+      }
+    }
 
-    // Detectar si el Master Spark está en fase de carga o de disparo
-    const masterSpark = this.laserSystem.lasers.find(l => l.ownerId === 'player');
-    const isMasterSparkCharging = masterSpark && masterSpark.state === 'charging';
-    this.isLaserFiring = !!(masterSpark && masterSpark.state === 'firing');
+    // Detectar si el Master Spark propio está en fase de carga o de disparo
+    const mySpark = this.laserSystem.lasers.find(
+      (l) => l.ownerId !== 'boss' && (l.ownerId === 'player' || !this.localPlayerId || l.ownerId === this.localPlayerId)
+    );
+    const anySparkFiring = this.laserSystem.lasers.some((l) => l.ownerId !== 'boss' && l.state === 'firing');
+    const isMasterSparkCharging = Boolean(mySpark && mySpark.state === 'charging');
+    this.isLaserFiring = anySparkFiring;
 
     if (!this.hasSyncedStageTime && !isMasterSparkCharging) {
       this.stageTime += dt;
@@ -729,7 +817,6 @@ export class GameEngine extends BaseStageEngine {
     }
     this.boss.syncVisuals(dt, this.animTimer, this.SCALE_X, this.SCALE_Y);
     this.enemySystem.syncRemoteVisuals(this.animTimer, this.player.pos, dt);
-    this.itemSystem.render(this.animTimer);
 
     // 6. Actualizar Láseres y Renderizado de Choque (reutilizando objetos sin asignaciones por frame)
     const authoritativeStruggleState = this.networkSync.getStruggleState();
@@ -770,10 +857,12 @@ export class GameEngine extends BaseStageEngine {
 
     // 10. Aplicar Temblor de Pantalla
     this.applyScreenShake(dt, 8);
+
+    // 11. Renderizar WebGL en sincronía exacta 1:1 con este frame de requestAnimationFrame
+    this.app.renderer.render(this.app.stage);
   }
 
   public override destroy(): void {
-    this.itemSystem.destroy();
     super.destroy();
   }
 }

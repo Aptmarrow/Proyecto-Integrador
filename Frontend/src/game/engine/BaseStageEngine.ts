@@ -39,6 +39,7 @@ export class BaseStageEngine {
   // Sprites de jugadores remotos (Multijugador)
   protected remotePlayerSprites = new Map<string, PIXI.Container>();
   protected playerRoleMap = new Map<string, string>();
+  protected localPlayerId: string = '';
   private activePlayerIds = new Set<string>();
   private soundPool = new Map<string, HTMLAudioElement[]>();
   private lastSoundTime = new Map<string, number>();
@@ -50,7 +51,6 @@ export class BaseStageEngine {
   public hiScore: number = 90039210;
   public playerLives: number = 3;
   public playerBombs: number = 3;
-  public power: number = 0;
   public graze: number = 0;
   public shakeTimer: number = 0;
   public freezeTimer: number = 0;
@@ -58,10 +58,17 @@ export class BaseStageEngine {
 
   public isBackendConnected: boolean = false;
   public useBackendBullets: boolean = false;
+  protected isDestroyed: boolean = false;
 
   constructor(canvas: HTMLCanvasElement, width: number = 1024, height: number = 576) {
+    const isCoarseTouch =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(pointer: coarse)').matches ||
+        (('ontouchstart' in window || navigator.maxTouchPoints > 0) &&
+          Math.min(window.innerWidth, window.innerHeight) <= 950));
+    const maxDpr = isCoarseTouch ? 1 : 1.25;
     const cappedResolution =
-      typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 1.25) : 1;
+      typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, maxDpr) : 1;
     this.app = new PIXI.Application({
       view: canvas,
       width: CANVAS_WIDTH,
@@ -69,6 +76,7 @@ export class BaseStageEngine {
       backgroundColor: 0x06040a,
       resolution: cappedResolution,
       autoDensity: true,
+      autoStart: false,
       antialias: false,
       powerPreference: 'high-performance',
     });
@@ -151,9 +159,38 @@ export class BaseStageEngine {
     }
   }
 
+  public spawnPlayerDeathEffect(worldX?: number, worldY?: number, playerId?: string): void {
+    let sx = typeof worldX === 'number' ? worldX * this.SCALE_X : null;
+    let sy = typeof worldY === 'number' ? worldY * this.SCALE_Y : null;
+
+    if (playerId) {
+      const sprite = this.remotePlayerSprites.get(playerId);
+      if (sprite) {
+        if (sx === null) sx = sprite.position.x;
+        if (sy === null) sy = sprite.position.y;
+        this.remotePlayersContainer.removeChild(sprite);
+        sprite.destroy({ children: true, texture: false, baseTexture: false });
+        this.remotePlayerSprites.delete(playerId);
+      }
+    }
+
+    if (sx !== null && sy !== null) {
+      this.particleSystem.spawnBurst(
+        sx,
+        sy,
+        28,
+        280,
+        [0xffffff, 0xff2b5b, 0xf97316, 0xfef08a],
+        true
+      );
+      this.shakeTimer = Math.max(this.shakeTimer, 0.25);
+    }
+  }
+
   public applyBackendSnapshot(players: RemotePlayer[], myPlayerId: string, onTargetPlayerPos?: (x: number, y: number, characterRole?: string) => void): void {
     this.isBackendConnected = true;
     this.useBackendBullets = true;
+    this.localPlayerId = myPlayerId || this.localPlayerId;
     this.activePlayerIds.clear();
     for (let i = 0; i < players.length; i++) {
       this.activePlayerIds.add(players[i].id);
@@ -214,6 +251,8 @@ export class BaseStageEngine {
           this.remotePlayersContainer.addChild(sprite);
         }
         sprite.position.set(scaledX, scaledY);
+        const remoteHp = (p as RemotePlayer & { hp?: number }).hp;
+        sprite.alpha = typeof remoteHp === 'number' && remoteHp <= 0 ? 0.22 : 1;
       }
     }
   }
@@ -288,7 +327,7 @@ export class BaseStageEngine {
     if (!lasers) return;
     this.laserSystem.lasers = lasers.map((l) => ({
       id: l.id,
-      ownerId: l.ownerId === 'boss' ? 'boss' : 'player',
+      ownerId: l.ownerId || 'boss',
       direction: l.direction || (l.ownerId === 'boss' ? 'left' : 'right'),
       sourceX: l.sourceX * this.SCALE_X,
       sourceY: l.sourceY * this.SCALE_Y,
@@ -302,15 +341,23 @@ export class BaseStageEngine {
       currentWidth: l.maxWidth * this.SCALE_Y,
       alpha: 1.0,
       color: l.color || 0xff2b5b,
+      isMegaBeam: Boolean(l.isMegaBeam),
       podType: (l.sourceY < 300 ? 'top' : 'bottom') as 'top' | 'bottom',
     }));
   }
 
   public destroy(): void {
-    this.backgroundRenderer.destroy();
-    this.bulletSystem.destroy();
-    this.particleSystem.destroy();
+    if (this.isDestroyed) return;
+    this.isDestroyed = true;
+    try { this.backgroundRenderer.destroy(); } catch {}
+    try { this.bulletSystem.destroy(); } catch {}
+    try { this.laserSystem.destroy(); } catch {}
+    try { this.particleSystem.destroy(); } catch {}
     this.soundPool.clear();
-    this.app.destroy(true, { children: true, texture: false });
+    try {
+      if (this.app && (this.app as { renderer?: unknown }).renderer) {
+        this.app.destroy(true, { children: true, texture: false });
+      }
+    } catch {}
   }
 }

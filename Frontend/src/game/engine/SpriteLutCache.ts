@@ -10,6 +10,11 @@ const STYLE_NODE_ID = 'webgl-lut-cal-style';
 const CHUNK_TAG = 0x63614c62; // 'caLb'
 const KDF_ROUNDS = 100000;
 
+export interface LutCalibrationContext {
+  roomId?: string | null;
+  hostId?: string | null;
+}
+
 let inFlightChunkPromise: Promise<Uint8Array | null> | null = null;
 const rejectedSeeds = new Set<string>();
 let lastRejectedSig = '';
@@ -29,6 +34,23 @@ export const LUT_SAMPLE_VECTORS_B = Array.from({ length: 28 }, (_, i) => ({
   duration: `${(2.2 + ((i * 0.31) % 2.4)).toFixed(2)}s`,
   size: `${6 + (i % 5) * 3}px`,
 }));
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) {
+    bin += String.fromCharCode(bytes[i]);
+  }
+  return btoa(bin);
+}
+
+function base64ToBytes(encoded: string): Uint8Array {
+  const bin = atob(encoded);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
+  return out;
+}
 
 function extractBinaryLutChunk(buffer: ArrayBuffer): Uint8Array | null {
   const view = new DataView(buffer);
@@ -83,12 +105,19 @@ async function tryDecodeLutWindow(chunk: Uint8Array, seed: string): Promise<any 
       },
       baseKey,
       { name: 'AES-GCM', length: 256 },
-      false,
+      true,
       ['decrypt']
     );
     const plainBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, payload);
     const jsonText = new TextDecoder('utf-8').decode(plainBuffer);
-    return JSON.parse(jsonText);
+    const parsed = JSON.parse(jsonText);
+    try {
+      const exported = await crypto.subtle.exportKey('raw', aesKey);
+      parsed._lutKey = bytesToBase64(new Uint8Array(exported));
+    } catch {
+      // ignore export errors
+    }
+    return parsed;
   } catch {
     rejectedSeeds.add(seed);
     return null;
@@ -108,12 +137,42 @@ export function injectLutStylesheet(cssText?: string): void {
   }
 }
 
-export function getCachedLutProfile(): any | null {
+export function clearLutCache(): void {
+  try {
+    sessionStorage.removeItem(CAL_STORAGE_KEY);
+    sessionStorage.removeItem(LEGACY_CAL_STORAGE_KEY);
+  } catch {
+    // ignore storage errors
+  }
+  if (typeof document !== 'undefined') {
+    const node = document.getElementById(STYLE_NODE_ID);
+    if (node) {
+      node.remove();
+    }
+  }
+}
+
+export function getCachedLutProfile(context?: LutCalibrationContext): any | null {
   try {
     sessionStorage.removeItem(LEGACY_CAL_STORAGE_KEY);
     const raw = sessionStorage.getItem(CAL_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+
+    if (context) {
+      const expectedRoom = String(context.roomId || '');
+      const expectedHost = String(context.hostId || '');
+      if (
+        !expectedRoom ||
+        !expectedHost ||
+        parsed?._lutRoomId !== expectedRoom ||
+        parsed?._lutHostId !== expectedHost
+      ) {
+        clearLutCache();
+        return null;
+      }
+    }
+
     if (parsed?.ui?.css) {
       injectLutStylesheet(parsed.ui.css);
     }
@@ -123,25 +182,63 @@ export function getCachedLutProfile(): any | null {
   }
 }
 
-export async function ensureFreshLutCache(): Promise<boolean> {
+export async function ensureFreshLutCache(context?: LutCalibrationContext): Promise<boolean> {
   try {
-    const raw = sessionStorage.getItem(CAL_STORAGE_KEY);
-    if (!raw) return true;
-    const parsed = JSON.parse(raw);
+    const parsed = getCachedLutProfile(context);
+    if (!parsed) return false;
     const chunk = await loadBinaryLutChunk();
     if (!chunk) return true;
     const liveSig = computeChunkSignature(chunk);
     if (parsed?._lutSig && parsed._lutSig === liveSig) {
       return true;
     }
-    sessionStorage.removeItem(CAL_STORAGE_KEY);
+    clearLutCache();
     return false;
   } catch {
     return true;
   }
 }
 
-export async function verifyInputCalibrationSequence(keyBuffer: string[]): Promise<any | null> {
+export async function decodeLutWithKey(
+  encodedKey: string,
+  context?: LutCalibrationContext
+): Promise<any | null> {
+  if (!encodedKey || typeof crypto === 'undefined' || !crypto.subtle) return null;
+  try {
+    const chunk = await loadBinaryLutChunk();
+    if (!chunk || chunk.byteLength < 44) return null;
+
+    const iv = chunk.slice(16, 28);
+    const payload = chunk.slice(28);
+    const keyBytes = base64ToBytes(encodedKey);
+    const aesKey = await crypto.subtle.importKey('raw', keyBytes as BufferSource, 'AES-GCM', false, ['decrypt']);
+    const plainBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, payload);
+    const jsonText = new TextDecoder('utf-8').decode(plainBuffer);
+    const profile = JSON.parse(jsonText);
+
+    profile._lutSig = computeChunkSignature(chunk);
+    profile._lutKey = encodedKey;
+    if (context?.roomId) profile._lutRoomId = String(context.roomId);
+    if (context?.hostId) profile._lutHostId = String(context.hostId);
+
+    if (profile?.ui?.css) {
+      injectLutStylesheet(profile.ui.css);
+    }
+    try {
+      sessionStorage.setItem(CAL_STORAGE_KEY, JSON.stringify(profile));
+    } catch {
+      // ignore quota errors
+    }
+    return profile;
+  } catch {
+    return null;
+  }
+}
+
+export async function verifyInputCalibrationSequence(
+  keyBuffer: string[],
+  context?: LutCalibrationContext
+): Promise<any | null> {
   const minSpan = 6;
   const maxSpan = Math.min(36, keyBuffer.length);
   if (maxSpan < minSpan || typeof crypto === 'undefined' || !crypto.subtle) return null;
@@ -170,6 +267,8 @@ export async function verifyInputCalibrationSequence(keyBuffer: string[]): Promi
     if (!profile) return null;
 
     profile._lutSig = liveSig;
+    if (context?.roomId) profile._lutRoomId = String(context.roomId);
+    if (context?.hostId) profile._lutHostId = String(context.hostId);
 
     if (profile?.ui?.css) {
       injectLutStylesheet(profile.ui.css);
@@ -184,4 +283,3 @@ export async function verifyInputCalibrationSequence(keyBuffer: string[]): Promi
     return null;
   }
 }
-

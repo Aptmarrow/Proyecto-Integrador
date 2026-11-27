@@ -1,5 +1,6 @@
 import { GameEngine } from '../engine/GameEngine';
 import { GameWSClient, type GameSnapshot, type ServerPlayer } from '../network/wsClient';
+import { SnapshotInterpolator } from '../network/SnapshotInterpolator';
 import { GameWorkerBridge } from './GameWorkerBridge';
 import { normalizeRole } from './squadState';
 import { getCachedLutProfile } from '../engine/SpriteLutCache';
@@ -35,6 +36,7 @@ export type RuntimeSessionOptions = {
   world?: number;
   stage?: number;
   testMode?: string | null;
+  allowDebugHotkeys?: boolean;
   initialRoster?: Record<string, string>;
   getSelectedRole: () => PlayerRole;
   setSelectedRole: (role: PlayerRole) => void;
@@ -47,6 +49,8 @@ export type RuntimeSessionOptions = {
   onEngineFrame: (engine: GameEngine) => void;
   onPlayersSnapshot?: (players: ServerPlayer[], myPlayerId: string) => void;
   onWorkerModeChange?: (mode: WorkerRuntimeMode, statusMessage: string) => void;
+  onHostStatusChange?: (isHost: boolean) => void;
+  onRoomClosed?: (message: string) => void;
 };
 
 const UUID_REGEX = /^[0-9a-f-]{36}$/i;
@@ -88,7 +92,7 @@ export class GameRuntimeSession {
   public readonly engine: GameEngine;
   private gameClient: GameWSClient | null = null;
   private workerBridge: GameWorkerBridge | null = null;
-  private snapshotWorker: Worker | null = null;
+  private readonly snapshotInterpolator = new SnapshotInterpolator();
   private readonly keys: Record<string, boolean> = {};
   private readonly effectiveKeys: Record<string, boolean> = {};
   private readonly moveVec = { dx: 0, dy: 0 };
@@ -98,8 +102,15 @@ export class GameRuntimeSession {
   private animFrameId = 0;
   private lastTime = performance.now();
   private stopped = false;
+  private destroyed = false;
   private numpad6Streak = 0;
   private lastNumpad6At = 0;
+
+  private readonly onWindowBlur = () => {
+    for (const k of Object.keys(this.keys)) {
+      this.keys[k] = false;
+    }
+  };
 
   private readonly onFirstTouch = () => {
     this.options.onTouchDeviceChange(true);
@@ -121,7 +132,7 @@ export class GameRuntimeSession {
       this.pushStruggle();
     }
 
-    if (!e.repeat) {
+    if (this.options.allowDebugHotkeys && !e.repeat) {
       const isNumpad6 = e.code === 'Numpad6' || (e.location === 3 && e.key === '6');
       if (isNumpad6) {
         const nowMs = performance.now();
@@ -139,7 +150,7 @@ export class GameRuntimeSession {
       }
     }
 
-    if (!e.repeat && this.engine.hasStagePreviewVariants()) {
+    if (this.options.allowDebugHotkeys && !e.repeat && this.engine.hasStagePreviewVariants()) {
       const codeDigit = /^(?:Digit|Numpad)([0-9])$/.exec(e.code)?.[1];
       const keyDigit = /^[0-9]$/.test(e.key) ? e.key : undefined;
       const digit = codeDigit ?? keyDigit;
@@ -156,7 +167,7 @@ export class GameRuntimeSession {
       }
     }
 
-    if (this.runtimeMode === 'local-worker') {
+    if (this.options.allowDebugHotkeys && this.runtimeMode === 'local-worker') {
       if (e.code === 'Digit1') this.selectRole('DPS');
       if (e.code === 'Digit2') this.selectRole('Tank');
       if (e.code === 'Digit3') this.selectRole('Support');
@@ -165,8 +176,8 @@ export class GameRuntimeSession {
       if (e.code === 'KeyN' && !e.repeat) this.goToNextStage();
     }
 
-    if (e.code === 'KeyT' && !e.repeat) this.startBeamStruggleTest();
-    if (e.code === 'KeyB' && !e.repeat) this.spawnBossNow();
+    if (this.options.allowDebugHotkeys && e.code === 'KeyT' && !e.repeat) this.startBeamStruggleTest();
+    if (this.options.allowDebugHotkeys && e.code === 'KeyB' && !e.repeat) this.spawnBossNow();
     if (e.code === 'KeyX' && !e.repeat) this.triggerSkill();
     if (e.code === 'KeyF' && !e.repeat) this.options.onToggleFullscreen();
   };
@@ -198,9 +209,11 @@ export class GameRuntimeSession {
 
   public start(): void {
     this.stopped = false;
-    const isCoarse = window.matchMedia('(pointer: coarse) and (hover: none)').matches;
+    this.destroyed = false;
+    const isCoarse = window.matchMedia('(pointer: coarse)').matches;
     const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    this.options.onTouchDeviceChange(isCoarse && hasTouch);
+    const isSmallTouchViewport = hasTouch && Math.min(window.innerWidth, window.innerHeight) <= 950;
+    this.options.onTouchDeviceChange(isCoarse || isSmallTouchViewport);
     this.options.onOrientationChange();
 
     window.addEventListener('touchstart', this.onFirstTouch, { once: true, passive: true });
@@ -209,40 +222,27 @@ export class GameRuntimeSession {
     document.addEventListener('fullscreenchange', this.options.onFullscreenChange);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.onWindowBlur);
 
     // 1. Connect to Authoritative Backend WS if valid room UUID + token, with automatic Local Physics Worker fallback
-    const calProfile = getCachedLutProfile();
-    const isCustomCalStage = Boolean(calProfile?.id && this.options.difficulty === calProfile.id);
     const canUseBackendWs = Boolean(
-      !isCustomCalStage && this.options.token && this.options.roomId && UUID_REGEX.test(this.options.roomId)
+      this.options.token && this.options.roomId && UUID_REGEX.test(this.options.roomId)
     );
 
     if (canUseBackendWs) {
-      // Only allocate Snapshot Interpolation Worker when running online multiplayer WS!
-      try {
-        this.snapshotWorker = new Worker(
-          new URL('../workers/snapshot.worker.ts', import.meta.url),
-          { type: 'module' }
-        );
-        this.snapshotWorker.onmessage = (e: MessageEvent) => {
-          const { type, payload } = e.data || {};
-          if (type === 'RENDER_FRAME' && payload) {
-            this.applySnapshot(payload as GameSnapshot);
-          }
-        };
-      } catch {
-        this.snapshotWorker = null;
-      }
-
-      this.setMode('connecting', 'Sincronizando sala multijugador...');
+      this.snapshotInterpolator.reset();
+      this.setMode('connecting', 'Conectando...');
       this.gameClient = new GameWSClient(this.options.token);
       this.gameClient
         .connect(
           this.options.roomId,
-          (playerId, initialState) => {
+          (playerId, initialState, isHost) => {
             if (this.stopped) return;
             this.myPlayerId = playerId;
-            this.setMode('backend-worker', 'Servidor Autoritativo + Snapshot Worker (60Hz)');
+            if (typeof isHost === 'boolean') {
+              this.options.onHostStatusChange?.(isHost);
+            }
+            this.setMode('backend-worker', 'ONLINE');
             if (initialState) this.handleIncomingSnapshot(initialState);
             if (this.options.testMode === 'beam' || this.options.testMode === 'struggle') {
               setTimeout(() => this.startBeamStruggleTest(), 150);
@@ -259,16 +259,33 @@ export class GameRuntimeSession {
             difficulty: this.options.difficulty || 'normal',
             world: clampLevelPart(this.options.world, 1),
             stage: clampLevelPart(this.options.stage, 1),
+            onPlayerLeft: (payload) => {
+              if (this.stopped) return;
+              if (payload.playerId && payload.playerId !== this.myPlayerId) {
+                this.engine.spawnPlayerDeathEffect(payload.x, payload.y, payload.playerId);
+              }
+            },
+            onRoomClosed: (payload) => {
+              if (this.stopped) return;
+              const message = payload.message || 'El host abandonó la partida. La sala fue cerrada.';
+              this.stopped = true;
+              cancelAnimationFrame(this.animFrameId);
+              this.snapshotInterpolator.reset();
+              this.options.onRoomClosed?.(message);
+            },
           }
         )
-        .catch(() => {
+        .catch((err) => {
           if (this.stopped) return;
+          if (err && (err as Error & { roomClosed?: boolean }).roomClosed) {
+            this.gameClient?.disconnect();
+            this.gameClient = null;
+            this.snapshotInterpolator.reset();
+            return;
+          }
           this.gameClient?.disconnect();
           this.gameClient = null;
-          if (this.snapshotWorker) {
-            this.snapshotWorker.terminate();
-            this.snapshotWorker = null;
-          }
+          this.snapshotInterpolator.reset();
           this.startLocalSimulationWorker();
         });
     } else {
@@ -280,7 +297,7 @@ export class GameRuntimeSession {
 
   private startLocalSimulationWorker(): void {
     if (this.stopped || this.workerBridge) return;
-    this.snapshotWorker?.postMessage({ type: 'RESET' });
+    this.snapshotInterpolator.reset();
 
     const localId = this.options.userId || 'player-local-host';
     this.workerBridge = new GameWorkerBridge();
@@ -300,16 +317,7 @@ export class GameRuntimeSession {
       .then((resolvedId) => {
         if (this.stopped) return;
         this.myPlayerId = resolvedId;
-        this.setMode('local-worker', 'Físicas Planck.js en Web Worker Local (60Hz)');
-
-        // Populate companion roster if coming from a demo/offline room
-        if (this.options.initialRoster) {
-          for (const [pid, role] of Object.entries(this.options.initialRoster)) {
-            if (pid !== resolvedId && pid !== localId) {
-              this.workerBridge?.addTeammate(pid, normalizeRole(role), true);
-            }
-          }
-        }
+        this.setMode('local-worker', 'LOCAL');
 
         if (this.options.testMode === 'beam' || this.options.testMode === 'struggle') {
           setTimeout(() => this.startBeamStruggleTest(), 120);
@@ -324,7 +332,25 @@ export class GameRuntimeSession {
     this.options.onWorkerModeChange?.(mode, message);
   }
 
+  public leaveMatch(): void {
+    if (this.destroyed) return;
+    this.stopped = true;
+    this.engine.player.hp = 0;
+    const client = this.gameClient;
+    this.gameClient = null;
+    if (client) {
+      client.sendLeaveGame();
+      // Give the browser WebSocket a brief window to flush leave-game before closing
+      setTimeout(() => {
+        client.disconnect();
+      }, 60);
+    }
+    this.stop();
+  }
+
   public stop(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     this.stopped = true;
     window.removeEventListener('touchstart', this.onFirstTouch);
     window.removeEventListener('resize', this.options.onOrientationChange);
@@ -332,16 +358,19 @@ export class GameRuntimeSession {
     document.removeEventListener('fullscreenchange', this.options.onFullscreenChange);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.onWindowBlur);
     cancelAnimationFrame(this.animFrameId);
-    if (this.snapshotWorker) {
-      this.snapshotWorker.terminate();
-      this.snapshotWorker = null;
-    }
+    this.snapshotInterpolator.reset();
     this.workerBridge?.stop();
     this.workerBridge = null;
     this.gameClient?.disconnect();
     this.gameClient = null;
     this.engine.destroy();
+  }
+
+  private isCustomStageFlagDisabled(flag: 'disableBoss' | 'disableWeapons'): boolean {
+    const cal = getCachedLutProfile();
+    return Boolean(cal?.id && this.options.difficulty === cal.id && cal?.level?.[flag]);
   }
 
   public selectRole(role: PlayerRole): void {
@@ -356,6 +385,7 @@ export class GameRuntimeSession {
   }
 
   public triggerSkill(): void {
+    if (this.isCustomStageFlagDisabled('disableWeapons')) return;
     if (this.workerBridge?.isActive()) {
       this.workerBridge.triggerSkill();
     }
@@ -377,7 +407,7 @@ export class GameRuntimeSession {
   }
 
   public restartStage(): void {
-    this.snapshotWorker?.postMessage({ type: 'RESET' });
+    this.snapshotInterpolator.reset();
     this.engine.restartStage();
     if (this.gameClient) {
       this.gameClient.sendRestartStage();
@@ -387,6 +417,7 @@ export class GameRuntimeSession {
   }
 
   public startBeamStruggleTest(): void {
+    if (this.isCustomStageFlagDisabled('disableBoss')) return;
     if (this.gameClient && this.runtimeMode === 'backend-worker') {
       this.options.setSelectedRole('Special_Attack');
       this.engine.startBeamStruggleTest();
@@ -399,6 +430,7 @@ export class GameRuntimeSession {
   }
 
   public spawnBossNow(): void {
+    if (this.isCustomStageFlagDisabled('disableBoss')) return;
     if (this.gameClient && this.runtimeMode === 'backend-worker') {
       this.engine.spawnBossDirectly();
       this.gameClient.sendSpawnBoss();
@@ -409,7 +441,7 @@ export class GameRuntimeSession {
   }
 
   public goToNextStage(): boolean {
-    this.snapshotWorker?.postMessage({ type: 'RESET' });
+    this.snapshotInterpolator.reset();
     this.engine.restartStage();
     if (this.gameClient) {
       this.gameClient.sendAdvanceStage();
@@ -467,14 +499,24 @@ export class GameRuntimeSession {
     ek.isFocus = isFocusing;
 
     const action = isShooting && !this.engine.isBeamStruggle ? 'shoot' : null;
+    const isMovementLocked = this.engine.isStruggleActive;
+    const sentDx = isMovementLocked ? 0 : dx;
+    const sentDy = isMovementLocked ? 0 : dy;
 
     if (this.gameClient && this.runtimeMode === 'backend-worker') {
-      this.gameClient.sendInput(dx, dy, action, isFocusing);
-      if (this.snapshotWorker) {
-        this.snapshotWorker.postMessage({ type: 'GET_INTERPOLATED_STATE' });
+      const seq = this.gameClient.sendInput(sentDx, sentDy, action, isFocusing);
+      if (seq >= 0 && this.engine.player.hp > 0) {
+        this.engine.player.recordPredictedInput(seq, sentDx, sentDy, isFocusing, dt);
+      }
+      const interpolated = this.snapshotInterpolator.sample(now);
+      if (interpolated) {
+        this.applySnapshot(interpolated, true);
       }
     } else if (this.workerBridge?.isActive()) {
-      this.workerBridge.sendInput(dx, dy, action, isFocusing);
+      const seq = this.workerBridge.sendInput(sentDx, sentDy, action, isFocusing);
+      if (seq >= 0 && this.engine.player.hp > 0) {
+        this.engine.player.recordPredictedInput(seq, sentDx, sentDy, isFocusing, dt);
+      }
     }
 
     this.moveVec.dx = dx;
@@ -486,21 +528,21 @@ export class GameRuntimeSession {
 
   private handleIncomingSnapshot(snapshot: GameSnapshot): void {
     if (this.runtimeMode === 'local-worker') {
-      // En modo local (Web Worker), aplicar directo sin el buffer artificial de delay de red (0ms lag)
-      this.applySnapshot(snapshot);
+      // En modo local (Web Worker), aplicar directo sin buffer artificial de delay de red (0ms lag)
+      this.applySnapshot(snapshot, false);
       return;
     }
-    if (this.snapshotWorker) {
-      this.snapshotWorker.postMessage({ type: 'ADD_SNAPSHOT', payload: snapshot });
-    } else {
-      this.applySnapshot(snapshot);
+    // Reconciliar jugador local a 0ms de delay (sin pasar por buffer de interpolación)
+    if (snapshot.players && this.myPlayerId) {
+      this.engine.reconcileLocalPlayer(snapshot.players, this.myPlayerId);
     }
+    this.snapshotInterpolator.push(snapshot, performance.now());
   }
 
-  private applySnapshot(snapshot: GameSnapshot): void {
+  private applySnapshot(snapshot: GameSnapshot, skipLocalPos: boolean = false): void {
     if (!snapshot) return;
     if (snapshot.players) {
-      this.engine.applyBackendSnapshot(snapshot.players, this.myPlayerId);
+      this.engine.applyBackendSnapshot(snapshot.players, this.myPlayerId, skipLocalPos);
       this.options.onPlayersSnapshot?.(snapshot.players, this.myPlayerId);
     }
     if (snapshot.bullets) this.engine.applyBackendBullets(snapshot.bullets);
@@ -509,8 +551,8 @@ export class GameRuntimeSession {
     if (snapshot.boss) this.engine.applyBackendBoss(snapshot.boss);
     if (snapshot.struggle) this.engine.applyBackendStruggle(snapshot.struggle);
     if (snapshot.enemies) this.engine.applyBackendEnemies(snapshot.enemies);
-    if (snapshot.items) this.engine.applyBackendItems(snapshot.items);
     if (snapshot.stageTime !== undefined) this.engine.setSyncedStageTime(snapshot.stageTime);
     if (snapshot.campaign) this.engine.applyBackendCampaign(snapshot.campaign);
+    if (snapshot.chipDrops?.length) this.engine.applyBackendChipDrops(snapshot.chipDrops, this.myPlayerId);
   }
 }

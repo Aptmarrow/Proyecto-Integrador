@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import BulletBackground from '../components/BulletBackground';
 import { registerUser, resendVerificationEmail } from '../services/api';
@@ -96,43 +96,22 @@ export default function Register() {
 
   const [isTyping, setIsTyping] = useState(false);
 
-  useEffect(() => {
-    const handleViewportChange = () => {
-      if (!window.visualViewport) return;
-      const isKeyboardClosed = window.visualViewport.height >= window.innerHeight * 0.8;
-      if (isKeyboardClosed) {
-        setIsTyping(false);
-        if (document.activeElement && document.activeElement.tagName === 'INPUT') {
-          document.activeElement.blur();
-        }
-      }
-    };
-
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', handleViewportChange);
-    }
-
-    return () => {
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', handleViewportChange);
-      }
-    };
-  }, []);
-
   const handleInputFocus = (e) => {
     setIsTyping(true);
     const target = e.target;
     setTimeout(() => {
-      target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
-    }, 350);
+      if (document.activeElement === target) {
+        target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+      }
+    }, 220);
   };
 
   const handleInputBlur = () => {
     setTimeout(() => {
-      if (!document.activeElement || (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'BUTTON')) {
+      if (!document.activeElement || document.activeElement.tagName !== 'INPUT') {
         setIsTyping(false);
       }
-    }, 150);
+    }, 180);
   };
 
   return (
@@ -166,6 +145,10 @@ export default function Register() {
                 id="username"
                 name="username"
                 type="text"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="3-11 characters"
                 value={form.username}
                 onChange={handleChange}
@@ -181,6 +164,11 @@ export default function Register() {
                 id="email"
                 name="email"
                 type="email"
+                inputMode="email"
+                autoComplete="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="player@danma.gg"
                 value={form.email}
                 onChange={handleChange}
@@ -196,6 +184,7 @@ export default function Register() {
                 id="password"
                 name="password"
                 type="password"
+                autoComplete="new-password"
                 placeholder="Min 6 characters"
                 value={form.password}
                 onChange={handleChange}
@@ -211,6 +200,7 @@ export default function Register() {
                 id="confirmPassword"
                 name="confirmPassword"
                 type="password"
+                autoComplete="new-password"
                 placeholder="Repeat your password"
                 value={form.confirmPassword}
                 onChange={handleChange}
