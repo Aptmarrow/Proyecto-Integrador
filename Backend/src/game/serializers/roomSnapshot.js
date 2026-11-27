@@ -52,8 +52,25 @@ function serializeBossHud(room) {
   return room.boss.toSnapshot();
 }
 
+function serializeChipDrops(room) {
+  const list = room._recentChipDrops;
+  if (!Array.isArray(list) || list.length === 0) return undefined;
+  const now = Date.now();
+  const active = list.filter((d) => d.expiresAt > now);
+  room._recentChipDrops = active;
+  if (active.length === 0) return undefined;
+  return active.map((d) => ({
+    dropId: d.dropId,
+    userId: d.userId,
+    name: d.name,
+    rarity: d.rarity,
+    rarityLabel: d.rarityLabel,
+  }));
+}
+
 function buildRoomSnapshot(room, options) {
   const { fallbackStats } = options;
+  const chipDrops = serializeChipDrops(room);
   return {
     type: 'snapshot',
     tick: room.tick,
@@ -68,6 +85,7 @@ function buildRoomSnapshot(room, options) {
     boss: serializeBossHud(room),
     campaign: room.campaign.toSnapshot(),
     struggle: room._beamStruggleController.toSnapshot(),
+    ...(chipDrops ? { chipDrops } : {}),
   };
 }
 

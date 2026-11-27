@@ -285,3 +285,31 @@ export async function getUserInventory() {
   });
   return handleResponse(res);
 }
+
+export async function createInventoryChip({ name, rarity = 1, level = 1, image, stats }) {
+  const res = await fetch(`${API_BASE}/auth/user/inventory/chips`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ name, rarity, level, image: image ?? null, stats: stats ?? null }),
+  });
+  return handleResponse(res);
+}
+
+export async function toggleEquipChip(chipId, equipped) {
+  const res = await fetch(`${API_BASE}/auth/user/inventory/chips/${chipId}/equip`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ equipped: Boolean(equipped) }),
+  });
+  return handleResponse(res);
+}
+
+export async function getEquippedChipStats(role = 'DPS') {
+  const res = await fetch(
+    `${API_BASE}/auth/user/inventory/stats?class=${encodeURIComponent(role)}`,
+    {
+      headers: authHeadersNoBody(),
+    }
+  );
+  return handleResponse(res);
+}

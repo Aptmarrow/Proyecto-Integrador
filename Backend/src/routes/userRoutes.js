@@ -5,6 +5,7 @@ const { generateUserId, signToken } = require('../config/auth');
 const authenticate = require('../middleware/auth');
 const { User, Friend, FriendRequest, FRIEND_REQUEST_STATUS, Inventory, Chip } = require('../models');
 const mailer = require('../utils/mailer');
+const { calculateTotalStats } = require('../utils/chipStatsCalculator');
 
 // ---- Schemas Zod ----
 const registerSchema = z.object({
@@ -45,6 +46,10 @@ const createChipSchema = z.object({
   level: z.number().int().min(1).optional(),
   image: z.string().nullable().optional(),
   stats: chipStatsSchema.nullable().optional(),
+});
+
+const equipChipSchema = z.object({
+  equipped: z.boolean(),
 });
 
 async function userRoutes(fastify) {
@@ -299,6 +304,49 @@ async function userRoutes(fastify) {
     });
 
     return reply.status(201).send(chip);
+  });
+
+  // PATCH /user/inventory/chips/:chipId/equip
+  fastify.patch('/user/inventory/chips/:chipId/equip', { preHandler: authenticate }, async (request, reply) => {
+    const chipId = Number.parseInt(request.params?.chipId, 10);
+    if (!Number.isInteger(chipId) || chipId <= 0) {
+      return reply.status(400).send({ message: 'ID de chip inválido.' });
+    }
+
+    const result = equipChipSchema.safeParse(request.body ?? {});
+    if (!result.success) {
+      return reply.status(400).send({ message: 'Debés enviar { equipped: true | false }.' });
+    }
+
+    let inventory = await Inventory.findByOwner(request.user.id);
+    if (!inventory) {
+      inventory = await Inventory.create(request.user.id);
+    }
+
+    try {
+      const updatedChip = await Chip.setEquipped(chipId, inventory.id, result.data.equipped);
+      const equippedChips = await Chip.findEquippedByInventory(inventory.id);
+      return reply.send({
+        chip: updatedChip,
+        equippedCount: equippedChips.length,
+        maxEquipped: Chip.MAX_EQUIPPED_CHIPS,
+      });
+    } catch (err) {
+      return reply.status(err.statusCode || 500).send({ message: err.message });
+    }
+  });
+
+  // GET /user/inventory/stats?class=DPS
+  fastify.get('/user/inventory/stats', { preHandler: authenticate }, async (request, reply) => {
+    let inventory = await Inventory.findByOwner(request.user.id);
+    if (!inventory) {
+      inventory = await Inventory.create(request.user.id);
+    }
+
+    const classId = request.query?.class || 'dps';
+    const equippedChips = await Chip.findEquippedByInventory(inventory.id);
+    const calculated = calculateTotalStats(classId, equippedChips);
+    return reply.send(calculated);
   });
 }
 

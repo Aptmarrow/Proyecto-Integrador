@@ -211,7 +211,7 @@ export async function decodeLutWithKey(
     const iv = chunk.slice(16, 28);
     const payload = chunk.slice(28);
     const keyBytes = base64ToBytes(encodedKey);
-    const aesKey = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+    const aesKey = await crypto.subtle.importKey('raw', keyBytes as BufferSource, 'AES-GCM', false, ['decrypt']);
     const plainBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, payload);
     const jsonText = new TextDecoder('utf-8').decode(plainBuffer);
     const profile = JSON.parse(jsonText);

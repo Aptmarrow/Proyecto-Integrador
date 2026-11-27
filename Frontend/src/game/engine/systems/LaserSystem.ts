@@ -277,7 +277,7 @@ export class LaserSystem {
 
       // El Master Spark sigue la posición de SU dueño (local o compañero en multijugador)
       if (isMasterSpark) {
-        const ownerPos = callbacks?.resolveOwnerPos?.(laser.ownerId) ?? playerPos;
+        const ownerPos = (laser.ownerId ? callbacks?.resolveOwnerPos?.(laser.ownerId) : undefined) ?? playerPos;
         laser.sourceX = ownerPos.x + 22;
         laser.sourceY = ownerPos.y;
         laser.targetY = ownerPos.y;

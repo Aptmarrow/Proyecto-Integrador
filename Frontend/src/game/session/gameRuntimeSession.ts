@@ -553,5 +553,6 @@ export class GameRuntimeSession {
     if (snapshot.enemies) this.engine.applyBackendEnemies(snapshot.enemies);
     if (snapshot.stageTime !== undefined) this.engine.setSyncedStageTime(snapshot.stageTime);
     if (snapshot.campaign) this.engine.applyBackendCampaign(snapshot.campaign);
+    if (snapshot.chipDrops?.length) this.engine.applyBackendChipDrops(snapshot.chipDrops, this.myPlayerId);
   }
 }

@@ -1,0 +1,667 @@
+/* ==========================================================
+   INVENTORY PAGE — DANMAKREW NEON TECH GRID
+   ========================================================== */
+
+.inv-page {
+  position: relative;
+  min-height: 100dvh;
+  width: 100%;
+  color: #e2e8f0;
+  font-family: 'Orbitron', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+  padding: 20px 24px 48px;
+  box-sizing: border-box;
+}
+
+.inv-shell {
+  position: relative;
+  z-index: 2;
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Barra superior */
+.inv-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 14px 18px;
+  background: rgba(11, 15, 32, 0.86);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  border-radius: 16px;
+  backdrop-filter: blur(8px);
+}
+
+.inv-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.inv-back-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  background: rgba(0, 229, 255, 0.08);
+  color: #00e5ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.inv-back-btn:hover {
+  transform: translateX(-2px);
+  background: rgba(0, 229, 255, 0.2);
+  box-shadow: 0 0 16px rgba(0, 229, 255, 0.35);
+}
+
+.inv-back-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.inv-title {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: 0.1em;
+  color: #ffffff;
+  text-shadow: 0 0 14px rgba(0, 229, 255, 0.45);
+}
+
+.inv-subtitle {
+  display: block;
+  font-size: 12px;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.inv-currencies {
+  display: flex;
+  gap: 10px;
+}
+
+.inv-currency-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(15, 21, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.inv-currency-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.inv-currency-danmas strong {
+  color: #fde047;
+  font-size: 15px;
+}
+
+.inv-currency-scraps strong {
+  color: #4ade80;
+  font-size: 15px;
+}
+
+/* Pestañas */
+.inv-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.inv-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(13, 18, 36, 0.82);
+  color: #cbd5e1;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.inv-tab:hover {
+  border-color: rgba(0, 229, 255, 0.5);
+  color: #ffffff;
+}
+
+.inv-tab--active {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.22), rgba(255, 42, 133, 0.22));
+  border-color: #00e5ff;
+  color: #ffffff;
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.25);
+}
+
+.inv-tab-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(0, 229, 255, 0.18);
+  color: #67e8f9;
+  font-size: 11px;
+}
+
+/* Alertas */
+.inv-alert {
+  padding: 11px 15px;
+  border-radius: 12px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.inv-alert--error {
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.55);
+  color: #fecaca;
+}
+
+.inv-alert--ok {
+  background: rgba(34, 197, 94, 0.16);
+  border: 1px solid rgba(34, 197, 94, 0.55);
+  color: #bbf7d0;
+}
+
+.inv-loading {
+  padding: 48px;
+  text-align: center;
+  color: #7dd3fc;
+  background: rgba(11, 15, 32, 0.78);
+  border-radius: 16px;
+  border: 1px solid rgba(0, 229, 255, 0.2);
+}
+
+/* Grid principal + sidebar de stats */
+.inv-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 18px;
+  align-items: start;
+}
+
+.inv-main-panel,
+.inv-stats-sidebar {
+  background: rgba(10, 14, 30, 0.86);
+  border: 1px solid rgba(0, 229, 255, 0.24);
+  border-radius: 16px;
+  padding: 18px;
+  backdrop-filter: blur(8px);
+}
+
+.inv-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.inv-section-head h2 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  color: #ffffff;
+}
+
+.inv-slot-counter {
+  font-size: 12px;
+  color: #67e8f9;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(0, 229, 255, 0.12);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+}
+
+/* 3 Slots equipados */
+.inv-equipped-bar {
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.inv-slots-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.inv-slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  min-height: 64px;
+  box-sizing: border-box;
+}
+
+.inv-slot--empty {
+  flex-direction: column;
+  justify-content: center;
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.45);
+  color: #64748b;
+  font-size: 11px;
+}
+
+.inv-slot--filled {
+  background: rgba(17, 23, 46, 0.92);
+  border: 1.5px solid var(--rarity-color, #00e5ff);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--rarity-color, #00e5ff) 25%, transparent);
+}
+
+.inv-slot-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.inv-slot-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inv-slot-info strong {
+  font-size: 12px;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inv-slot-info small {
+  font-size: 11px;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #94a3b8;
+}
+
+.inv-slot-remove {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.14);
+  color: #fca5a5;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.inv-slot-remove:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.35);
+  color: #ffffff;
+}
+
+/* Filtros */
+.inv-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.inv-filter-label {
+  font-size: 11.5px;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #94a3b8;
+}
+
+.inv-filter-pill {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 23, 42, 0.72);
+  color: #cbd5e1;
+  font-size: 12px;
+  font-family: system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.inv-filter-pill--active {
+  border-color: #00e5ff;
+  background: rgba(0, 229, 255, 0.18);
+  color: #ffffff;
+}
+
+/* Rarezas (estilo exacto de la referencia: Verde, Rojo, Azul, Dorado) */
+.inv-rarity-1 { --rarity-color: #22c55e; }
+.inv-rarity-2 { --rarity-color: #ef4444; }
+.inv-rarity-3 { --rarity-color: #38bdf8; }
+.inv-rarity-4 { --rarity-color: #f59e0b; }
+
+/* Grilla de chips */
+.inv-chips-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+  gap: 14px;
+}
+
+.inv-chip-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 12px 12px;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(16, 22, 42, 0.96), rgba(9, 13, 26, 0.98));
+  border: 1.5px solid color-mix(in srgb, var(--rarity-color) 55%, transparent);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.inv-chip-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--rarity-color);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--rarity-color) 24%, transparent);
+}
+
+.inv-chip-card--equipped {
+  box-shadow: 0 0 0 1px var(--rarity-color), 0 0 20px color-mix(in srgb, var(--rarity-color) 32%, transparent);
+}
+
+.inv-chip-top {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+}
+
+.inv-chip-rarity-tag {
+  color: var(--rarity-color);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.inv-chip-level {
+  color: #94a3b8;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.inv-chip-art {
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inv-chip-img,
+.inv-chip-svg {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.inv-chip-name {
+  margin: 0;
+  font-size: 13px;
+  color: #ffffff;
+  text-align: center;
+}
+
+.inv-chip-stats {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-height: 36px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.inv-chip-stat-line {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.inv-chip-stat-line--muted {
+  color: #64748b;
+  font-weight: 400;
+}
+
+.inv-equip-btn {
+  width: 100%;
+  margin-top: auto;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 229, 255, 0.55);
+  background: rgba(0, 229, 255, 0.14);
+  color: #e0f2fe;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+.inv-equip-btn:hover:not(:disabled) {
+  background: rgba(0, 229, 255, 0.28);
+}
+
+.inv-equip-btn--unequip {
+  border-color: rgba(255, 42, 133, 0.6);
+  background: rgba(255, 42, 133, 0.16);
+  color: #fbcfe8;
+}
+
+.inv-equip-btn--unequip:hover:not(:disabled) {
+  background: rgba(255, 42, 133, 0.32);
+}
+
+.inv-equip-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+/* Skins y Recursos */
+.inv-empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+  border-radius: 14px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.inv-empty-state p {
+  margin: 0 0 6px;
+  color: #cbd5e1;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.inv-empty-state small {
+  color: #64748b;
+  font-size: 12.5px;
+}
+
+.inv-skins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.inv-skin-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 12px;
+  border-radius: 14px;
+  background: rgba(16, 22, 42, 0.9);
+  border: 1px solid rgba(0, 229, 255, 0.32);
+  text-align: center;
+}
+
+.inv-skin-card--effect {
+  border-color: rgba(255, 42, 133, 0.4);
+}
+
+.inv-skin-icon {
+  font-size: 28px;
+  color: #00e5ff;
+}
+
+.inv-skin-card--effect .inv-skin-icon {
+  color: #ff2a85;
+}
+
+.inv-resources-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.inv-resource-card {
+  padding: 18px;
+  border-radius: 14px;
+  background: rgba(16, 22, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.inv-resource-card--danmas { border-color: rgba(253, 224, 71, 0.45); }
+.inv-resource-card--scraps { border-color: rgba(74, 222, 128, 0.45); }
+
+.inv-resource-tag {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.inv-resource-card h3 {
+  margin: 6px 0 4px;
+  font-size: 18px;
+  color: #ffffff;
+}
+
+.inv-resource-value {
+  font-size: 30px;
+  font-weight: 800;
+  margin: 6px 0 8px;
+  color: #00e5ff;
+}
+
+.inv-resource-card--danmas .inv-resource-value { color: #fde047; }
+.inv-resource-card--scraps .inv-resource-value { color: #4ade80; }
+
+.inv-resource-card p {
+  margin: 0;
+  font-size: 12.5px;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #94a3b8;
+}
+
+/* Sidebar de Stats */
+.inv-role-switcher {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.inv-role-btn {
+  padding: 7px 4px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.8);
+  color: #94a3b8;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.inv-role-btn--active {
+  border-color: #00e5ff;
+  background: rgba(0, 229, 255, 0.2);
+  color: #ffffff;
+}
+
+.inv-stats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inv-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(15, 21, 40, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.inv-stat-row--boosted {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(20, 40, 36, 0.55);
+}
+
+.inv-stat-name {
+  display: flex;
+  flex-direction: column;
+}
+
+.inv-stat-name span {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.inv-stat-name small {
+  font-size: 10.5px;
+  color: #64748b;
+}
+
+.inv-stat-values {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.inv-stat-total {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 14px;
+  color: #ffffff;
+}
+
+.inv-stat-bonus {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #4ade80;
+}
+
+@media (max-width: 960px) {
+  .inv-content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inv-slots-row {
+    grid-template-columns: 1fr;
+  }
+}

@@ -14,6 +14,7 @@ const { spawnAutoAimBullet } = require('./autoAim');
 const { releaseBullet } = require('./entities/Bullet');
 const { DEFAULT_PLAYER_STATS, normalizeClassId, getCharacterStats } = require('./config/characterStats');
 const { buildRoomSnapshot } = require('./serializers/roomSnapshot');
+const { awardBossChipDrops } = require('./rewards/bossChipDrops');
 
 const SKILL_COOLDOWN    = 1.5;   // 1.5s skill cooldown
 const STRUGGLE_BOSS_WIN_PLAYER_DAMAGE = 35;
@@ -44,6 +45,7 @@ class GameRoom {
     this.stageTime     = 0;
     this._countdownMs  = 0;
     this._autoAdvanceTimer = 0;
+    this._recentChipDrops = [];
     this._phaseController = new RoomPhaseController({
       initialPhase: options.initialPhase || 'loading',
       expectedPlayerCount: options.expectedPlayerCount || 1,
@@ -61,6 +63,33 @@ class GameRoom {
       this.bulletSystem.clearByOwner('boss');
       this.laserSystem.lasers = [];
       this.enemySystem.clear();
+
+      // Roll & persist boss chip drops directly into each player's inventory (async, non-blocking)
+      const participantIds = Array.from(this.players.keys());
+      const diff = this.campaign.difficulty;
+      const worldNum = this.campaign.worldIndex + 1;
+      awardBossChipDrops(participantIds, diff, worldNum)
+        .then((awarded) => {
+          if (!Array.isArray(awarded) || awarded.length === 0) return;
+          const now = Date.now();
+          this._recentChipDrops = (this._recentChipDrops || []).filter((d) => d.expiresAt > now);
+          for (const entry of awarded) {
+            if (!entry?.chip) continue;
+            const r = Number(entry.chip.rarity) || 1;
+            this._recentChipDrops.push({
+              dropId: `${entry.userId}_${entry.chip.id}_${now}`,
+              userId: entry.userId,
+              name: entry.chip.name,
+              rarity: r,
+              rarityLabel: r >= 3 ? 'Premiumish' : r === 2 ? 'Reliable' : 'Scrapy',
+              expiresAt: now + 7500,
+            });
+          }
+        })
+        .catch((err) => {
+          console.error('[GameRoom] Boss chip drop error:', err.message);
+        });
+
       if (this.campaign.hasNextStage()) {
         this._autoAdvanceTimer = AUTO_ADVANCE_DURATION;
       }

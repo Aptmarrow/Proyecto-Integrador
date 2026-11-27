@@ -136,6 +136,18 @@
           }
         }
       },
+      "EquipChipRequest": {
+        "type": "object",
+        "required": [
+          "equipped"
+        ],
+        "properties": {
+          "equipped": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
       "CreateRoomRequest": {
         "type": "object",
         "required": [
@@ -517,6 +529,62 @@
             }
           }
         }
+      }
+    },
+    "/api/auth/user/inventory/chips/{chipId}/equip": {
+      "patch": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chipId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Equipar o desequipar un chip del inventario (máximo 3 equipados)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EquipChipRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/user/inventory/stats": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Calcular estadísticas totales del rol combinando stats base y chips equipados",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/rooms": {

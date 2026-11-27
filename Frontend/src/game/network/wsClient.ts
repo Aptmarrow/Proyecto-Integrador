@@ -152,6 +152,14 @@ export interface ServerBeamStruggle {
   vortexY?: number;
 }
 
+export interface ServerChipDrop {
+  dropId: string;
+  userId: string;
+  name: string;
+  rarity: number;
+  rarityLabel: string;
+}
+
 export interface GameSnapshot {
   type: 'snapshot';
   tick: number;
@@ -167,6 +175,7 @@ export interface GameSnapshot {
   boss?: ServerBoss;
   campaign?: ServerCampaign;
   struggle?: ServerBeamStruggle;
+  chipDrops?: ServerChipDrop[];
 }
 
 export type GameServerMessage =

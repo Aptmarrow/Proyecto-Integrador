@@ -48,6 +48,17 @@ const OPENAPI_ROUTE_META = {
     auth: true,
     bodyRef: 'CreateChipRequest',
   },
+  'PATCH /api/auth/user/inventory/chips/:chipId/equip': {
+    tags: ['Inventory'],
+    summary: 'Equipar o desequipar un chip del inventario (máximo 3 equipados)',
+    auth: true,
+    bodyRef: 'EquipChipRequest',
+  },
+  'GET /api/auth/user/inventory/stats': {
+    tags: ['Inventory'],
+    summary: 'Calcular estadísticas totales del rol combinando stats base y chips equipados',
+    auth: true,
+  },
 
   'POST /api/rooms': {
     tags: ['Rooms'],
@@ -190,6 +201,13 @@ async function buildApp(options = {}) {
                     Crit_Damage: { type: 'number', nullable: true },
                   },
                 },
+              },
+            },
+            EquipChipRequest: {
+              type: 'object',
+              required: ['equipped'],
+              properties: {
+                equipped: { type: 'boolean', example: true },
               },
             },
             CreateRoomRequest: {
