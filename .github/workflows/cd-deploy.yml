@@ -46,16 +46,17 @@ jobs:
           VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
         run: |
           if [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_SSH_KEY" ]; then
-            DEPLOY_DIR="${VPS_DEPLOY_PATH:-~/Proyecto-Integrador}"
+            DEPLOY_DIR="${VPS_DEPLOY_PATH:-/home/${VPS_USER}/Proyecto-Integrador}"
             mkdir -p ~/.ssh
-            printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+            printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
             chmod 600 ~/.ssh/deploy_key
             ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
             ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" bash -s <<EOF
               set -euo pipefail
-              cd ${DEPLOY_DIR}
+              cd "${DEPLOY_DIR}"
               git fetch origin main
-              git checkout main
+              git checkout -f main
+              git clean -fd -e Backend/.env
               git reset --hard origin/main
               docker build -t danmakrew-cloud:latest .
               docker rm -f danmakrew || true
@@ -64,7 +65,7 @@ jobs:
                 --network danmakrew-net \
                 --add-host=host.docker.internal:host-gateway \
                 --restart unless-stopped \
-                --env-file ${DEPLOY_DIR}/Backend/.env \
+                --env-file "${DEPLOY_DIR}/Backend/.env" \
                 -e PORT=8080 \
                 -e HOST=0.0.0.0 \
                 -e NODE_ENV=production \
