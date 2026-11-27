@@ -3,23 +3,23 @@
 /**
  * Boss 3-3: M.O. (Mechanical Ophanim) — 5-Shape Geometric Predator Tackle Engine.
  *
- * Each phase owns an unmistakable geometric tackle silhouette + purpose-built bullet behavior:
- *  - P1 "Guadaña Lunar" (crescent_arc): Giant curved Crescent Arc (☾) sweeping through player ->
- *    wake expands in cyan then snaps shut like Converging Scythe Jaws (`turnAbsAngle`, crimson).
- *  - P2 "Serpiente Sinusoidal" (sine_serpent): Full-arena Sinusoidal S-Wave (∿) centered on player ->
- *    wake erupts vertically as cyan pillars then snaps EXACT 90° (`turnAbsAngle`) into crimson horizontal lanes.
- *  - P3 "Pinball Cazador" (pinball_snipe): Lightning single-line 4-wall ricochet piercing player ->
- *    wake orbs FREEZE DEAD in mid-air pulsing red (`freezeAfter`/`freezeDur`) then SNAP-SNIPE live player (`snapToPlayer`).
- *  - P4 "Lemniscata Infinita" (infinity_loop): True C1-continuous Figure-8 Infinity Loop (∞) ->
- *    wake blooms into smooth counter-rotating curved galaxy spiral arms (`angularVel`).
- *  - P5 "Ojo del Trono" (ophanim_halo): Alternates full 360° Circular Ophanim Halo (◎) encircling player
- *    with straight Cross Execution Lunges (✚) -> swirling spiral vortex (`angularVel`) + Freeze->Red Lock-On Sniper Eyes!
+ * Rhythm & Fairness Design:
+ *  - Encounter clock (`battleTime`) drives a dynamic tempo envelope:
+ *      0.0s ..  9.6s : Cinematic intro reveal ("MECHANICAL OPHANIM" -> "M.O.", lock-in at ~6.7s)
+ *      9.6s .. 69.5s : Steady combat tempo (1.00x)
+ *     69.5s .. 75.8s : Dramatic Ritardando slowdown (dips to 0.54x around 72.5s..74.2s)
+ *     75.8s .. 82.0s : Heavy Drop shockwave + Accelerando (1.14x -> 1.28x)
+ *     82.0s .. 89.5s : Peak Climax Rush (1.32x)
+ *     89.5s .. 93.5s : Smooth Normalization back to 1.00x
+ *  - Fair human-readable telegraph windows (0.54s..0.72s), crisp wake spacing, and readable bullet speeds
+ *    across 5 unmistakable geometric silhouettes (☾, ∿, ⚡ Pinball, ∞, ◎ + ✚).
  */
 
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
 const MO_HOME_X = 640;
 const MO_HOME_Y = 300;
+const MO_INTRO_DURATION = 9.6;
 const ARENA_PAD_X = 64;
 const ARENA_PAD_Y = 62;
 
@@ -66,6 +66,51 @@ const MO_PHASE_DEFS = [
   },
 ];
 
+/**
+ * Dynamic tempo envelope driven by live encounter clock `battleTime` (in seconds).
+ */
+function getMoTempoProfile(battleTime) {
+  const t = Math.max(0, Number(battleTime) || 0);
+  if (t < 69.5) {
+    return { tempoScale: 1.0, bulletTempo: 1.0, section: 'steady' };
+  }
+  // 1:09.5 -> 1:12.5: Dramatic ritardando slowdown (1.00x -> 0.54x)
+  if (t < 72.5) {
+    const u = (t - 69.5) / 3.0;
+    const ease = u * u * (3 - 2 * u);
+    const s = 1.0 - 0.46 * ease;
+    return { tempoScale: s, bulletTempo: 0.68 + 0.32 * s, section: 'ritardando' };
+  }
+  // 1:12.5 -> 1:14.2: Heavy slow trough (~0.54x suspended tension)
+  if (t < 74.2) {
+    return { tempoScale: 0.54, bulletTempo: 0.82, section: 'ritardando_trough' };
+  }
+  // 1:14.2 -> 1:15.8: Recovery swell building back into the heavy drop
+  if (t < 75.8) {
+    const u = (t - 74.2) / 1.6;
+    const s = 0.54 + 0.38 * u;
+    return { tempoScale: s, bulletTempo: 0.72 + 0.28 * s, section: 'recovery' };
+  }
+  // 1:15.8 -> 1:22.0: Heavy drop + accelerando surge (1.14x -> 1.28x)
+  if (t < 82.0) {
+    const u = (t - 75.8) / 6.2;
+    const s = 1.14 + 0.14 * u;
+    return { tempoScale: s, bulletTempo: 0.96 + 0.14 * u, section: 'accelerando' };
+  }
+  // 1:22.0 -> 1:29.5: Peak climax rush (1.32x maximum energy)
+  if (t < 89.5) {
+    return { tempoScale: 1.32, bulletTempo: 1.14, section: 'climax' };
+  }
+  // 1:29.5 -> 1:33.5: Smooth normalization back to steady rhythm (1.32x -> 1.00x)
+  if (t < 93.5) {
+    const u = (t - 89.5) / 4.0;
+    const ease = u * u * (3 - 2 * u);
+    const s = 1.32 - 0.32 * ease;
+    return { tempoScale: s, bulletTempo: 1.14 - 0.14 * ease, section: 'normalize' };
+  }
+  return { tempoScale: 1.0, bulletTempo: 1.0, section: 'steady' };
+}
+
 function clampX(x) {
   return Math.round(Math.max(ARENA_PAD_X, Math.min(WORLD_WIDTH - ARENA_PAD_X, x)));
 }
@@ -74,9 +119,6 @@ function clampY(y) {
   return Math.round(Math.max(ARENA_PAD_Y, Math.min(WORLD_HEIGHT - ARENA_PAD_Y, y)));
 }
 
-/**
- * Project a ray from (sx, sy) passing straight through (tx, ty) until it slams into the inner arena wall.
- */
 function extendThroughTarget(sx, sy, tx, ty, minTravel = 320) {
   let dx = tx - sx;
   let dy = ty - sy;
@@ -105,7 +147,6 @@ function extendThroughTarget(sx, sy, tx, ty, minTravel = 320) {
   const ex = clampX(sx + ux * travel);
   const ey = clampY(sy + uy * travel);
 
-  // If the target sat pinned against the exact same wall M.O. started on, force a dramatic cross-arena lunge
   if (Math.hypot(ex - sx, ey - sy) < 240) {
     const farX = sx < WORLD_WIDTH * 0.5 ? WORLD_WIDTH - ARENA_PAD_X : ARENA_PAD_X;
     const farY = clampY(ty + (sy < MO_HOME_Y ? 120 : -120));
@@ -114,9 +155,6 @@ function extendThroughTarget(sx, sy, tx, ty, minTravel = 320) {
   return { x: ex, y: ey };
 }
 
-/**
- * Convert an array of 2D polyline points into chained micro-segments.
- */
 function pointsToChain(points, kind, speed, isCurve = true, extra = null) {
   const chain = [];
   for (let i = 0; i < points.length - 1; i++) {
@@ -138,14 +176,22 @@ function pointsToChain(points, kind, speed, isCurve = true, extra = null) {
   return chain;
 }
 
-function createInitialMoState(introDuration = 3.8) {
+function getTotalBurstsForPhase(phase) {
+  if (phase >= 3) return 4; // P3: 4 crisp pinballs, P4: 2 full ∞ cycles, P5: 2x (◎ + ✚)
+  return 3; // P1 & P2: 3 sweeping curves before recovery window
+}
+
+function createInitialMoState(introDuration = MO_INTRO_DURATION) {
   return {
     mode: 'intro', // 'intro' | 'telegraph' | 'dashing' | 'resting'
     timer: 0,
-    introDuration: introDuration || 3.8,
+    battleTime: 0,
+    introDuration: introDuration || MO_INTRO_DURATION,
+    dropTriggered: false,
+    tempoSection: 'steady',
     volleyIndex: 0,
     burstIndex: 0,
-    totalBursts: 4,
+    totalBursts: 3,
     flipY: 1,
     shapeKind: 'crescent_arc',
     waveCounter: 1,
@@ -156,9 +202,9 @@ function createInitialMoState(introDuration = 3.8) {
     wakeDistAccum: 0,
     wakeNodeIndex: 0,
     dashHitPlayers: new Set(),
-    restDuration: 1.0,
+    restDuration: 1.5,
     restShotAccum: 0,
-    summonTimer: 3.0,
+    summonTimer: 3.5,
     lastPhaseSeen: 1,
     targetSnapX: 180,
     targetSnapY: MO_HOME_Y,
@@ -169,14 +215,7 @@ function createInitialMoState(introDuration = 3.8) {
   };
 }
 
-function getTotalBurstsForPhase(phase) {
-  if (phase === 3) return 6; // Pinball rapid 6-bounce frenzy
-  if (phase >= 5) return 6; // 3x (360° Halo + Cross Execution)
-  if (phase === 4) return 5; // 5 lobes of ∞
-  return 4;
-}
-
-function resetMoCycleForPhase(state, phase) {
+function resetMoCycleForPhase(state, phase, jumpClockToPhase = false) {
   state.mode = 'telegraph';
   state.timer = 0;
   state.burstIndex = 0;
@@ -189,6 +228,11 @@ function resetMoCycleForPhase(state, phase) {
   state.restShotAccum = 0;
   state.heldWaveTag = null;
   state.lastPhaseSeen = phase;
+  if (jumpClockToPhase) {
+    const phaseNominalSec = [10.0, 26.0, 42.0, 58.0, 71.0];
+    state.battleTime = phaseNominalSec[Math.max(0, Math.min(4, phase - 1))] || 10.0;
+    state.dropTriggered = state.battleTime >= 75.8;
+  }
 }
 
 function buildMoKamikazeSpec(phase, statScale = 1.0, playerPos = null) {
@@ -214,18 +258,14 @@ function buildMoKamikazeSpec(phase, statScale = 1.0, playerPos = null) {
     attackPattern: 'none',
     startX,
     startY,
-    speed: Math.round((184 + phase * 8) * statScale),
-    hp: Math.round(20 * statScale),
+    speed: Math.round((165 + phase * 6) * statScale),
+    hp: Math.round(18 * statScale),
     radius: 18,
     scoreValue: 260,
-    customParams: { fuseTime: 1.75, triggerDist: 130, statScale },
+    customParams: { fuseTime: 1.9, triggerDist: 125, statScale },
   };
 }
 
-/**
- * Dynamically project ONLY the next geometric tackle silhouette from M.O.'s LIVE position
- * directly engaging the player's LIVE `(px, py)` (Byakuren chained cadence).
- */
 function buildDynamicBurst(boss, state, phase, playerPos) {
   const sx = clampX(boss.x);
   const sy = clampY(boss.y);
@@ -237,15 +277,13 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
   state.targetSnapX = px;
   state.targetSnapY = py;
 
-  // ── P1: GUADAÑA LUNAR (☾) — Giant Quadratic Bézier Crescent Arc sweeping straight through (px, py)! ──
+  // ── P1: GUADAÑA LUNAR (☾) — Giant Quadratic Bézier Crescent Arc sweeping through (px, py) ──
   if (phase === 1) {
     const faceLeft = px < WORLD_WIDTH * 0.62;
     state.shapeFaceLeft = faceLeft;
     const ex = faceLeft ? clampX(615 + (bIdx % 2) * 45) : clampX(135 + (bIdx % 2) * 35);
-    // Always arc cleanly across the full vertical span (top <-> bottom)
-    const ey = sy < MO_HOME_Y ? WORLD_HEIGHT - 80 : 80;
+    const ey = sy < MO_HOME_Y ? WORLD_HEIGHT - 82 : 82;
 
-    // Solve Bézier control point P1 so B(0.5) passes EXACTLY through (px, py)!
     const rawCx = 2 * px - 0.5 * (sx + ex);
     const rawCy = 2 * py - 0.5 * (sy + ey);
     const ctrlX = Math.max(-280, Math.min(WORLD_WIDTH + 280, rawCx));
@@ -264,21 +302,20 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
     state.shapeCenterY = py;
     return {
       shapeKind: 'crescent_arc',
-      chain: pointsToChain(pts, 'crescent_blade', 1120, true),
+      chain: pointsToChain(pts, 'crescent_blade', 760, true),
     };
   }
 
-  // ── P2: SERPIENTE SINUSOIDAL (∿) — Full-Arena Sine Wave crossing straight through (px, py)! ──
+  // ── P2: SERPIENTE SINUSOIDAL (∿) — Full-Arena Sine Wave centered on player Y ──
   if (phase === 2) {
     const goingLeft = sx >= WORLD_WIDTH * 0.5;
     state.shapeFaceLeft = goingLeft;
-    const endX = goingLeft ? ARENA_PAD_X + 12 : WORLD_WIDTH - ARENA_PAD_X - 12;
+    const endX = goingLeft ? ARENA_PAD_X + 14 : WORLD_WIDTH - ARENA_PAD_X - 14;
     const spanX = endX - sx || (goingLeft ? -560 : 560);
     const tPlayer = Math.max(0.22, Math.min(0.78, (px - sx) / spanX));
-    // Tune wave frequency slightly around 1.5 cycles (3π) so a zero-crossing hits (px, py) directly!
     const halfWaves = Math.max(2, Math.round(tPlayer * 3));
     const omega = Math.max(2.3 * Math.PI, Math.min(3.5 * Math.PI, (halfWaves * Math.PI) / tPlayer));
-    const amp = 128;
+    const amp = 124;
 
     const steps = 12;
     const pts = [];
@@ -294,11 +331,11 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
     state.shapeCenterY = py;
     return {
       shapeKind: 'sine_serpent',
-      chain: pointsToChain(pts, 'sine_ribbon', 1240, true),
+      chain: pointsToChain(pts, 'sine_ribbon', 820, true),
     };
   }
 
-  // ── P3: PINBALL CAZADOR (⚡) — Blazing Single-Line Wall-Bounce Railgun piercing (px, py)! ──
+  // ── P3: PINBALL CAZADOR (⚡) — Single-Line Wall-Bounce Railgun piercing (px, py) ──
   if (phase === 3) {
     const exit = extendThroughTarget(sx, sy, px, py, 360);
     return {
@@ -310,7 +347,7 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
           x2: exit.x,
           y2: exit.y,
           kind: 'pinball_dash',
-          speed: 1380,
+          speed: 920,
           isReturn: false,
           isCurve: false,
         },
@@ -318,25 +355,23 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
     };
   }
 
-  // ── P4: LEMNISCATA INFINITA (∞) — True C1-Continuous Figure-8 Infinity Loop (one full lobe per burst!) ──
+  // ── P4: LEMNISCATA INFINITA (∞) — True C1-Continuous Figure-8 Infinity Loop ──
   if (phase === 4) {
     const cx = 400;
     const cy = clampY(Math.max(195, Math.min(405, py)));
-    // Start with the lobe containing the player on burst 0, then strictly alternate Left <-> Right lobes
     const startLeft = px <= cx;
     const isLeftLobe = bIdx % 2 === 0 ? startLeft : !startLeft;
     const loopDir = isLeftLobe ? -1 : 1;
-    // Keep same spin sign across all bursts in a volley so Left -> Right -> Left is mathematically C1-smooth!
     const spin = state.volleyIndex % 2 === 0 ? 1 : -1;
     state.shapeSpin = spin * loopDir;
     state.shapeCenterX = cx;
     state.shapeCenterY = cy;
 
     const rx = isLeftLobe
-      ? Math.max(185, Math.min(320, cx - Math.max(ARENA_PAD_X + 10, px - 12)))
-      : Math.max(185, Math.min(315, Math.max(WORLD_WIDTH - ARENA_PAD_X - 20, px + 12) - cx));
-    const maxRy = Math.min(cy - ARENA_PAD_Y - 8, WORLD_HEIGHT - ARENA_PAD_Y - 8 - cy);
-    const ry = Math.max(125, Math.min(190, maxRy));
+      ? Math.max(185, Math.min(315, cx - Math.max(ARENA_PAD_X + 12, px - 12)))
+      : Math.max(185, Math.min(310, Math.max(WORLD_WIDTH - ARENA_PAD_X - 20, px + 12) - cx));
+    const maxRy = Math.min(cy - ARENA_PAD_Y - 10, WORLD_HEIGHT - ARENA_PAD_Y - 10 - cy);
+    const ry = Math.max(125, Math.min(185, maxRy));
 
     const steps = 12;
     const pts = [];
@@ -345,7 +380,6 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
       const theta = t * Math.PI;
       const idealX = cx + loopDir * rx * Math.sin(theta);
       const idealY = cy + spin * ry * Math.sin(2 * theta);
-      // Smoothly blend initial start offset to 0 by t = 0.38 so far tip (t = 0.5) sweeps DEAD-ON through player!
       const startBlend = Math.pow(Math.max(0, 1 - t * 2.6), 2);
       const x = idealX + (sx - cx) * startBlend;
       const y = idealY + (sy - cy) * startBlend;
@@ -353,15 +387,15 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
     }
     return {
       shapeKind: 'infinity_loop',
-      chain: pointsToChain(pts, 'infinity_lobe', 1320, true),
+      chain: pointsToChain(pts, 'infinity_lobe', 880, true),
     };
   }
 
-  // ── P5: OJO DEL TRONO (◎ + ✚) — Alternates Full 360° Ophanim Halo Circle & Cross Execution Kill-Lunge! ──
+  // ── P5: OJO DEL TRONO (◎ + ✚) — Alternates Full 360° Circular Halo & Cross Execution Lunge ──
   if (bIdx % 2 === 0) {
     const cx = clampX(Math.max(210, Math.min(545, px + (px < 400 ? 35 : -35))));
     const cy = clampY(Math.max(195, Math.min(405, py)));
-    const radius = 142;
+    const radius = 148;
     const spin = f;
     state.shapeCenterX = cx;
     state.shapeCenterY = cy;
@@ -371,7 +405,6 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
     const entryX = clampX(cx + Math.cos(entryAngle) * radius);
     const entryY = clampY(cy + Math.sin(entryAngle) * radius);
 
-    // 3 smooth entry micro-segments into the perimeter + 12 full 360° circular ring segments!
     const chain = [];
     if (Math.hypot(entryX - sx, entryY - sy) > 20) {
       const entryPts = [];
@@ -382,7 +415,7 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
           y: clampY(sy + (entryY - sy) * t),
         });
       }
-      chain.push(...pointsToChain(entryPts, 'halo_entry', 1420, true));
+      chain.push(...pointsToChain(entryPts, 'halo_entry', 960, true));
     }
 
     const ringSteps = 12;
@@ -394,14 +427,13 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
         y: clampY(cy + Math.sin(a) * radius),
       });
     }
-    chain.push(...pointsToChain(ringPts, 'halo_ring', 1360, true));
+    chain.push(...pointsToChain(ringPts, 'halo_ring', 900, true));
     return {
       shapeKind: 'ophanim_halo',
       chain,
     };
   }
 
-  // Odd P5 bursts: ✚ Sharp Cross Execution Lunge piercing straight through (px, py) and waking the 360° Halo!
   const exit1 = extendThroughTarget(sx, sy, px, py, 360);
   const exit2X = exit1.x < WORLD_WIDTH * 0.5 ? WORLD_WIDTH - ARENA_PAD_X - 16 : ARENA_PAD_X + 16;
   const exit2Y = exit1.y < MO_HOME_Y ? WORLD_HEIGHT - ARENA_PAD_Y - 16 : ARENA_PAD_Y + 16;
@@ -414,7 +446,7 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
         x2: exit1.x,
         y2: exit1.y,
         kind: 'cross_pierce',
-        speed: 1480,
+        speed: 980,
         isReturn: false,
         isCurve: false,
       },
@@ -424,7 +456,7 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
         x2: exit2X,
         y2: exit2Y,
         kind: 'cross_slash',
-        speed: 1460,
+        speed: 960,
         isReturn: false,
         isCurve: false,
       },
@@ -432,15 +464,12 @@ function buildDynamicBurst(boss, state, phase, playerPos) {
   };
 }
 
-/**
- * Emit uniformly spaced suspended wake bullets (`holdTag: state.activeWaveTag`) along M.O.'s physical path.
- * Every phase uses a distinct, super-legible bullet mechanic (never random self-cancelling bends!).
- */
-function emitHeldWakeNode(state, seg, x, y, segAngle, bulletSystem, statScale) {
-  const dmg = Number((4.8 * statScale).toFixed(1));
+function emitHeldWakeNode(state, seg, x, y, segAngle, bulletSystem, statScale, bulletTempo) {
+  const dmg = Number((4.5 * statScale).toFixed(1));
+  const spdScale = statScale * bulletTempo;
   const nodeIdx = state.wakeNodeIndex;
   const tag = state.activeWaveTag;
-  const holdOpts = { holdTag: tag, delay: 7.0 };
+  const holdOpts = { holdTag: tag, delay: 8.5 };
 
   const toPlayer = Math.atan2(state.targetSnapY - y, state.targetSnapX - x);
   const perpA = segAngle + Math.PI / 2;
@@ -449,24 +478,23 @@ function emitHeldWakeNode(state, seg, x, y, segAngle, bulletSystem, statScale) {
   const towardPerp = dotA >= 0 ? perpA : perpB;
   const awayPerp = dotA >= 0 ? perpB : perpA;
 
-  // ── P1 (☾ Crescent): Cyan expanding crescent -> Converging Crimson Scythe Jaws (`turnAbsAngle`)! ──
+  // ── P1 (☾ Crescent): Cyan expanding crescent -> Converging Crimson Scythe Jaws ──
   if (seg.kind === 'crescent_blade') {
     const faceAngle = state.shapeFaceLeft ? Math.PI : 0;
     const isUpper = y < state.targetSnapY;
-    // Upper jaw slams DOWN toward player's lane; lower jaw slams UP toward player's lane!
     const jawAngle = state.shapeFaceLeft
-      ? (isUpper ? Math.PI - 0.36 : Math.PI + 0.36)
-      : (isUpper ? 0.36 : -0.36);
+      ? (isUpper ? Math.PI - 0.34 : Math.PI + 0.34)
+      : (isUpper ? 0.34 : -0.34);
 
-    bulletSystem.spawn('boss', x, y, towardPerp, 155 * statScale, 5.2, 5.2, 'normal', dmg, 0x38bdf8, {
+    bulletSystem.spawn('boss', x, y, towardPerp, 125 * spdScale, 5.0, 5.4, 'normal', dmg, 0x38bdf8, {
       ...holdOpts,
-      turnAfter: 0.36,
+      turnAfter: 0.44 / Math.max(0.65, bulletTempo),
       turnAbsAngle: jawAngle,
-      turnSpeedMult: 1.52,
+      turnSpeedMult: 1.44,
       turnColor: 0xff2b5b,
     });
-    if (nodeIdx % 2 === 0) {
-      bulletSystem.spawn('boss', x, y, faceAngle, 185 * statScale, 4.4, 4.8, 'normal', dmg, 0xfef08a, {
+    if (nodeIdx % 3 === 0) {
+      bulletSystem.spawn('boss', x, y, faceAngle, 155 * spdScale, 4.2, 4.8, 'normal', dmg, 0xfef08a, {
         ...holdOpts,
         spriteType: 'MObullet3png',
       });
@@ -474,20 +502,19 @@ function emitHeldWakeNode(state, seg, x, y, segAngle, bulletSystem, statScale) {
     return;
   }
 
-  // ── P2 (∿ Sine Serpent): Pure Vertical Cyan Pillars -> EXACT 90° Fold into Crimson Horizontal Lanes! ──
+  // ── P2 (∿ Sine Serpent): Pure Vertical Cyan Pillars -> EXACT 90° Fold into Crimson Horizontal Lanes ──
   if (seg.kind === 'sine_ribbon') {
     const vertAngle = nodeIdx % 2 === 0 ? -Math.PI / 2 : Math.PI / 2;
-    // Snap horizontally straight toward the player's X column!
     const horizAngle = x >= state.targetSnapX - 35 ? Math.PI : 0;
-    bulletSystem.spawn('boss', x, y, vertAngle, 175 * statScale, 5.2, 5.4, 'normal', dmg, 0x38bdf8, {
+    bulletSystem.spawn('boss', x, y, vertAngle, 138 * spdScale, 5.0, 5.6, 'normal', dmg, 0x38bdf8, {
       ...holdOpts,
-      turnAfter: 0.38,
+      turnAfter: 0.44 / Math.max(0.65, bulletTempo),
       turnAbsAngle: horizAngle,
-      turnSpeedMult: 1.48,
+      turnSpeedMult: 1.42,
       turnColor: 0xff2b5b,
     });
-    if (nodeIdx % 2 === 0) {
-      bulletSystem.spawn('boss', x, y, towardPerp, 225 * statScale, 4.5, 4.8, 'normal', dmg, 0xfef08a, {
+    if (nodeIdx % 3 === 0) {
+      bulletSystem.spawn('boss', x, y, towardPerp, 180 * spdScale, 4.3, 4.8, 'normal', dmg, 0xfef08a, {
         ...holdOpts,
         spriteType: 'MObullet3png',
       });
@@ -495,95 +522,95 @@ function emitHeldWakeNode(state, seg, x, y, segAngle, bulletSystem, statScale) {
     return;
   }
 
-  // ── P3 (⚡ Pinball): Sakuya/Byakuren FREEZE DEAD IN MID-AIR pulsing Crimson -> SNAP-FIRE AT LIVE PLAYER! ──
+  // ── P3 (⚡ Pinball): Clear FREEZE DEAD IN MID-AIR pulsing Crimson (0.46s) -> SNAP-FIRE AT PLAYER ──
   if (seg.kind === 'pinball_dash') {
     const spreadAng = nodeIdx % 2 === 0 ? towardPerp : awayPerp;
-    const snapOffset = ((nodeIdx % 3) - 1) * 0.085;
-    bulletSystem.spawn('boss', x, y, spreadAng, 165 * statScale, 5.2, 5.6, 'normal', dmg, 0x38bdf8, {
+    const snapOffset = ((nodeIdx % 3) - 1) * 0.11;
+    bulletSystem.spawn('boss', x, y, spreadAng, 132 * spdScale, 5.0, 5.8, 'normal', dmg, 0x38bdf8, {
       ...holdOpts,
-      freezeAfter: 0.24,
-      freezeDur: 0.34,
+      freezeAfter: 0.28,
+      freezeDur: 0.46 / Math.max(0.7, bulletTempo),
       turnColor: 0xff2b5b,
       snapToPlayer: true,
       snapOffset,
-      snapSpeed: 335 * statScale,
+      snapSpeed: 248 * spdScale,
     });
-    bulletSystem.spawn('boss', x, y, towardPerp, 245 * statScale, 4.4, 4.6, 'normal', dmg, 0xfef08a, {
-      ...holdOpts,
-      spriteType: 'MObullet3png',
-    });
+    if (nodeIdx % 2 === 0) {
+      bulletSystem.spawn('boss', x, y, towardPerp, 195 * spdScale, 4.2, 4.6, 'normal', dmg, 0xfef08a, {
+        ...holdOpts,
+        spriteType: 'MObullet3png',
+      });
+    }
     return;
   }
 
-  // ── P4 (∞ Figure-8): True Smooth Counter-Rotating Curved Galaxy Spiral Arms (`angularVel`)! ──
+  // ── P4 (∞ Figure-8): Smooth Counter-Rotating Curved Galaxy Spiral Arms ──
   if (seg.kind === 'infinity_lobe') {
     const spinDir = state.shapeSpin >= 0 ? 1 : -1;
-    bulletSystem.spawn('boss', x, y, towardPerp, 195 * statScale, 5.0, 5.4, 'normal', dmg, 0xfde047, {
+    bulletSystem.spawn('boss', x, y, towardPerp, 152 * spdScale, 4.8, 5.6, 'normal', dmg, 0xfde047, {
       ...holdOpts,
-      angularVel: spinDir * 1.08,
+      angularVel: spinDir * 0.88 * bulletTempo,
     });
-    bulletSystem.spawn('boss', x, y, awayPerp, 175 * statScale, 4.8, 5.4, 'normal', dmg, 0x38bdf8, {
-      ...holdOpts,
-      angularVel: -spinDir * 0.94,
-    });
+    if (nodeIdx % 2 === 0) {
+      bulletSystem.spawn('boss', x, y, awayPerp, 138 * spdScale, 4.6, 5.6, 'normal', dmg, 0x38bdf8, {
+        ...holdOpts,
+        angularVel: -spinDir * 0.78 * bulletTempo,
+      });
+    }
     return;
   }
 
-  // ── P5 (◎ 360° Ophanim Halo): Swirling Golden Spiral Vortex + Every 3rd Eye is a Freeze->Red Lock-On Sniper! ──
+  // ── P5 (◎ 360° Ophanim Halo): Golden Spiral Vortex + Every 4th Eye is a Freeze->Lock-On Sniper ──
   if (seg.kind === 'halo_entry') {
-    return; // Only leave the pure, iconic 360° ring suspended around the player
+    return;
   }
   if (seg.kind === 'halo_ring') {
     const spinDir = state.shapeSpin >= 0 ? 1 : -1;
     const toCenter = Math.atan2(state.shapeCenterY - y, state.shapeCenterX - x);
-    // Golden vortex orbs contract & swirl inward like an Ophanim wheel!
-    bulletSystem.spawn('boss', x, y, toCenter + spinDir * 0.62, 185 * statScale, 5.2, 5.6, 'normal', dmg, 0xfde047, {
+    bulletSystem.spawn('boss', x, y, toCenter + spinDir * 0.65, 146 * spdScale, 5.0, 5.8, 'normal', dmg, 0xfde047, {
       ...holdOpts,
-      angularVel: spinDir * 0.96,
+      angularVel: spinDir * 0.82 * bulletTempo,
     });
-    // Every 3rd Eye freezes crimson in space and snipes the player's live position!
-    if (nodeIdx % 3 === 0) {
-      bulletSystem.spawn('boss', x, y, toCenter + Math.PI, 145 * statScale, 5.2, 5.8, 'normal', dmg, 0x38bdf8, {
+    if (nodeIdx % 4 === 0) {
+      bulletSystem.spawn('boss', x, y, toCenter + Math.PI, 120 * spdScale, 5.0, 5.8, 'normal', dmg, 0x38bdf8, {
         ...holdOpts,
-        freezeAfter: 0.22,
-        freezeDur: 0.30,
+        freezeAfter: 0.26,
+        freezeDur: 0.42 / Math.max(0.7, bulletTempo),
         turnColor: 0xff2b5b,
         snapToPlayer: true,
         snapOffset: 0,
-        snapSpeed: 345 * statScale,
+        snapSpeed: 262 * spdScale,
       });
     }
     return;
   }
 
-  // ── P5 (✚ Cross Execution Lunge): Exact 90° Grid-Fold Crimson Bars + Golden Needles! ──
+  // ── P5 (✚ Cross Execution Lunge): Exact 90° Grid-Fold Crimson Bars + Golden Needles ──
   const horizFold = x >= state.targetSnapX - 30 ? Math.PI : 0;
-  bulletSystem.spawn('boss', x, y, towardPerp, 210 * statScale, 5.0, 5.2, 'normal', dmg, 0x38bdf8, {
+  bulletSystem.spawn('boss', x, y, towardPerp, 158 * spdScale, 4.8, 5.4, 'normal', dmg, 0x38bdf8, {
     ...holdOpts,
-    turnAfter: 0.34,
+    turnAfter: 0.38 / Math.max(0.65, bulletTempo),
     turnAbsAngle: horizFold,
-    turnSpeedMult: 1.42,
+    turnSpeedMult: 1.38,
     turnColor: 0xff2b5b,
   });
-  bulletSystem.spawn('boss', x, y, awayPerp, 240 * statScale, 4.5, 4.6, 'normal', dmg, 0xfef08a, {
-    ...holdOpts,
-    spriteType: 'MObullet3png',
-  });
+  if (nodeIdx % 2 === 0) {
+    bulletSystem.spawn('boss', x, y, awayPerp, 190 * spdScale, 4.3, 4.6, 'normal', dmg, 0xfef08a, {
+      ...holdOpts,
+      spriteType: 'MObullet3png',
+    });
+  }
 }
 
-/**
- * Odd-way aimed anti-safespot vertex burst (center bullet ALWAYS dead-center on player!).
- * Fires ONLY on sharp corners or burst endpoints (never spammed on intermediate curve micro-segments).
- */
-function emitCornerAimedBurst(seg, playerPos, bulletSystem, statScale, phase) {
+function emitCornerAimedBurst(seg, playerPos, bulletSystem, statScale, phase, bulletTempo) {
   const vx = seg.x2;
   const vy = seg.y2;
-  const dmg = Number((5.0 * statScale).toFixed(1));
+  const dmg = Number((4.8 * statScale).toFixed(1));
   const aim = playerPos ? Math.atan2(playerPos.y - vy, playerPos.x - vx) : Math.PI;
 
-  const fanHalf = phase >= 5 ? 3 : phase >= 2 ? 2 : 1; // 3-way (P1), 5-way (P2-P4), 7-way (P5)
-  const stepRad = phase >= 5 ? 0.18 : 0.21;
-  const spd = (255 + phase * 12) * statScale;
+  const fanHalf = phase >= 4 ? 2 : 1; // 3-way (P1-P3), 5-way (P4-P5) — readable & zero safespot!
+  const stepRad = phase >= 4 ? 0.24 : 0.26;
+  const spd = (195 + phase * 10) * statScale * bulletTempo;
 
   for (let k = -fanHalf; k <= fanHalf; k++) {
     bulletSystem.spawn(
@@ -591,9 +618,9 @@ function emitCornerAimedBurst(seg, playerPos, bulletSystem, statScale, phase) {
       vx,
       vy,
       aim + k * stepRad,
-      spd - Math.abs(k) * 14,
-      5.0,
-      4.2,
+      spd - Math.abs(k) * 12,
+      4.8,
+      4.4,
       'normal',
       dmg,
       0xef4444,
@@ -601,34 +628,51 @@ function emitCornerAimedBurst(seg, playerPos, bulletSystem, statScale, phase) {
     );
   }
 
-  // P4 (at center crossing of ∞) & P5 (at Cross Execution endpoints): throw a splitting MObullet4png boulder!
   if (phase >= 4 && (seg.kind === 'infinity_lobe' || seg.kind === 'cross_slash')) {
     bulletSystem.spawn(
       'boss',
       vx,
       vy,
-      aim + (phase >= 5 ? 0 : 0.12),
-      215 * statScale,
-      11.0,
+      aim + 0.14,
+      175 * statScale * bulletTempo,
+      10.5,
       5.5,
       'normal',
-      Number((6.5 * statScale).toFixed(1)),
+      Number((6.0 * statScale).toFixed(1)),
       0x9ca3af,
-      { spriteType: 'MObullet4png', splitOnImpact: true, splitCount: phase >= 5 ? 8 : 6 }
+      { spriteType: 'MObullet4png', splitOnImpact: true, splitCount: phase >= 5 ? 6 : 5 }
     );
   }
 }
 
-function releasePreviousWave(state, bulletSystem, stagger = 0.012) {
+function emitClimaxDropRing(boss, bulletSystem, statScale) {
+  const count = 16;
+  const dmg = Number((4.8 * statScale).toFixed(1));
+  for (let k = 0; k < count; k++) {
+    const a = (Math.PI * 2 * k) / count;
+    bulletSystem.spawn(
+      'boss',
+      boss.x,
+      boss.y,
+      a,
+      165 * statScale,
+      5.2,
+      5.0,
+      'normal',
+      dmg,
+      k % 2 === 0 ? 0xfde047 : 0xff2b5b,
+      { angularVel: k % 2 === 0 ? 0.55 : -0.55 }
+    );
+  }
+}
+
+function releasePreviousWave(state, bulletSystem, stagger = 0.016) {
   if (state.heldWaveTag !== null && typeof bulletSystem.releaseHeldBullets === 'function') {
     bulletSystem.releaseHeldBullets(state.heldWaveTag, stagger);
   }
   state.heldWaveTag = null;
 }
 
-/**
- * Main state machine tick for Boss 3-3: M.O. (Mechanical Ophanim).
- */
 function updateMechanicalOphanim(
   boss,
   dt,
@@ -638,17 +682,20 @@ function updateMechanicalOphanim(
   emitSpawnEnemy = null
 ) {
   if (!boss._moState) {
-    boss._moState = createInitialMoState(boss._introDuration || 3.8);
+    boss._moState = createInitialMoState(boss._introDuration || MO_INTRO_DURATION);
   }
   const state = boss._moState;
   const phase = Math.max(1, Math.min(5, boss.phase || 1));
   const statScale = boss._statScale || boss.statScale || 1.0;
 
-  // 1. Intro sequence ("MECHANICAL OPHANIM" -> "M.O.")
+  // Encounter master clock ALWAYS advances in real time to stay locked to the musical timeline!
+  state.battleTime = (state.battleTime || 0) + dt;
+
+  // 1. Intro sequence (~9.6s: "MECHANICAL OPHANIM" -> lock-in "M.O." at ~6.7s -> battle drop at 9.6s!)
   if (state.mode === 'intro') {
     state.timer += dt;
     boss.isInvulnerable = true;
-    const dur = state.introDuration || 3.8;
+    const dur = state.introDuration || MO_INTRO_DURATION;
     const progress = Math.min(1, state.timer / dur);
     boss.x = 760 + (MO_HOME_X - 760) * (1 - Math.pow(1 - progress, 2));
     boss.y = MO_HOME_Y;
@@ -661,7 +708,7 @@ function updateMechanicalOphanim(
       boss.moIntroProgress = 1;
       boss.x = MO_HOME_X;
       boss.y = MO_HOME_Y;
-      resetMoCycleForPhase(state, phase);
+      resetMoCycleForPhase(state, phase, false);
     }
     return;
   }
@@ -670,29 +717,42 @@ function updateMechanicalOphanim(
   boss.isInvulnerable = false;
 
   if (state.lastPhaseSeen !== phase) {
-    releasePreviousWave(state, bulletSystem, 0.008);
-    resetMoCycleForPhase(state, phase);
+    releasePreviousWave(state, bulletSystem, 0.01);
+    resetMoCycleForPhase(state, phase, false);
   }
 
-  // Tactical MOenemy2 kamikaze summons on Difficult / No Mercy (or P5)
+  // Evaluate live musical tempo curve (steady -> 1:10 ritardando -> 1:16 drop/accelerando -> 1:22 climax -> 1:30 normalize)
+  const tempo = getMoTempoProfile(state.battleTime);
+  state.tempoSection = tempo.section;
+  const scaledDt = dt * tempo.tempoScale;
+  const bulletTempo = tempo.bulletTempo;
+
+  // One-shot musical drop burst right at t = 75.8s (1:15.8) when the heavy climax kicks in!
+  if (!state.dropTriggered && state.battleTime >= 75.8) {
+    state.dropTriggered = true;
+    releasePreviousWave(state, bulletSystem, 0.008);
+    emitClimaxDropRing(boss, bulletSystem, statScale);
+  }
+
+  // Tactical MOenemy2 kamikaze summons (Difficult / No Mercy, or sparing single drone on P5)
   const diffBonus = statScale >= 1.2 ? 2 : statScale >= 1.08 ? 1 : 0;
-  const summonCount = phase >= 5 ? 1 + diffBonus : phase >= 4 ? diffBonus : diffBonus >= 2 ? 1 : 0;
+  const summonCount = phase >= 5 ? 1 + (diffBonus > 0 ? 1 : 0) : phase >= 4 ? diffBonus : diffBonus >= 2 ? 1 : 0;
   if (typeof emitSpawnEnemy === 'function' && summonCount > 0) {
-    state.summonTimer = (state.summonTimer ?? 2.8) + dt;
-    const summonInterval = Math.max(4.6, 7.0 - phase * 0.4);
+    state.summonTimer = (state.summonTimer ?? 3.5) + scaledDt;
+    const summonInterval = Math.max(5.8, 8.2 - phase * 0.4);
     if (state.summonTimer >= summonInterval) {
       state.summonTimer = 0;
-      const maxActive = Math.min(4, 1 + diffBonus);
+      const maxActive = Math.min(3, 1 + diffBonus);
       for (let k = 0; k < summonCount; k++) {
         emitSpawnEnemy(buildMoKamikazeSpec(phase, statScale, playerPos), maxActive);
       }
     }
   }
 
-  // 2. SNAPPY TELEGRAPH OF ONLY THE NEXT GEOMETRIC SHAPE (Byakuren cadence!)
+  // 2. READABLE TELEGRAPH OF NEXT GEOMETRIC SHAPE (expands in ritardando, tightens in climax!)
   if (state.mode === 'telegraph') {
-    state.timer += dt;
-    const telegraphDur = Math.max(0.30, (0.48 - phase * 0.03) / Math.sqrt(statScale));
+    state.timer += scaledDt;
+    const telegraphDur = Math.max(0.50, (0.76 - phase * 0.045) / Math.sqrt(statScale));
 
     if (!Array.isArray(state.dashChain) || state.dashChain.length === 0) {
       const built = buildDynamicBurst(boss, state, phase, playerPos);
@@ -717,8 +777,7 @@ function updateMechanicalOphanim(
     }));
 
     if (state.timer >= telegraphDur) {
-      // BYAKUREN MAGIC: Launching Burst K releases Burst K-1's frozen wake in domino cascade!
-      releasePreviousWave(state, bulletSystem, Math.max(0.008, 0.015 - phase * 0.001));
+      releasePreviousWave(state, bulletSystem, Math.max(0.01, (0.02 - phase * 0.0015) / Math.max(0.6, tempo.tempoScale)));
 
       state.waveCounter += 1;
       state.activeWaveTag = state.waveCounter;
@@ -732,7 +791,7 @@ function updateMechanicalOphanim(
     return;
   }
 
-  // 3. HIGH-SPEED GEOMETRIC TACKLE (physically runs over player if they don't dodge!)
+  // 3. GEOMETRIC TACKLE (speed smoothly follows tempoScale: slow & dramatic at 1:10, blazing at 1:22!)
   if (state.mode === 'dashing') {
     const chain = state.dashChain || [];
     const seg = chain[state.segIndex];
@@ -745,16 +804,15 @@ function updateMechanicalOphanim(
     }
 
     const segLen = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1) || 1;
-    const speed = (seg.speed || 1240) * statScale;
+    const speed = (seg.speed || 860) * statScale;
     const segDur = seg.isCurve
-      ? Math.max(0.02, Math.min(0.24, segLen / speed))
-      : Math.max(0.15, Math.min(0.46, segLen / speed));
+      ? Math.max(0.025, Math.min(0.28, segLen / speed))
+      : Math.max(0.20, Math.min(0.56, segLen / speed));
     const prevX = boss.x;
     const prevY = boss.y;
 
-    state.timer += dt;
+    state.timer += scaledDt;
     const rawT = Math.min(1, state.timer / segDur);
-    // Curved polylines glide at constant supersonic velocity; straight slashes snap with ease-in-out!
     const ease = seg.isCurve
       ? rawT
       : rawT < 0.5
@@ -767,7 +825,6 @@ function updateMechanicalOphanim(
     boss.angle = segAngle;
     boss.moDashState = 'dashing';
 
-    // Dynamically unzip the glowing trail right behind M.O.'s wheels!
     boss.moDashLines = chain
       .filter((_s, idx) => idx >= state.segIndex)
       .map((s, relIdx) => ({
@@ -781,9 +838,8 @@ function updateMechanicalOphanim(
         isReturn: Boolean(s.isReturn),
       }));
 
-    // Uniform arc-length suspended wake emission along BOTH smooth curves and straight slashes!
     if (!seg.isReturn) {
-      const spacingPx = seg.kind === 'halo_ring' ? 48 : 45;
+      const spacingPx = seg.kind === 'halo_ring' ? 62 : Math.max(54, 66 - phase * 2);
       const deltaDist = Math.hypot(boss.x - prevX, boss.y - prevY);
       state.wakeDistAccum += deltaDist;
       while (state.wakeDistAccum >= spacingPx && deltaDist > 0.01) {
@@ -792,33 +848,33 @@ function updateMechanicalOphanim(
         const wx = prevX + (boss.x - prevX) * u;
         const wy = prevY + (boss.y - prevY) * u;
         state.wakeNodeIndex += 1;
-        emitHeldWakeNode(state, seg, wx, wy, segAngle, bulletSystem, statScale);
+        emitHeldWakeNode(state, seg, wx, wy, segAngle, bulletSystem, statScale, bulletTempo);
         state.wakeDistAccum -= spacingPx;
       }
     }
 
-    // Sub-sampled contact damage (large spiked roller body WILL crush stationary players!)
+    // Fair physical contact hitbox (30px core radius — matches M.O. body cleanly without phantom clips!)
     if (typeof emitPlayerContactDamage === 'function' && (!seg.isReturn || rawT < 0.7)) {
       for (let s = 1; s <= 5; s++) {
         const st = s / 5;
         emitPlayerContactDamage(
           prevX + (boss.x - prevX) * st,
           prevY + (boss.y - prevY) * st,
-          38,
-          16,
+          30,
+          14,
           state.dashHitPlayers
         );
       }
     }
 
     if (rawT >= 1) {
-      const overshoot = seg.isCurve ? Math.min(dt * 0.9, Math.max(0, state.timer - segDur)) : 0;
+      const overshoot = seg.isCurve ? Math.min(scaledDt * 0.9, Math.max(0, state.timer - segDur)) : 0;
       boss.x = seg.x2;
       boss.y = seg.y2;
 
       const isFinalSegment = state.segIndex >= chain.length - 1;
       if (!seg.isReturn && (!seg.isCurve || isFinalSegment)) {
-        emitCornerAimedBurst(seg, playerPos, bulletSystem, statScale, phase);
+        emitCornerAimedBurst(seg, playerPos, bulletSystem, statScale, phase, bulletTempo);
       }
       state.segIndex += 1;
       state.timer = overshoot;
@@ -835,9 +891,9 @@ function updateMechanicalOphanim(
         if (state.burstIndex < state.totalBursts) {
           state.mode = 'telegraph';
         } else {
-          releasePreviousWave(state, bulletSystem, 0.012);
+          releasePreviousWave(state, bulletSystem, 0.015);
           state.mode = 'resting';
-          state.restDuration = Math.max(0.85, 1.3 - phase * 0.08);
+          state.restDuration = Math.max(1.2, 1.75 - phase * 0.10);
           state.restShotAccum = 0;
           boss.moDashLines = [];
         }
@@ -846,26 +902,26 @@ function updateMechanicalOphanim(
     return;
   }
 
-  // 4. BRIEF ACTIVE RECOVERY HOVER (glides back right while firing odd-way aimed anti-safespot rings!)
-  state.timer += dt;
+  // 4. CLEAN ACTIVE RECOVERY HOVER (gives human players a real DPS window while staying alert!)
+  state.timer += scaledDt;
   boss.moDashState = 'resting';
   boss.moDashLines = [];
 
   const targetHoverX = MO_HOME_X;
   const targetHoverY = clampY((playerPos?.y ?? MO_HOME_Y) * 0.45 + MO_HOME_Y * 0.55);
-  boss.x += (targetHoverX - boss.x) * Math.min(1, dt * 4.8);
-  boss.y += (targetHoverY - boss.y) * Math.min(1, dt * 4.8);
+  boss.x += (targetHoverX - boss.x) * Math.min(1, scaledDt * 4.2);
+  boss.y += (targetHoverY - boss.y) * Math.min(1, scaledDt * 4.2);
   if (playerPos) {
     boss.angle = Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x);
   }
 
-  state.restShotAccum += dt;
-  const restShotInterval = Math.max(0.38, 0.62 - phase * 0.04);
+  state.restShotAccum += scaledDt;
+  const restShotInterval = Math.max(0.56, 0.82 - phase * 0.045);
   if (state.restShotAccum >= restShotInterval) {
     state.restShotAccum = 0;
     const aim = playerPos ? Math.atan2(playerPos.y - boss.y, playerPos.x - boss.x) : Math.PI;
-    const count = 5 + phase * 2; // Odd count (7..15) aimed dead-center on player!
-    const speed = (220 + phase * 12) * statScale;
+    const count = 5 + phase; // 6..10 bullets (center bullet always aimed on player!)
+    const speed = (175 + phase * 10) * statScale * bulletTempo;
     for (let k = 0; k < count; k++) {
       const a = aim + (Math.PI * 2 * k) / count;
       bulletSystem.spawn(
@@ -874,17 +930,17 @@ function updateMechanicalOphanim(
         boss.y,
         a,
         speed,
-        4.8,
-        4.0,
+        4.6,
+        4.2,
         'normal',
-        Number((4.8 * statScale).toFixed(1)),
+        Number((4.5 * statScale).toFixed(1)),
         k === 0 ? 0xff2b5b : 0xef4444,
         { spriteType: k % 2 === 0 ? 'MObullet1png' : 'MObullet3png' }
       );
     }
   }
 
-  if (state.timer >= (state.restDuration || 1.0)) {
+  if (state.timer >= (state.restDuration || 1.4)) {
     state.volleyIndex += 1;
     state.burstIndex = 0;
     state.totalBursts = getTotalBurstsForPhase(phase);
@@ -898,7 +954,9 @@ function updateMechanicalOphanim(
 module.exports = {
   MO_HOME_X,
   MO_HOME_Y,
+  MO_INTRO_DURATION,
   MO_PHASE_DEFS,
+  getMoTempoProfile,
   createInitialMoState,
   resetMoCycleForPhase,
   buildMoKamikazeSpec,

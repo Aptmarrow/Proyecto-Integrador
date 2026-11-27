@@ -655,14 +655,14 @@ export function getNormalWorldBossProfile(
     };
   }
 
-  const baseHp = 175;
+  const baseHp = 125;
   const raw = MO_PHASE_DEFS;
   return {
     bossId: 'mo',
     bossName: 'M.O',
     fullBossName: 'Mechanical Ophanim',
     sprite: '/assets/sprites/M.O.png',
-    introDuration: 3.8,
+    introDuration: 9.6,
     moveArchetype: 'mo_ophanim_dash',
     palette,
     speedScale: Number((1.06 * statScale).toFixed(3)),

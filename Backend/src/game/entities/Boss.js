@@ -138,7 +138,7 @@ class BossController {
       this.isRefilling = false;
       this.moIntroActive = true;
       this.moIntroProgress = 0;
-      this._moState = createInitialMoState(this._introDuration || 3.8);
+      this._moState = createInitialMoState(this._introDuration || 9.6);
     } else {
       this.moIntroActive = false;
       this.moIntroProgress = 0;

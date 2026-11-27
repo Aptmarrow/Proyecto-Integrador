@@ -187,10 +187,17 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     moRoom.spawnBossNow();
     assert.equal(moRoom.boss.bossId, 'mo');
 
-    // Finish M.O. intro (~4s)
-    for (let i = 0; i < 250; i++) moRoom.update(1 / 60);
+    // Finish M.O. cinematic 9.6s intro
+    for (let i = 0; i < 590; i++) moRoom.update(1 / 60);
     assert.equal(moRoom.boss.moIntroActive, false);
     assert.equal(moRoom.boss.moDashState, 'telegraph');
+
+    // Verify musical tempo envelope (steady -> 1:10 ritardando -> 1:16 drop/accelerando -> 1:22 climax -> 1:30 normalize)
+    const { getMoTempoProfile } = require('../src/game/campaign/moBossEngine');
+    assert.equal(getMoTempoProfile(30).tempoScale, 1.0);
+    assert.ok(getMoTempoProfile(73.0).tempoScale < 0.6, 'Expected ritardando slowdown around 1:13');
+    assert.ok(getMoTempoProfile(85.0).tempoScale > 1.25, 'Expected climax speedup around 1:25');
+    assert.equal(getMoTempoProfile(95.0).tempoScale, 1.0, 'Expected normalized tempo after 1:34');
 
     // Verify all 5 distinct geometric shapes & purpose-built bullet behaviors across P1..P5:
     const seenShapes = new Set();
@@ -205,7 +212,7 @@ describe('Authoritative 60Hz Game Engine & Physics', () => {
     for (let targetPhase = 1; targetPhase <= 5; targetPhase++) {
       moRoom.boss.phase = targetPhase;
       p1.hp = p1.stats.hpMax;
-      for (let i = 0; i < 360; i++) {
+      for (let i = 0; i < 460; i++) {
         moRoom.update(1 / 60);
         seenStates.add(moRoom.boss.moDashState);
         if (moRoom.boss.moDashState === 'telegraph') {

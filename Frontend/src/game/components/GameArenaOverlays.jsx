@@ -163,7 +163,7 @@ function GameArenaOverlays({
               <span className="dk-mo-collapse" style={collapseStyle}>PHANIM</span>
             </div>
             <div className="dk-mo-intro-sub">
-              {finalBurst > 0.3 ? 'ASALTO LINEAL ACTIVO' : 'MECHANICAL OPHANIM'}
+              {finalBurst > 0.3 ? 'PROTOCOLO GEOMÉTRICO ACTIVO' : 'MECHANICAL OPHANIM'}
             </div>
           </div>
         );

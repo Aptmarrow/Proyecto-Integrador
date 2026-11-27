@@ -283,7 +283,7 @@ class DanmakrewSimulationWorker {
     moIntroProgress: 0,
     moDashState: 'idle',
     moDashLines: [] as Array<{ x1: number; y1: number; x2: number; y2: number; progress: number; active: boolean; completed?: boolean; isReturn?: boolean }>,
-    moState: createInitialMoState(3.8) as MoBossRuntimeState,
+    moState: createInitialMoState(9.6) as MoBossRuntimeState,
   };
 
   private struggle: ServerBeamStruggle = {
@@ -675,7 +675,7 @@ class DanmakrewSimulationWorker {
       this.boss.y = MO_HOME_Y;
       this.boss.moIntroActive = false;
       this.boss.moIntroProgress = 1;
-      resetMoCycleForPhase(this.boss.moState, clampedPhase);
+      resetMoCycleForPhase(this.boss.moState, clampedPhase, true);
       this.boss.moDashLines = [];
       this.boss.moDashState = 'idle';
     }
@@ -843,7 +843,7 @@ class DanmakrewSimulationWorker {
       moIntroProgress: 0,
       moDashState: 'idle',
       moDashLines: [],
-      moState: createInitialMoState(3.8),
+      moState: createInitialMoState(9.6),
     };
   }
 
@@ -917,7 +917,7 @@ class DanmakrewSimulationWorker {
       this.boss.isInvulnerable = true;
       this.boss.moIntroActive = true;
       this.boss.moIntroProgress = 0;
-      this.boss.moState = createInitialMoState(profile.introDuration || 3.8);
+      this.boss.moState = createInitialMoState(profile.introDuration || 9.6);
     } else {
       this.boss.isInvulnerable = false;
       this.boss.moIntroActive = false;

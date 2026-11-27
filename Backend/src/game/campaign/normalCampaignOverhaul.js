@@ -945,10 +945,10 @@ function getNormalWorldBossConfig(world, difficulty = 'normal') {
     fullBossName: 'Mechanical Ophanim',
     sprite: '/assets/sprites/M.O.png',
     moveArchetype: 'mo_ophanim_dash',
-    baseHp: Math.round(175 * scale),
+    baseHp: Math.round(125 * scale),
     speedScale: Number((1.06 * scale).toFixed(3)),
     statScale: scale,
-    introDuration: 3.8,
+    introDuration: 9.6,
     phases: scalePhases(MO_PHASE_DEFS),
   };
 }
